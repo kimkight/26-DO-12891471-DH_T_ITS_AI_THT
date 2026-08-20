@@ -42,9 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No application logic. Label extraction, comparison, and verification are
   designed but not implemented; only the health endpoint exists.
-- The build session could not reach PyPI, npm, or the Ubuntu package archive,
-  so tests, the frontend build, and the container build were not run locally.
-  They run in CI. See `docs/OPEN_QUESTIONS.md`, OQ-15.
+- The build session could not reach PyPI, npm, or the Ubuntu package archive
+  and had no Docker daemon, so tests, the frontend build, and the container
+  build were not run locally. All of them run and pass in CI, which is where
+  the scaffold was actually verified. See `docs/OPEN_QUESTIONS.md`, OQ-15.
+- Branch protection is not applied and the default branch is still `main`
+  rather than `develop`; neither endpoint was reachable from the initializing
+  session. See OQ-12 and OQ-17.
 - No lockfile in either ecosystem, so builds are not yet reproducible.
   Backend dependencies use minimum-version floors rather than exact pins,
   because hand-written exact pins went stale and `pip-audit` found seven
