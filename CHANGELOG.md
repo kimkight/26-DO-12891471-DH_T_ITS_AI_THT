@@ -45,7 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The build session could not reach PyPI, npm, or the Ubuntu package archive,
   so tests, the frontend build, and the container build were not run locally.
   They run in CI. See `docs/OPEN_QUESTIONS.md`, OQ-15.
-- No frontend lockfile, so frontend builds are not yet reproducible. See OQ-3.
+- No lockfile in either ecosystem, so builds are not yet reproducible.
+  Backend dependencies use minimum-version floors rather than exact pins,
+  because hand-written exact pins went stale and `pip-audit` found seven
+  advisories against the transitive `starlette` version they resolved to.
+  See OQ-3.
 - Container base images are pinned by tag rather than by digest.
 
 [Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/commits/develop

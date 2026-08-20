@@ -96,8 +96,22 @@ This should be closed by running `npm install` in a network-enabled environment
 and committing the resulting lockfile, then switching CI and the Dockerfile to
 `npm ci`. Both places carry a comment marking the switch.
 
+**The same issue applies to the backend, and it had teeth.** `backend/pyproject.toml`
+originally carried exact `==` pins written by hand. Those pins were stale, and
+`pip-audit` in CI found seven advisories against the transitive `starlette`
+version they resolved to (PYSEC-2026-161, -248, -249, -1941, -1942, -2280,
+-2281), the highest requiring a fix in 1.3.1. The pins have been replaced with
+minimum-version floors at or above the fixed versions, so the resolver picks
+current releases.
+
+Floors are the right answer for security but the wrong answer for
+reproducibility: two builds a week apart can now resolve different versions.
+Closing this question properly means generating real lockfiles for both
+ecosystems, committing them, and switching CI and the Dockerfile to
+`npm ci` and to installing from a locked requirements file.
+
 **Who can answer:** the repository owner.
-**Blocks:** reproducible frontend builds.
+**Blocks:** reproducible builds in both ecosystems.
 
 ## OQ-4
 **What numeric tolerance applies to alcohol content?**
