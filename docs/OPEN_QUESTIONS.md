@@ -26,6 +26,7 @@ updates every artifact the answer affects.
 | [OQ-14](#oq-14) | Open | Nothing; a manual step for the repository owner |
 | [OQ-15](#oq-15) | Open | Local verification of the build in this environment |
 | [OQ-16](#oq-16) | Open | Batch UI design (US-9) |
+| [OQ-17](#oq-17) | Open | Setting `develop` as the default branch |
 
 ---
 
@@ -214,19 +215,39 @@ Officer, citing the current controlling documents.
 **Blocks:** AI governance sign-off for anything beyond a prototype.
 
 ## OQ-12
-**Can branch protection be enforced on this repository?**
+**Branch protection could not be applied, and could not even be attempted.**
 
-Decision D-6 requires protection on `main` and `develop`. GitHub does not
-enforce branch protection on private repositories under a Free plan.
+Decision D-6 requires protection on `main` and `develop`: pull request required,
+the `ci` status check required, stale approvals dismissed, force pushes blocked.
 
-The outcome of the protection API calls made during initialization is recorded
-in the final summary for this work. If protection could not be applied, the Git
-Flow rules in [08_SDLC_PROCESS.md](08_SDLC_PROCESS.md) section 2 remain the
-documented process and are followed by convention rather than enforced by the
-platform.
+**This was not applied.** Two independent obstacles:
 
-**Who can answer:** the repository owner, by checking the plan or by making the
-repository public.
+1. **No API path exists in this session.** The build instructions specified
+   `gh api -X PUT repos/.../branches/<branch>/protection`. The `gh` CLI is not
+   installed in this environment, and direct REST calls to `api.github.com`
+   return:
+
+   ```
+   HTTP 403
+   {"message":"GitHub access is not enabled for this session. An org admin must
+   connect the Claude GitHub App for this organization."}
+   ```
+
+   GitHub access in this session is mediated by a tool set that provides issues,
+   pull requests, branches, and file contents, but exposes **no branch
+   protection endpoint and no repository settings endpoint**.
+
+2. **The anticipated plan limitation may also apply.** GitHub does not enforce
+   branch protection on private repositories under a Free plan. Whether that
+   applies here was never reached, because obstacle 1 blocked the attempt.
+
+Until protection is applied, the Git Flow rules in
+[08_SDLC_PROCESS.md](08_SDLC_PROCESS.md) section 2 are followed by convention
+rather than enforced by the platform. `CODEOWNERS` still requests review, but
+nothing prevents a direct push to `main` or `develop`.
+
+**Who can answer:** the repository owner, in the GitHub web interface under
+Settings, Branches. The required `ci` status check is named `ci`.
 **Blocks:** enforcement, not process.
 
 ## OQ-13
@@ -286,9 +307,32 @@ session. **None of these could be run.** The session's egress policy returned
 
 Confirmed against the proxy status endpoint, which recorded
 `connect_rejected: gateway answered 403 to CONNECT (policy denial or upstream
-failure)` for `pypi.org:443` and `files.pythonhosted.org:443`. Because the
-Docker build installs from all three sources, `docker compose up --build` fails
-for the same reason.
+failure)` for `pypi.org:443` and `files.pythonhosted.org:443`. The npm failure
+surfaced as `npm error code E403 ... 403 Forbidden - GET
+https://registry.npmjs.org/@eslint%2fjs`.
+
+**A fourth, separate obstacle:** there is no Docker daemon in this session. The
+`docker` CLI is present, but `docker compose up -d --build` fails with:
+
+```
+failed to connect to the docker API at unix:///var/run/docker.sock; check if
+the path is correct and if the daemon is running: dial unix
+/var/run/docker.sock: connect: no such file or directory
+```
+
+So the container build could not have run even with package access, and
+`curl http://localhost:8000/api/health` correspondingly failed with
+`Connection refused`.
+
+Every one of the four required checks was attempted and every one failed for an
+environmental reason, not a defect in the code:
+
+| Required check | Attempted | Result |
+| --- | --- | --- |
+| `pytest` | Yes | Failed: `pip install` could not reach PyPI |
+| Frontend build | Yes | Failed: `npm install` returned 403 |
+| `docker compose up -d` | Yes | Failed: no Docker daemon |
+| `curl /api/health` | Yes | Failed: nothing running to serve it |
 
 The proxy documentation states that policy denials must be reported rather than
 routed around, so no workaround was attempted.
@@ -319,3 +363,31 @@ observation, not a decision.
 
 **Who can answer:** Sarah Chen, or Janet in the Seattle office.
 **Blocks:** FR-8 and US-9 interface design.
+
+## OQ-17
+**The default branch was not changed to `develop`.**
+
+Decision D-6 makes `develop` the integration branch, and the build instructions
+called for `gh api -X PATCH repos/... -f default_branch=develop`.
+
+**This was not done.** The repository's default branch is still `main`. The
+reason is the same as obstacle 1 in OQ-12: `gh` is not installed, direct REST
+calls to `api.github.com` return 403 with "GitHub access is not enabled for this
+session," and the GitHub tool set available here exposes no repository settings
+endpoint.
+
+Consequences while `main` remains the default:
+
+- New pull requests opened through the web interface default to targeting
+  `main` rather than `develop`, which contradicts the Git Flow rules in
+  [08_SDLC_PROCESS.md](08_SDLC_PROCESS.md) section 2.
+- A fresh `git clone` checks out `main`, which holds only the initial commit,
+  rather than `develop`, which holds all of the work.
+
+Note that `.github/dependabot.yml` sets `target-branch: develop` explicitly, so
+Dependabot is unaffected by this.
+
+**Who can answer:** the repository owner, in the GitHub web interface under
+Settings, General, Default branch.
+**Blocks:** correct default targeting for new pull requests and clones. It does
+not block any code.

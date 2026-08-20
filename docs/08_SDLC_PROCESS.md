@@ -86,7 +86,7 @@ Per Decision D-6. Rationale and alternatives are in
 | Branch | Purpose | Merges from | Merges to |
 | --- | --- | --- | --- |
 | `main` | Releases only. Every commit is a tagged release. | `release/*`, `hotfix/*` | nothing |
-| `develop` | Integration branch. Default branch. | `feature/*`, `release/*`, `hotfix/*` | `release/*` |
+| `develop` | Integration branch. Intended default branch; see OQ-17. | `feature/*`, `release/*`, `hotfix/*` | `release/*` |
 | `feature/*` | One issue's worth of work | `develop` | `develop` |
 | `release/*` | Release stabilization; version bump, changelog, fixes only | `develop` | `main` and back to `develop` |
 | `hotfix/*` | Urgent fix against a release | `main` | `main` and `develop` |
@@ -94,9 +94,11 @@ Per Decision D-6. Rationale and alternatives are in
 **Rules**
 
 1. No direct commits to `main` or `develop`. Everything arrives by pull request.
-2. `main` and `develop` are protected: pull request required, the `ci` status
-   check required, stale approvals dismissed on new commits, force pushes
-   blocked.
+2. `main` and `develop` are to be protected: pull request required, the `ci`
+   status check required, stale approvals dismissed on new commits, force pushes
+   blocked. **Protection is not applied yet**; see OQ-12 in
+   [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md). Until it is, these rules hold by
+   convention.
 3. Branch names carry the issue number: `feature/12-batch-upload`.
 4. A `release/*` branch takes no new features, only version bump, changelog, and
    fixes for problems found in stabilization.

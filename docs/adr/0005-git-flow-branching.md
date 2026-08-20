@@ -91,11 +91,13 @@ demonstrating.
   Accepted deliberately: the assignment is evaluated in part on "Code quality and
   organization," and a documented, enforced branching model is part of that.
   [Source: Evaluation Criteria]
-- That branch protection cannot be enforced. GitHub does not enforce branch
-  protection on private repositories under a Free plan. If the protection API
-  rejects the request for that reason, the rules remain the documented process
-  and the gap is recorded in [../OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) rather
-  than left silent.
+- That branch protection cannot be enforced. **It is not enforced today.** The
+  session that initialized this repository had no API path to the branch
+  protection endpoint, and GitHub additionally does not enforce protection on
+  private repositories under a Free plan. The rules therefore remain the
+  documented process, followed by convention, until an owner applies protection
+  in the web interface. Recorded as OQ-12 in
+  [../OPEN_QUESTIONS.md](../OPEN_QUESTIONS.md) rather than left silent.
 
 ## References
 

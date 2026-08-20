@@ -28,7 +28,9 @@ traced back to a source is indistinguishable from a document that was invented.
 Git Flow ([ADR 0005](docs/adr/0005-git-flow-branching.md)).
 
 - `main` holds releases only. Every commit on it is a tagged release.
-- `develop` is the integration branch and the default branch.
+- `develop` is the integration branch. It is the intended default branch;
+  the repository default is still `main` (see OQ-17), so check your base branch
+  when opening a pull request.
 - Work happens on `feature/<issue-number>-<short-description>`, branched from
   `develop` and merged back to `develop`.
 - `release/*` and `hotfix/*` as described in the SDLC document.
