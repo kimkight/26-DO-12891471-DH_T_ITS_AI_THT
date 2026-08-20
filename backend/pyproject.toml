@@ -43,7 +43,8 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=68"]
+# 83.0.0 is the fix for PYSEC-2026-3447.
+requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
