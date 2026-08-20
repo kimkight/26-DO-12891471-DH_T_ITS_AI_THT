@@ -70,8 +70,18 @@ The version is therefore **unknown, not assumed**. The Dockerfile installs
 `tesseract-ocr` and `tesseract-ocr-eng` from Debian bookworm at image build
 time; the actual version must be read from a built image and recorded.
 
-**Who can answer:** anyone who can build the image in a network-enabled
-environment, with `docker run --rm <image> tesseract --version`.
+**Now readable from CI.** The `container build and SBOM` job has a step,
+"Report the Tesseract version in the image", that runs `tesseract --version`
+against the built image and writes the result to the workflow run summary page.
+The version also appears in the SBOM artifact attached to every run.
+
+**To close this question:** read the version from the summary of any successful
+CI run and record it in the version table in
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8, replacing the
+"Not verified in this session" row.
+
+**Who can answer:** anyone reading a CI run summary, or running
+`docker run --rm --entrypoint tesseract <image> --version` locally.
 **Blocks:** the version row in [05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8.
 
 ## OQ-3

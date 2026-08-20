@@ -227,7 +227,7 @@ default path.
 | Python | 3.11 | `python:3.11-slim-bookworm` base image; local `python3 --version` reported 3.11.15 |
 | Node.js | 22 | `node:22-bookworm-slim` build image; local `node --version` reported v22.22.2 |
 | Docker | 29.3.1 | `docker --version` in the build session |
-| Tesseract | **Not verified in this session** | See below |
+| Tesseract | **Recorded by CI, not yet transcribed here** | See below |
 
 **Tesseract version is not recorded because it could not be verified.** The
 build session had no Tesseract binary, and it could not be installed: the
@@ -236,7 +236,13 @@ session's egress policy returned `403 Forbidden` for `archive.ubuntu.com`, so
 therefore unknown rather than assumed, and is tracked as OQ-2 in
 [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md). The Dockerfile installs
 `tesseract-ocr` and `tesseract-ocr-eng` from the Debian bookworm repositories at
-image build time; the version must be read from a built image and recorded here.
+image build time.
+
+The version **is** captured automatically: the `container build and SBOM` CI job
+runs `tesseract --version` against the built image and publishes the result to
+the workflow run summary, and the version also appears in the SBOM artifact
+attached to every run. It has not been transcribed into this table yet, because
+doing so from anything other than a real run output would be a guess.
 
 Only English language data is installed, per the build instruction not to add
 OCR models beyond English.

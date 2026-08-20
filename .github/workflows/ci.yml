@@ -157,8 +157,18 @@ jobs:
       # the authoritative source for docs/05_ARCHITECTURE.md (OQ-2).
       - name: Report the Tesseract version in the image
         run: |
-          docker run --rm --entrypoint tesseract \
-            ttb-label-verifier:${{ github.sha }} --version
+          version=$(docker run --rm --entrypoint tesseract \
+            ttb-label-verifier:${{ github.sha }} --version 2>&1)
+          echo "${version}"
+          # Also surface it on the run summary page so it can be read without
+          # scrolling the build log.
+          {
+            echo "### Tesseract version in the image"
+            echo ""
+            echo '```'
+            echo "${version}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate SBOM (syft)
         uses: anchore/sbom-action@v0
