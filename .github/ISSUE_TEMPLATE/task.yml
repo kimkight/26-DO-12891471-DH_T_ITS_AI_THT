@@ -1,0 +1,24 @@
+name: Task
+description: Engineering or documentation work that is not directly user facing.
+title: "[Task] "
+labels: ["type:task"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: What needs to be done
+    validations:
+      required: true
+  - type: textarea
+    id: rationale
+    attributes:
+      label: Why
+      description: Link the requirement, ADR, open question, or assumption this serves.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+    validations:
+      required: true

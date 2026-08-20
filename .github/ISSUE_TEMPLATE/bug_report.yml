@@ -1,0 +1,48 @@
+name: Bug report
+description: Behaviour that contradicts a documented requirement.
+title: "[Bug] "
+labels: ["type:bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Cite the requirement ID this contradicts, for example FR-4.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit SHA, browser, and how the app was run. Do not paste credentials, account identifiers, or personal data.
+    validations:
+      required: false
+  - type: checkboxes
+    id: data-check
+    attributes:
+      label: Data handling
+      options:
+        - label: This report contains no credentials, account identifiers, or personal data.
+          required: true

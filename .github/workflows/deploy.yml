@@ -1,0 +1,97 @@
+name: deploy
+
+# ---------------------------------------------------------------------------
+# DISABLED ON PURPOSE.
+#
+# Every job carries `if: false`. The workflow is committed now so that the
+# deployment path is reviewable alongside the architecture, but it cannot run
+# because none of the infrastructure it targets exists yet: there is no ECR
+# repository, no ECS cluster or service, no load balancer, and no IAM role for
+# GitHub Actions to assume through OIDC. See infra/README.md, which is itself
+# still a placeholder, and docs/09_DEPLOYMENT.md.
+#
+# Running this as written would fail at the credential step. Leaving it enabled
+# would also mean a workflow with `id-token: write` sits on the default branch
+# before the trust policy that scopes it has been reviewed.
+#
+# To enable, in this order:
+#   1. Apply the Terraform in infra/ so the ECR repository, ECS service, load
+#      balancer, and OIDC role exist.
+#   2. Set the repository variables AWS_REGION, AWS_ROLE_ARN, ECR_REPOSITORY,
+#      ECS_CLUSTER, ECS_SERVICE, and ECS_CONTAINER_NAME. These are
+#      configuration, not secrets; no static AWS access keys are used
+#      (Decision D-8 and docs/06_SECURITY_AND_COMPLIANCE.md).
+#   3. Remove the `if: false` guard from each job.
+# ---------------------------------------------------------------------------
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-and-push:
+    name: build and push image
+    if: false
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        id: meta
+        env:
+          REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          docker build -t "$REGISTRY/$REPOSITORY:$TAG" .
+          docker push "$REGISTRY/$REPOSITORY:$TAG"
+          echo "image=$REGISTRY/$REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    name: deploy to ECS
+    if: false
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Render the task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: infra/task-definition.json
+          container-name: ${{ vars.ECS_CONTAINER_NAME }}
+          image: ${{ needs.build-and-push.outputs.image }}
+
+      - name: Deploy and wait for the service to stabilise
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          cluster: ${{ vars.ECS_CLUSTER }}
+          service: ${{ vars.ECS_SERVICE }}
+          wait-for-service-stability: true
