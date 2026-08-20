@@ -4,7 +4,7 @@
  * docs/03_REQUIREMENTS.md (NFR-4, NFR-5).
  */
 :root {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
   color-scheme: light dark;
 }

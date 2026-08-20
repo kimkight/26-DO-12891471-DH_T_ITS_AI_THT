@@ -39,7 +39,7 @@ jobs:
         run: ruff check .
 
       - name: Format check (ruff)
-        run: ruff format --check .
+        run: ruff format --check --diff .
 
       - name: Test (pytest)
         run: pytest --cov=app --cov-report=term-missing
@@ -65,8 +65,15 @@ jobs:
       - name: Lint (eslint)
         run: npm run lint
 
+      # `prettier --check` reports only which files differ. On failure, rewrite
+      # them and print the diff so the required change is visible in the log.
       - name: Format check (prettier)
-        run: npm run format:check
+        run: |
+          npm run format:check || {
+            npm run format
+            git --no-pager diff -- src
+            exit 1
+          }
 
       - name: Build (tsc and vite)
         run: npm run build
@@ -91,7 +98,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install pip-audit==2.7.3
           pip install -e ".[matching]"
-          pip-audit --strict --progress-spinner off
+          # --skip-editable excludes this repository's own package, which is
+          # installed editable and is not published to PyPI. Without it,
+          # --strict fails on "Dependency not found on PyPI".
+          pip-audit --strict --skip-editable --progress-spinner off
 
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend
@@ -138,6 +148,14 @@ jobs:
           uid=$(docker run --rm --entrypoint id ttb-label-verifier:${{ github.sha }} -u)
           echo "container uid: ${uid}"
           test "${uid}" != "0"
+
+      # Records the Tesseract version actually shipped in the image. The
+      # initializing session could not install Tesseract locally, so this is
+      # the authoritative source for docs/05_ARCHITECTURE.md (OQ-2).
+      - name: Report the Tesseract version in the image
+        run: |
+          docker run --rm --entrypoint tesseract \
+            ttb-label-verifier:${{ github.sha }} --version
 
       - name: Generate SBOM (syft)
         uses: anchore/sbom-action@v0

@@ -24,10 +24,7 @@ STATIC_DIR = Path(__file__).resolve().parent / "static"
 app = FastAPI(
     title=settings.app_name,
     version=__version__,
-    description=(
-        "Prototype API for verifying alcohol beverage label artwork "
-        "against application data."
-    ),
+    description="Verifies label artwork against application data.",
 )
 
 
