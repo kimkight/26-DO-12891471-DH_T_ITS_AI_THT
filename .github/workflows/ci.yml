@@ -99,9 +99,12 @@ jobs:
           pip install pip-audit==2.7.3
           pip install -e ".[matching]"
           # --skip-editable excludes this repository's own package, which is
-          # installed editable and is not published to PyPI. Without it,
-          # --strict fails on "Dependency not found on PyPI".
-          pip-audit --strict --skip-editable --progress-spinner off
+          # installed editable and is not published to PyPI.
+          # --strict is deliberately not used: it fails on *any* skipped
+          # distribution, including the one skipped just above. Without it,
+          # pip-audit still exits non-zero when a real vulnerability is found,
+          # which is the gate this job exists to enforce.
+          pip-audit --skip-editable --progress-spinner off
 
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend
