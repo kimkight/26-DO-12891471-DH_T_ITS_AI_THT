@@ -1,0 +1,773 @@
+# User Stories
+
+Personas are limited to those appearing in the discovery interviews:
+
+| Persona | Drawn from | Notes |
+| --- | --- | --- |
+| Compliance agent | Dave Morrison, 28 years; Jenny Park, 8 months | The primary user. Spans the full range of technology comfort Sarah describes. |
+| Deputy Director of Label Compliance | Sarah Chen | Accountable for throughput and adoption. |
+| IT systems administrator | Marcus Williams | Owns the technical and security boundary. |
+| Batch submitter context | Janet, Seattle office, via Sarah | Not interviewed directly. The batch need is attributed to her through Sarah. |
+
+Story points are intentionally left blank; they are set at refinement
+(see [08_SDLC_PROCESS.md](08_SDLC_PROCESS.md)).
+
+The `Issue` column is filled in from the GitHub Issues created from this file.
+
+---
+
+## Epic A: Single label verification
+
+### US-1 Verify a single label against its application data
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-1, FR-2, FR-3 |
+| Points | |
+| Issue | #1 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent,
+**I want** to upload a label image together with the application data,
+**so that** I can see whether the label agrees with the application without
+checking every field by eye.
+
+**Acceptance criteria**
+
+```
+Given a label image and application data for brand name, class/type,
+      alcohol content, net contents, and government warning
+When  I submit them for verification
+Then  I receive one outcome for each of the five fields
+And   each outcome is one of match, needs human review, or mismatch
+```
+
+```
+Given a field the system could not find on the label
+When  results are returned
+Then  that field is reported as not found
+And   it is not reported as a match
+```
+
+Sarah describes the manual task this replaces: "An agent pulls up an
+application, looks at the label artwork, and checks that what's on the label
+matches what's in the application." [Source: Sarah Chen interview]
+
+### US-2 See what was found next to what was expected
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-3, FR-10 |
+| Points | |
+| Issue | #2 |
+| Source | Dave Morrison interview |
+
+**As a** compliance agent,
+**I want** each result to show the value found on the label beside the value
+from the application,
+**so that** I can exercise my own judgment instead of trusting a verdict I
+cannot inspect.
+
+**Acceptance criteria**
+
+```
+Given a completed verification
+When  I view the results
+Then  each field row shows the field name, the label value, the application
+      value, and the outcome
+```
+
+```
+Given a field with an outcome of needs human review
+When  I view the results
+Then  that row is visually distinct from both matches and mismatches
+```
+
+Dave's condition for adopting any tool: "Just don't make my life harder in the
+process." A verdict without its evidence would make the work harder, not easier.
+[Source: Dave Morrison interview]
+
+### US-3 Tolerate differences of case and punctuation
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-4 |
+| Points | |
+| Issue | #3 |
+| Source | Dave Morrison interview |
+
+**As a** compliance agent,
+**I want** presentational differences such as capitalization to not be treated
+as substantive mismatches,
+**so that** I am not sent to review pairs that are obviously the same thing.
+
+**Acceptance criteria**
+
+```
+Given a label reading STONE'S THROW and an application reading Stone's Throw
+When  verification runs
+Then  the brand name outcome is match or needs human review
+And   the outcome is never mismatch
+```
+
+```
+Given two genuinely different brand names
+When  verification runs
+Then  normalization does not cause them to be reported as a match
+```
+
+Dave's case verbatim: "the brand name was 'STONE'S THROW' on the label but
+'Stone's Throw' in the application. Technically a mismatch? Sure. But it's
+obviously the same thing. You need judgment." [Source: Dave Morrison interview]
+
+### US-4 Check the government warning word for word
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-5 |
+| Points | |
+| Issue | #4 |
+| Source | Jenny Park interview |
+
+**As a** compliance agent,
+**I want** the government warning compared exactly against the required text,
+**so that** altered wording is caught rather than passed as close enough.
+
+**Acceptance criteria**
+
+```
+Given a warning matching 27 CFR 16.21 except for line breaks and runs of spaces
+When  verification runs
+Then  the warning body outcome is match
+```
+
+```
+Given a warning with any word added, removed, or changed
+When  verification runs
+Then  the outcome is mismatch
+And   the outcome is not needs human review
+```
+
+```
+Given no warning statement is found on the label
+When  verification runs
+Then  the outcome is mismatch and the result states the statement was not found
+```
+
+Jenny: "It has to be exact. Like, word-for-word." She names the pattern she
+sees: "people try to get creative with the warning all the time... different
+wording." [Source: Jenny Park interview]
+
+### US-5 Catch a warning that is not in capital letters
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-6 |
+| Points | |
+| Issue | #5 |
+| Source | Jenny Park interview |
+
+**As a** compliance agent,
+**I want** the `GOVERNMENT WARNING:` prefix checked for capitalization
+separately from the warning body,
+**so that** a title-case warning is caught and I can see which rule failed.
+
+**Acceptance criteria**
+
+```
+Given a label reading Government Warning: in title case
+When  verification runs
+Then  the capitalization check fails
+And   the warning field does not report a match
+```
+
+```
+Given a label reading GOVERNMENT WARNING: in capitals
+When  verification runs
+Then  the capitalization check passes
+```
+
+```
+Given any verification result
+When  the warning field is displayed
+Then  the result does not state or imply that bold type was verified
+```
+
+Jenny's real case: "I caught one last month where they used 'Government Warning'
+in title case instead of all caps. Rejected." [Source: Jenny Park interview]
+
+The rule is confirmed by 27 CFR 16.22(a)(2), which requires the first two words
+in "capital letters and in bold type." The prototype checks capitals only; the
+bold requirement is out of scope and must not be implied as checked
+(see OOS-4 in [02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md)).
+
+### US-6 Compare alcohol content and net contents as numbers
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-7 |
+| Points | |
+| Issue | #6 |
+| Source | Decision D-5 |
+
+**As a** compliance agent,
+**I want** numeric fields compared numerically rather than as text,
+**so that** the same value written differently is not reported as a mismatch.
+
+**Acceptance criteria**
+
+```
+Given a label reading 45% Alc./Vol. (90 Proof) and an application reading 45
+When  verification runs
+Then  the alcohol content outcome is match
+```
+
+```
+Given a label reading 750 mL and an application reading 750ml
+When  verification runs
+Then  the net contents outcome is match
+```
+
+```
+Given a numeric field that cannot be parsed as a number
+When  verification runs
+Then  the system falls back to text comparison and says so in the result
+```
+
+The sample label's alcohol content is given as `45% Alc./Vol. (90 Proof)` and
+net contents as `750 mL`. [Source: Technical Requirements, Sample Label section]
+
+### US-7 Get a clear message when a label cannot be read
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | FR-9 |
+| Points | |
+| Issue | #7 |
+| Source | Jenny Park interview |
+
+**As a** compliance agent,
+**I want** an unreadable image to tell me plainly that it could not be read,
+**so that** I can request a better image instead of acting on a wrong result.
+
+**Acceptance criteria**
+
+```
+Given a corrupt or undecodable image file
+When  I submit it
+Then  the response states the image could not be read
+And   no field reports a match
+```
+
+```
+Given an image from which no text is extracted
+When  results are returned
+Then  the message distinguishes no text found from fields did not match
+```
+
+```
+Given a file that is not an allowed image type, or is over the size limit
+When  I submit it
+Then  it is rejected before decoding, with a message naming the limit or the
+      accepted types
+```
+
+Today's behaviour is the bar to clear: "Right now if an agent can't read the
+label they just reject it and ask for a better image."
+[Source: Jenny Park interview]
+
+### US-8 Get results back in about five seconds
+
+| | |
+| --- | --- |
+| Epic | Single label verification |
+| Priority | Must |
+| Requirements | NFR-1 |
+| Points | |
+| Issue | #8 |
+| Source | Sarah Chen interview |
+
+**As a** Deputy Director of Label Compliance,
+**I want** single-label results in about five seconds,
+**so that** agents use the tool instead of reverting to checking by eye.
+
+**Acceptance criteria**
+
+```
+Given a single label submitted for verification
+When  the measurement harness runs against the sample set
+Then  end-to-end latency is recorded and reported against the 5-second target
+And   the hardware and sample set used are stated alongside the number
+```
+
+```
+Given the measured latency exceeds the target
+When  results are published
+Then  the shortfall is reported rather than omitted
+```
+
+This is the failure mode of the previous pilot: "The system would take 30, 40
+seconds sometimes... If we can't get results back in about 5 seconds, nobody's
+going to use it. We learned that the hard way." [Source: Sarah Chen interview]
+
+---
+
+## Epic B: Batch verification
+
+### US-9 Submit many labels at once
+
+| | |
+| --- | --- |
+| Epic | Batch verification |
+| Priority | Must |
+| Requirements | FR-8 |
+| Points | |
+| Issue | #9 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent handling a bulk importer submission,
+**I want** to upload many labels with their application data in one go,
+**so that** I am not processing a 300-application drop one at a time.
+
+**Acceptance criteria**
+
+```
+Given a batch of labels each with application data
+When  I submit the batch
+Then  the response contains a result set for every label in the batch
+And   each result identifies which label it belongs to
+```
+
+```
+Given a batch larger than the configured file limit
+When  I submit it
+Then  the request is rejected before any file is processed
+And   the message names the limit
+```
+
+Sarah: "during peak season, we get these big importers who dump 200, 300 label
+applications on us at once. Right now we literally have to process them one at a
+time. If there was some way to handle batch uploads, that would be huge."
+She attributes the standing request to "Janet from our Seattle office," who "has
+been asking about this for years." [Source: Sarah Chen interview]
+
+### US-10 Keep one bad image from failing the whole batch
+
+| | |
+| --- | --- |
+| Epic | Batch verification |
+| Priority | Must |
+| Requirements | FR-8, FR-9 |
+| Points | |
+| Issue | #10 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent,
+**I want** a single unreadable label to fail on its own,
+**so that** I do not lose the results for the other 299 labels.
+
+**Acceptance criteria**
+
+```
+Given a batch containing one unreadable image
+When  the batch is processed
+Then  that label reports an error
+And   every other label in the batch still returns results
+```
+
+### US-11 See that a large batch is progressing
+
+| | |
+| --- | --- |
+| Epic | Batch verification |
+| Priority | Should |
+| Requirements | NFR-2 |
+| Points | |
+| Issue | #11 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent,
+**I want** to see that a large batch is still working,
+**so that** I do not assume the page has frozen and start over.
+
+**Acceptance criteria**
+
+```
+Given a batch of 300 labels
+When  processing is under way
+Then  progress is visible rather than presenting as a frozen page
+```
+
+```
+Given a long-running batch
+When  processing completes
+Then  results are returned without a request timeout discarding completed work
+```
+
+---
+
+## Epic C: Usability and accessibility
+
+### US-12 Verify a label without hunting for anything
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Must |
+| Requirements | NFR-4 |
+| Points | |
+| Issue | #12 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent with low technology comfort,
+**I want** the main task available immediately on the landing page,
+**so that** I can do my job without learning a new system.
+
+**Acceptance criteria**
+
+```
+Given I open the application
+When  the landing page loads
+Then  I can verify one label without navigating anywhere first
+```
+
+```
+Given any step in the primary task
+When  I read the on-screen text
+Then  it uses no terminology beyond what label review already uses
+```
+
+Sarah's benchmark: "We need something my mother could figure out; she's 73 and
+just learned to video call her grandkids last year." And: "Clean, obvious, no
+hunting for buttons." [Source: Sarah Chen interview]
+
+### US-13 Use the tool with a keyboard and a screen reader
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Must |
+| Requirements | NFR-5 |
+| Points | |
+| Issue | #13 |
+| Source | Sarah Chen interview |
+
+**As a** compliance agent using assistive technology,
+**I want** the interface to meet WCAG 2.1 Level AA,
+**so that** I can do the same work as everyone else.
+
+**Acceptance criteria**
+
+```
+Given a results table
+When  outcomes are displayed
+Then  each outcome is conveyed by text and shape, not by colour alone
+```
+
+```
+Given any interactive control
+When  I navigate with the keyboard
+Then  the control is reachable and its focus is visible
+```
+
+```
+Given results appear after submission
+When  the update happens
+Then  it is announced to assistive technology
+```
+
+Sarah states "half our team is over 50" with a wide range of technology comfort.
+[Source: Sarah Chen interview] Section 508 applicability is unconfirmed; see
+OQ-7 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+
+---
+
+## Epic D: Platform, security, and deployment
+
+### US-14 Work behind a firewall that blocks outbound traffic
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Must |
+| Requirements | NFR-3 |
+| Points | |
+| Issue | #14 |
+| Source | Marcus Williams interview |
+
+**As an** IT systems administrator,
+**I want** the default path to make no outbound network calls,
+**so that** the tool does not fail the way the last vendor's did.
+
+**Acceptance criteria**
+
+```
+Given default configuration and blocked egress
+When  a label is verified
+Then  verification completes successfully
+```
+
+```
+Given the Bedrock fallback environment variable is unset
+When  the application starts
+Then  the fallback is disabled
+```
+
+```
+Given the fallback is enabled and used
+When  results are returned
+Then  the result shows that an external call was involved
+```
+
+Marcus: "our network blocks outbound traffic to a lot of domains... During the
+scanning vendor pilot, half their features didn't work because our firewall
+blocked connections to their ML endpoints. Classic."
+[Source: Marcus Williams interview]
+
+### US-15 Retain nothing that was uploaded
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Must |
+| Requirements | NFR-6 |
+| Points | |
+| Issue | #15 |
+| Source | Marcus Williams interview |
+
+**As an** IT systems administrator,
+**I want** no uploaded image or form data retained beyond the request,
+**so that** the prototype raises no retention or privacy question.
+
+**Acceptance criteria**
+
+```
+Given a completed verification
+When  the response has been returned
+Then  no image or form field has been written to disk, database, object
+      storage, or cache
+```
+
+```
+Given application logs for a verification
+When  they are inspected
+Then  they contain no image content and no extracted field value
+```
+
+Marcus: "there's PII considerations, document retention policies, the usual
+federal compliance stuff. But for a prototype? Just don't do anything crazy.
+We're not storing anything sensitive for this exercise."
+[Source: Marcus Williams interview]
+
+### US-16 Reject bad uploads before processing them
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Must |
+| Requirements | NFR-7 |
+| Points | |
+| Issue | #16 |
+| Source | Decision D-9 |
+
+**As an** IT systems administrator,
+**I want** size, type, and count limits enforced before any file is decoded,
+**so that** a malformed or oversized upload cannot exhaust the service.
+
+**Acceptance criteria**
+
+```
+Given a file larger than the configured size limit
+When  it is submitted
+Then  it is rejected before the body is read into memory
+And   the message names the limit
+```
+
+```
+Given a file whose MIME type is not in the allowed list
+When  it is submitted
+Then  it is rejected before decoding
+And   the message names the accepted types
+```
+
+### US-17 Reach a working prototype at a URL
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Must |
+| Requirements | NFR-9 |
+| Points | |
+| Issue | #17 |
+| Source | Deliverables |
+
+**As a** reviewer,
+**I want** a deployed URL I can open and test,
+**so that** I can evaluate the working prototype rather than only the code.
+
+**Acceptance criteria**
+
+```
+Given the deployed URL
+When  I open it
+Then  the application loads and I can run a verification
+```
+
+```
+Given the deployed service
+When  the load balancer probes it
+Then  GET /api/health returns 200
+```
+
+The assignment requires a "Deployed Application URL: Working prototype we can
+access and test." [Source: Deliverables]
+
+### US-18 Keep quality gates automatic
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Must |
+| Requirements | NFR-8 |
+| Points | |
+| Issue | #18 |
+| Source | Decision D-8 |
+
+**As an** IT systems administrator,
+**I want** lint, tests, dependency audit, container build, and SBOM generation
+to run on every pull request,
+**so that** quality and supply-chain checks do not depend on anyone remembering.
+
+**Acceptance criteria**
+
+```
+Given a pull request to develop or main
+When  CI runs
+Then  backend lint and tests, frontend lint and build, dependency audit,
+      container build, and SBOM generation all execute
+```
+
+```
+Given any of those checks fails
+When  the pull request is viewed
+Then  the ci status check reports failure
+```
+
+### US-19 Keep the GovCloud path open
+
+| | |
+| --- | --- |
+| Epic | Platform, security, and deployment |
+| Priority | Should |
+| Requirements | NFR-10 |
+| Points | |
+| Issue | #19 |
+| Source | Decision D-11 |
+
+**As an** IT systems administrator,
+**I want** the infrastructure code to target AWS GovCloud (US) without redesign,
+**so that** the prototype does not have to be rebuilt to move toward production.
+
+**Acceptance criteria**
+
+```
+Given the infrastructure code
+When  it is reviewed
+Then  it contains no hardcoded partition, region, or account identifier
+And   ARNs are derived from partition and region data sources
+```
+
+```
+Given the set of AWS services used
+When  the GovCloud target is prepared
+Then  availability of each service in GovCloud is confirmed against AWS
+      documentation rather than assumed
+```
+
+Marcus on the compliance overhead this anticipates: "don't get me started on the
+FedRAMP certification process. Took 18 months just for the paperwork."
+[Source: Marcus Williams interview]
+
+---
+
+## Epic E: Documentation
+
+### US-20 Understand how to run it and what it assumes
+
+| | |
+| --- | --- |
+| Epic | Documentation |
+| Priority | Must |
+| Requirements | SC-5, SC-6 |
+| Points | |
+| Issue | #20 |
+| Source | Deliverables |
+
+**As a** reviewer,
+**I want** setup and run instructions plus a statement of approach, tools, and
+assumptions,
+**so that** I can run the prototype and understand the decisions behind it.
+
+**Acceptance criteria**
+
+```
+Given a clean checkout
+When  I follow the README quick start
+Then  the application runs and the health endpoint responds
+```
+
+```
+Given the documentation
+When  I look for approach, tools used, and assumptions made
+Then  each is documented, and anything inferred is marked as an assumption
+```
+
+The assignment asks for "Brief documentation of approach, tools used,
+assumptions made." [Source: Deliverables]
+
+### US-21 See measured accuracy rather than claimed accuracy
+
+| | |
+| --- | --- |
+| Epic | Documentation |
+| Priority | Must |
+| Requirements | NFR-1, NFR-8 |
+| Points | |
+| Issue | #21 |
+| Source | Evaluation Criteria |
+
+**As a** reviewer,
+**I want** per-field accuracy and latency measured against a labeled sample set,
+**so that** I can judge the prototype on evidence rather than assertion.
+
+**Acceptance criteria**
+
+```
+Given the labeled sample set with ground truth
+When  the accuracy suite runs
+Then  per-field precision and recall are reported
+And   the sample size and its composition are stated
+```
+
+```
+Given the published results
+When  a field performs poorly
+Then  the weakness is reported rather than omitted
+```
+
+No accuracy target is stated in any source, so none is invented here; see OQ-8
+in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
