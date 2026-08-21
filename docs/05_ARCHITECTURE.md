@@ -6,7 +6,7 @@ choice, with alternatives and consequences, is in the ADRs under
 
 | ADR | Decision |
 | --- | --- |
-| [0001](adr/0001-cloud-platform-aws.md) | AWS commercial `us-east-1`, portable to GovCloud (US) |
+| [0001](adr/0001-cloud-platform-aws.md) | AWS commercial `us-east-1`, portable to a FedRAMP-authorized government region |
 | [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) | ECS with Fargate behind an ALB, not App Runner |
 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) | Local OCR by default, optional Bedrock fallback |
 | [0004](adr/0004-fuzzy-matching-with-review-band.md) | Normalized fuzzy matching with a human-review band |
@@ -210,10 +210,18 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_MAX_BATCH_FILES` | `300` | Batch file-count limit, enforced before processing |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
 | `TTB_REVIEW_THRESHOLD` | `80` | Between this and the match threshold, a field needs human review |
+| `TTB_ABV_TOLERANCE` | `0.0` | Allowed difference, in percentage points, between the label ABV and the application ABV. Zero means the two declared values must be identical (A-12). |
 
 The two threshold defaults are starting points chosen to be tuned against the
 labeled sample set, not values derived from any source. They are marked as
 assumptions; see [ASSUMPTIONS.md](ASSUMPTIONS.md) and OQ-9.
+
+`TTB_ABV_TOLERANCE` is different: `0.0` is a deliberate compliance position, not
+a starting point for tuning. The regulatory tolerances in 27 CFR 5.65, 4.36, and
+7.65 govern actual against labeled alcohol content, and this tool compares two
+declared values, so no tolerance applies. The variable exists so the position can
+change without a code change if a compliance agent states otherwise. See A-12 in
+[ASSUMPTIONS.md](ASSUMPTIONS.md).
 
 In deployed environments these are supplied by the ECS task definition. Secrets,
 if any are ever introduced, come from AWS Secrets Manager by reference and never
@@ -247,17 +255,25 @@ doing so from anything other than a real run output would be a guess.
 Only English language data is installed, per the build instruction not to add
 OCR models beyond English.
 
-## 9. Portability to AWS GovCloud (US)
+## 9. Portability to a FedRAMP-authorized government region
 
-The agency's intended production environment is AWS GovCloud (US); this
-assignment deploys to AWS commercial `us-east-1`.
-[Source: Decision D-1; Decision D-11]
+**Decision D-11: Target environment.** The agency states it is on Azure
+(Marcus Williams interview). This prototype deploys to AWS commercial
+`us-east-1` by the author's choice, for delivery speed on the platform the
+author knows best, which the assignment permits. The architecture is
+container-first and cloud-portable by design; a production deployment would
+target the agency's platform, presumed to be Azure Government, and that would be
+a deployment change rather than a redesign. FedRAMP status of any target service
+is confirmed against the FedRAMP Marketplace at deployment time, not asserted
+here. [Source: Decision D-1; Decision D-11;
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 1]
 
-The architecture holds that path open by construction:
+The architecture holds both paths open by construction:
 
-- **Partition independence.** GovCloud uses the `aws-us-gov` ARN partition. No
-  ARN, region, or account identifier is hardcoded; they are derived from
-  Terraform data sources (NFR-10).
+- **Partition independence.** AWS GovCloud (US) uses the `aws-us-gov` ARN
+  partition. No ARN, region, or account identifier is hardcoded; they are
+  derived from Terraform data sources (NFR-10).
 - **Service selection.** The runtime uses ECR, ECS on Fargate, an Application
   Load Balancer, IAM, and CloudWatch Logs. App Runner was excluded partly for
   this reason; see [ADR 0002](adr/0002-compute-ecs-fargate-not-app-runner.md).
@@ -266,13 +282,19 @@ The architecture holds that path open by construction:
   a restricted network, which is the environment Marcus describes.
   [Source: Marcus Williams interview]
 - **The optional Bedrock fallback is the one portability risk.** Model
-  availability differs between commercial regions and GovCloud. Because the
-  fallback is off by default and is not on the committed path, it cannot block a
-  GovCloud deployment. Availability must be confirmed before it is relied on
-  anywhere.
+  availability differs between commercial regions and government regions, and
+  Bedrock has no equivalent on Azure. Because the fallback is off by default and
+  is not on the committed path, it cannot block a deployment to either target.
+  Availability must be confirmed before it is relied on anywhere.
+- **A move to Azure is a deployment change, not a redesign.** ECS on Fargate
+  maps to Azure Container Apps or AKS running the same image. The infrastructure
+  code is the part that does not transfer: Terraform would need an Azure
+  provider module before a pilot. See
+  [ADR 0001](adr/0001-cloud-platform-aws.md).
 
-Service availability in GovCloud and FedRAMP in-scope status are **not asserted
-here**. They must be confirmed against AWS documentation at deployment time; see
+Service availability and FedRAMP in-scope status, in AWS GovCloud (US) or in
+Azure Government, are **not asserted here**. They must be confirmed against the
+FedRAMP Marketplace and the provider's documentation at deployment time; see
 [06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md).
 
 ## 10. Current implementation status

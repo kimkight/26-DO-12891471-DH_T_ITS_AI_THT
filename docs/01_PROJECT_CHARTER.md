@@ -131,7 +131,7 @@ Only criteria stated in the assignment are listed. Each is testable.
 | C-3 | No sensitive data is stored. "We're not storing anything sensitive for this exercise." | Marcus Williams interview |
 | C-4 | The exercise is time constrained. "A working core application with clean code is preferred over ambitious but incomplete features." | Technical Requirements |
 | C-5 | Results must return in about 5 seconds or the tool will not be adopted. | Sarah Chen interview |
-| C-6 | The intended production environment is AWS GovCloud (US); this assignment deploys to AWS commercial `us-east-1`. The build must not foreclose the GovCloud path. | Decision D-11 |
+| C-6 | The agency states it is on Azure; this prototype deploys to AWS commercial `us-east-1` by the author's choice. The build must stay cloud-portable, so a production deployment to the agency's platform is a deployment change rather than a redesign. | Decision D-11 |
 
 ## 6. Deliverables
 
@@ -156,17 +156,25 @@ Exactly the six the assignment lists. [Source: Evaluation Criteria]
 
 ## 8. Target environment
 
-The prototype deploys to **AWS commercial `us-east-1`**. The agency's intended
-production environment is **AWS GovCloud (US)**. The infrastructure code is
-written so that the same modules target GovCloud without redesign: no hardcoded
-partition, region, or account identifiers, and no dependency on a service absent
-from GovCloud. [Source: Decision D-1; Decision D-11]
+**Decision D-11: Target environment.** The agency states it is on Azure
+(Marcus Williams interview). This prototype deploys to AWS commercial
+`us-east-1` by the author's choice, for delivery speed on the platform the
+author knows best, which the assignment permits. The architecture is
+container-first and cloud-portable by design; a production deployment would
+target the agency's platform, presumed to be Azure Government, and that would be
+a deployment change rather than a redesign. FedRAMP status of any target service
+is confirmed against the FedRAMP Marketplace at deployment time, not asserted
+here. [Source: Decision D-1; Decision D-11;
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 1]
 
-Marcus notes the agency is "on Azure now after the migration in 2019."
-[Source: Marcus Williams interview] The prototype nonetheless targets AWS per
-Decision D-1. Nothing in this assignment states which cloud the eventual
-production system would use, and no inference is drawn here; the discrepancy is
-recorded as OQ-1 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+Marcus's statement is the only source on the agency's platform: "We're on Azure
+now after the migration in 2019." [Source: Marcus Williams interview] The
+rationale for building on AWS anyway, and the public Treasury evidence bearing
+on it, is recorded in [ADR 0001](adr/0001-cloud-platform-aws.md) under "Why not
+Azure, given the agency runs Azure". OQ-1 in
+[OPEN_QUESTIONS.md](OPEN_QUESTIONS.md) is answered by that ADR as the author's
+decision, not as a stakeholder answer.
 
 ## 9. Out of scope for the charter
 

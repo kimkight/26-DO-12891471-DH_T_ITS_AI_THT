@@ -193,9 +193,45 @@ strings.
 - Given a numeric field that cannot be parsed as a number, then the system falls
   back to text comparison and says so, rather than reporting a false mismatch.
 
-The tolerance band for near-miss numeric values, and the handling of unit
-conversion such as `750 mL` against `25.4 fl oz`, are unresolved; see OQ-4 and
-OQ-5 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+**Alcohol content (Assumption A-12).** The two declared values must be
+numerically identical. The regulatory tolerances in 27 CFR 5.65, 4.36, and 7.65
+govern actual against labeled alcohol content, which is a laboratory question,
+and do not apply to a comparison of two values the applicant declared.
+
+- Both values are normalized before comparison: "%", "Alc./Vol.", "ABV",
+  "alc. by vol.", whitespace, and trailing zeros are stripped, so
+  `45% Alc./Vol.`, `45.0%`, and `45` are the same number.
+- Given a label that also states proof, then proof is cross-checked against
+  2 x ABV (27 CFR 5.65 defines proof this way for spirits). Given a proof value
+  that does not equal twice the ABV, then the outcome is needs human review with
+  both numbers shown, because it indicates an internal inconsistency on the
+  label itself.
+- Given two normalized ABV numbers that are equal, then the outcome is match.
+- Given normalized ABV numbers that differ by any nonzero amount, then the
+  outcome is mismatch, with both values and the difference shown. No tolerance
+  band is applied; `TTB_ABV_TOLERANCE` defaults to `0.0`.
+- Given an ABV value on either side that cannot be parsed as a number, then the
+  outcome is needs human review, with the raw strings shown, falling back to
+  text comparison as above.
+- Given a label stating a range (for example "12 to 14% alc/vol", permitted for
+  wine under 27 CFR 4.36) and an application stating a single value, then the
+  outcome is needs human review. The prototype does not evaluate range
+  semantics.
+
+**Net contents (Assumption A-13).** Values are compared numerically only when
+units match after normalization (`mL`/`ml`/`milliliters`, `L`/`liters`,
+`fl oz`/`fl. oz.`).
+
+- Given two values in matching units, then they are compared numerically.
+- Given two values in different units, for example `750 mL` against
+  `25.4 fl oz`, then the outcome is needs human review and no conversion is
+  performed.
+- Standards of fill are not validated.
+
+OQ-4 and OQ-5 are closed by assumptions A-12 and A-13 in
+[ASSUMPTIONS.md](ASSUMPTIONS.md); the reasoning and the eCFR citations are in
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 2.
 
 ### FR-8 Batch verification
 
@@ -396,12 +432,18 @@ Uploads are validated before processing.
 - The image exposes `GET /api/health` for load balancer health checks.
 - The same image runs locally under docker-compose and on ECS with Fargate.
 
-### NFR-10 Portability to AWS GovCloud (US)
+### NFR-10 Portability to a FedRAMP-authorized government region (AWS GovCloud or Azure Government)
 
 **Priority:** Should
 **Source:** Decision D-11
 
-Infrastructure code targets GovCloud without redesign.
+Infrastructure code targets a FedRAMP-authorized government region without
+redesign. Decision D-11 presumes the agency's platform, Azure per the interview,
+as the eventual production target; moving there runs the same container image
+and needs an Azure provider module for the Terraform. See
+[ADR 0001](adr/0001-cloud-platform-aws.md) and
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 1.
 
 **Acceptance criteria**
 - No hardcoded partition, region, or account identifier in infrastructure code.

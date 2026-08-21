@@ -16,8 +16,8 @@ and the built frontend assets, and needs a public URL reviewers can test.
 Two constraints narrow the field. The workload is CPU bound: local OCR runs
 inside the container on every request (Decision D-4), and the 5-second response
 target is the binding requirement. [Source: Sarah Chen interview] And the
-intended production environment is AWS GovCloud (US), where a service that does
-not exist is not an option. [Source: Decision D-11]
+intended production environment is a FedRAMP-authorized government region,
+where a service that does not exist is not an option. [Source: Decision D-11]
 
 Federal deployment adds a gate that commercial deployment does not: a service
 that is not on the AWS FedRAMP services-in-scope list creates an authorization
@@ -89,7 +89,7 @@ about known execution models, not about benchmark results.
 - The ALB provides TLS termination and a health check target, which the
   container already exposes at `GET /api/health`.
 - ECS, ECR, ELB, IAM, and CloudWatch are long-established AWS services, which
-  supports the GovCloud portability goal (NFR-10).
+  supports the government-region portability goal (NFR-10).
 - Task CPU and memory are configurable, which matters for a CPU-bound OCR
   workload under a latency target.
 

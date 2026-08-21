@@ -177,6 +177,11 @@ against a deployed build before the prototype is presented.
 | 15 | Inspect the warning result wording | It does not state or imply that bold type was checked | OOS-4; FR-6 |
 | 16 | Run a verification with egress blocked | Completes successfully | Marcus Williams interview; NFR-3 |
 | 17 | Inspect logs after a verification | No image content and no extracted field values | NFR-6 |
+| 18 | Alcohol content `45` against application `45.0%` | Match | FR-7; A-12 |
+| 19 | Alcohol content `45` against application `45.1` | Mismatch, with both values and the difference shown. **A match or a needs-human-review outcome is a failure of this test.** | FR-7; A-12 |
+| 20 | Label stating `45% Alc./Vol. (90 Proof)` against application `45` | Proof cross-check passes, because 90 equals 2 x 45; the alcohol content outcome is match | FR-7; A-12; 27 CFR 5.65 |
+| 21 | Label stating `45% Alc./Vol. (92 Proof)` against application `45` | Needs human review, with both numbers shown, because 92 does not equal 2 x 45 | FR-7; A-12; 27 CFR 5.65 |
+| 22 | Net contents `750 mL` against application `25.4 fl oz` | Needs human review. **No conversion is performed and no match is reported.** | FR-7; A-13 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.

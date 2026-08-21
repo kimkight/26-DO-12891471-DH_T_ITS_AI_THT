@@ -8,7 +8,10 @@ architecture and deployment documents have something concrete to reference.
 
 Terraform, targeting AWS commercial `us-east-1` for the prototype and written so
 that the same modules apply to AWS GovCloud (US) without redesign
-(Decisions D-1 and D-11).
+(Decisions D-1 and D-11). Decision D-11 presumes the agency's platform, Azure
+per the interview, as the eventual production target; the Terraform here does
+not cover that path and would need an Azure provider module before a pilot. See
+[docs/adr/0001-cloud-platform-aws.md](../docs/adr/0001-cloud-platform-aws.md).
 
 | Resource | Purpose |
 | --- | --- |
@@ -21,10 +24,10 @@ that the same modules apply to AWS GovCloud (US) without redesign
 | Amazon CloudWatch log group | Container logs, with a retention period set explicitly. |
 | Security groups | Load balancer accepts inbound HTTPS; tasks accept traffic only from the load balancer. |
 
-## Portability constraints for GovCloud
+## Portability constraints for a government region
 
-These are the rules the modules must follow so the GovCloud target needs no
-redesign. They are constraints on how the Terraform is written, not claims
+These are the rules the modules must follow so an AWS GovCloud (US) target needs
+no redesign. They are constraints on how the Terraform is written, not claims
 about what has been tested.
 
 - No hardcoded region, partition, or account identifiers. Derive ARNs from
