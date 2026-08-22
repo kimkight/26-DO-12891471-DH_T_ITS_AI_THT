@@ -7,7 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
+  with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
+  releases are therefore created through the GitHub Releases web interface.
+  v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
+- A header on `docs/cloud_choice_and_abv_assumption.md` marking it as the source
+  record for ADR 0001, A-12, and A-13, and as not maintained going forward.
+
+### Changed
+
+- OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
+  2026-08-21: pull request required, the `ci` status check required, approvals
+  not required, force pushes and deletions blocked. GitHub shows them as "Not
+  enforced" because the repository is private on a Free plan.
+- OQ-14 closed. The Project board "TTB Label Verifier" exists at
+  <https://github.com/users/kimkight/projects/1>, a user-owned project linked to
+  this repository, with issues #1 to #21 in Backlog.
+- OQ-17 closed. `develop` is now the repository's default branch.
+- OQ-15 updated with the root cause of the package-manager denials: the cloud
+  environment was at the Custom network level without the default package
+  manager list included, so PyPI, npm, and the apt archives were denied with
+  `host_not_allowed` even though they appear in `no_proxy`. Being in `no_proxy`
+  is not an allowlist entry. The environment fix is recorded; the question stays
+  open until a preflight from a new session confirms it.
+- `docs/08_SDLC_PROCESS.md` section 7 now states that tags are created through
+  GitHub Releases from `main` rather than pushed from a session, and why.
 
 ## [0.1.0] - 2026-08-22
 
