@@ -135,9 +135,10 @@ current releases.
 
 Floors are the right answer for security but the wrong answer for
 reproducibility: two builds a week apart can now resolve different versions.
-Closing this question properly means generating real lockfiles for both
-ecosystems, committing them, and switching CI and the Dockerfile to
-`npm ci` and to installing from a locked requirements file.
+Closing this question properly therefore meant generating real lock files for
+both ecosystems, committing them, and switching CI and the Dockerfile to
+`npm ci` and to installing from a locked requirements file. That is what was
+done.
 
 **How it was closed.** npm is the package manager, because the frontend was
 scaffolded with npm and nothing in the assignment or the recorded decisions asks
@@ -166,6 +167,21 @@ Consuming the lock files:
   `pip install --require-hashes -r requirements.lock`, so every artifact in the
   image is verified against the digest recorded at resolution time.
 - The comments in both files that marked the switch as pending are removed.
+
+**Confirmed by CI**, run 32597623435 on the pull request that closes this
+question:
+
+- `backend lint and test` green. `pip install -r requirements.lock` installed
+  all 61 pinned packages, with hash checking enforced automatically because
+  every entry carries hashes, and the test suite ran against them.
+- `dependency audit`, Python half green:
+  `pip-audit -r backend/requirements.lock --no-deps` reported **"No known
+  vulnerabilities found"** without installing anything.
+
+The Docker half of the backend install,
+`pip install --require-hashes -r requirements.lock`, has **not** been exercised
+yet. The container build fails one stage earlier, at `npm ci`, so that layer was
+cancelled before it ran. See the defect below.
 
 Regeneration is documented in [CONTRIBUTING.md](../CONTRIBUTING.md), section
 "Regenerating lock files", with the rule that a lock file is regenerated and
