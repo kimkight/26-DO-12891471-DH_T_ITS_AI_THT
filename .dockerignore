@@ -1,0 +1,16 @@
+**/.git
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+docs
+infra
+samples
+.github
+*.md
+.env
+.env.*
+!.env.example
