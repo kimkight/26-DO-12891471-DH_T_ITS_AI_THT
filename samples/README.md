@@ -21,6 +21,37 @@ blocked until the sample set is built.
 columns are `image_filename`, `brand_name`, `class_type`, `alcohol_content`,
 `net_contents`, `government_warning_present`, and `notes`.
 
+## Batch application data CSV
+
+`applications/` holds the comparison side of a test case. For batch submissions
+(FR-8), application data is one CSV keyed by image filename, per
+[ADR 0006](../docs/adr/0006-batch-execution-model.md). The contract:
+
+| Column | Meaning |
+| --- | --- |
+| `filename` | Must match the filename of one submitted image part |
+| `brand_name` | Application brand name, compared per FR-4 |
+| `class_type` | Application class or type designation |
+| `alcohol_content` | Application ABV, compared per FR-7 and A-12 |
+| `net_contents` | Application net contents, compared per FR-7 and A-13 |
+| `beverage_type` | Distilled spirits, wine, or malt beverage |
+
+Example:
+
+```csv
+filename,brand_name,class_type,alcohol_content,net_contents,beverage_type
+stones-throw-bourbon.png,Stone's Throw,Kentucky Straight Bourbon Whiskey,45%,750 mL,distilled spirits
+```
+
+**Two files, two purposes.** `expected.csv` is ground truth: what the tool
+should extract from the artwork, used to score accuracy. The batch CSV is
+input: what the applicant claims, which the tool compares the artwork against.
+They overlap in columns and must not be conflated. `expected.csv` keys on
+`image_filename`; the batch CSV keys on `filename`, matching the API contract.
+
+This format is assumed rather than stated by any source, and is recorded as A-14
+in [docs/ASSUMPTIONS.md](../docs/ASSUMPTIONS.md).
+
 ## Why images are git-ignored
 
 `samples/images/` is listed in `.gitignore`. Label artwork can carry third-party

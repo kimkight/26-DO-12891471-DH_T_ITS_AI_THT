@@ -249,6 +249,31 @@ return per-label, per-field results.
 - Given a batch exceeding the configured file-count limit, then the request is
   rejected with a message naming the limit, before any file is processed.
 - The result identifies which label each result belongs to.
+- Given a batch submission, then it is one multipart request carrying the image
+  files plus one CSV of application data keyed by image filename, and results
+  stream back as newline-delimited JSON so progress is visible while the batch
+  runs. See [ADR 0006](adr/0006-batch-execution-model.md).
+- Given a CSV row whose `filename` matches no submitted image, or an image with
+  no matching CSV row, then that item reports an error on its own result line
+  and the rest of the batch still returns results.
+
+**Application data CSV contract.** `(Assumption)` A-14. One header row, one row
+per image:
+
+| Column | Meaning |
+| --- | --- |
+| `filename` | Must match the filename of one submitted image part |
+| `brand_name` | Application brand name, compared per FR-4 |
+| `class_type` | Application class or type designation |
+| `alcohol_content` | Application ABV, compared per FR-7 and A-12 |
+| `net_contents` | Application net contents, compared per FR-7 and A-13 |
+| `beverage_type` | Distilled spirits, wine, or malt beverage |
+
+`beverage_type` is present because A-12 and A-13 need it: the proof cross-check
+applies to distilled spirits, and range handling for wine cites 27 CFR 4.36.
+Without the beverage class the tool would have to guess which rule applies. No
+source states this format; it is assumed and recorded as A-14 in
+[ASSUMPTIONS.md](ASSUMPTIONS.md).
 
 Sarah's case: "we get these big importers who dump 200, 300 label applications
 on us at once. Right now we literally have to process them one at a time."
