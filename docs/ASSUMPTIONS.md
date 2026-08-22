@@ -24,6 +24,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-11](#a-11) | English-only OCR is sufficient | FR-1 | Low |
 | [A-12](#a-12) | Alcohol content must be numerically identical; no tolerance band | FR-7 | Medium |
 | [A-13](#a-13) | Net contents compared only when units match; no conversion | FR-7 | Low |
+| [A-14](#a-14) | Batch application data arrives as one CSV keyed by image filename | FR-8, US-9 | Medium |
 
 ---
 
@@ -260,3 +261,43 @@ possible, which costs agent time only.
 **Traceability:** Source: FR-7; Decision D-5;
 [cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
 section 2. Marks OQ-5 as closed by assumption A-13.
+
+## A-14
+**Batch application data arrives as one CSV keyed by image filename, with the
+columns `filename`, `brand_name`, `class_type`, `alcohol_content`,
+`net_contents`, and `beverage_type`.**
+
+FR-8 requires batch submission of labels "with their application data" but no
+source states the format. For a single label the agent types the values (A-8);
+for 300 labels that is not plausible. Sarah Chen names the volume, "200, 300
+label applications... at once," and Janet in the Seattle office as the original
+requester, but neither is quoted on how the data would arrive.
+[Source: Sarah Chen interview]
+
+Two things make a CSV keyed by filename the least invented option available:
+
+- The repository already uses that shape. `samples/expected.csv` keys ground
+  truth on image filename for the accuracy tier, so the batch input mirrors a
+  convention the test strategy already committed to.
+- Filename is the only identifier that exists on both sides of the submission.
+  There is no application number in the extracted fields (FR-1), no persistence
+  to hold a mapping (D-9), and no authentication to scope one (OOS-2).
+
+`beverage_type` is in the column set because A-12 and A-13 depend on it: the
+proof cross-check applies to distilled spirits, and range handling for wine
+cites 27 CFR 4.36. Without the beverage class the tool would have to infer which
+rule applies, and inference is the failure mode A-12 exists to prevent. That
+column is the one part of this assumption that adds a field the agent would not
+otherwise supply, so it is the part most likely to be wrong.
+
+Recorded in the FR-8 acceptance criteria in
+[03_REQUIREMENTS.md](03_REQUIREMENTS.md), in
+[ADR 0006](adr/0006-batch-execution-model.md), and in
+[samples/README.md](../samples/README.md).
+
+**Confirmed or falsified by:** asking Sarah Chen or Janet what an importer
+actually sends today, or whether COLAs Online exports application data in a
+fixed layout. If it does, that layout wins and this assumption is discarded.
+**Risk if wrong:** medium. It is one input adapter, and the verification core
+does not depend on the format, so the blast radius is a parser and a document.
+The cost of being wrong is rework on FR-8 and US-9 rather than a redesign.

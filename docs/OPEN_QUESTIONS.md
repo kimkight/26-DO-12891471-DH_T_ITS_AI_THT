@@ -15,7 +15,7 @@ updates every artifact the answer affects.
 | [OQ-3](#oq-3) | Open | Reproducible frontend builds; `npm ci` in CI and Docker |
 | [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
-| [OQ-6](#oq-6) | Open | Batch design (FR-8, NFR-2) |
+| [OQ-6](#oq-6) | Closed by ADR 0006 | Nothing; the execution model is decided |
 | [OQ-7](#oq-7) | Open | Accessibility acceptance (NFR-5) |
 | [OQ-8](#oq-8) | Open | Accuracy acceptance (US-21) |
 | [OQ-9](#oq-9) | Open | Matching threshold defaults (FR-3) |
@@ -25,7 +25,7 @@ updates every artifact the answer affects.
 | [OQ-13](#oq-13) | Open | Deployment (a later task) |
 | [OQ-14](#oq-14) | Open | Nothing; a manual step for the repository owner |
 | [OQ-15](#oq-15) | Open | Local verification of the build in this environment |
-| [OQ-16](#oq-16) | Open | Batch UI design (US-9) |
+| [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
 | [OQ-17](#oq-17) | Open | Setting `develop` as the default branch |
 
 ---
@@ -197,6 +197,35 @@ be validated.
 ## OQ-6
 **Is there a latency target for a batch, and does a batch need an asynchronous
 job model?**
+
+**Status: Closed by [ADR 0006](adr/0006-batch-execution-model.md).**
+
+Two questions, two different answers.
+
+**Is there a latency target for a batch? No, and one is not invented here.** No
+source states one, and this question is the record that it was asked rather than
+assumed. ADR 0006 therefore optimizes for the two properties NFR-2 does state,
+which are that completed work is not discarded and that progress is visible,
+rather than for a completion time nobody has specified.
+
+**Does a batch need an asynchronous job model? No, and it cannot have one.**
+Batch verification is a single synchronous multipart request carrying up to
+`TTB_MAX_BATCH_FILES` images plus one CSV, processed concurrently by a bounded
+worker pool, streaming per-label results as newline-delimited JSON. There is no
+job store, because a job identifier that outlives the request implies stored
+state and Decision D-9 forbids persistence.
+
+The accepted cost is stated plainly in the ADR: a dropped connection loses the
+batch, because the response stream is the only copy of the results. An
+asynchronous job model with a results store is the right production design and
+is recorded in ADR 0006 as the expected successor once persistence and
+authentication exist.
+
+**What would reopen it:** Sarah Chen or Janet stating an actual completion-time
+expectation for a batch, or persistence being permitted, either of which changes
+the trade the ADR makes.
+
+The original record follows.
 
 NFR-1 sets about 5 seconds for a single label, from Sarah Chen. Nothing states a
 target for a batch of 300. At 5 seconds each, sequential processing of 300
@@ -421,6 +450,34 @@ does not currently match that intent.
 
 ## OQ-16
 **How is application data supplied for a batch?**
+
+**Status: Closed by [ADR 0006](adr/0006-batch-execution-model.md) and assumption
+[A-14](ASSUMPTIONS.md#a-14).** Answer: one CSV keyed by image filename,
+submitted as a part of the same multipart request as the images, with the
+columns `filename`, `brand_name`, `class_type`, `alcohol_content`,
+`net_contents`, and `beverage_type`.
+
+**This is an assumption, not a stakeholder answer**, and it is marked
+`(Assumption)` wherever it appears. The observation this question already
+recorded, that `samples/expected.csv` keys on image filename and so a CSV would
+be a natural fit, is what the decision rests on, together with the fact that
+filename is the only identifier present on both sides of a submission: there is
+no application number among the extracted fields, no persistence to hold a
+mapping, and no authentication to scope one.
+
+`beverage_type` is the one column that adds a field an agent would not otherwise
+supply. It is there because A-12 and A-13 need the beverage class to know which
+rule applies, and it is the part of A-14 most likely to be wrong.
+
+The contract is stated in the FR-8 acceptance criteria in
+[03_REQUIREMENTS.md](03_REQUIREMENTS.md), in ADR 0006, and in
+[samples/README.md](../samples/README.md).
+
+**What would reopen it:** Sarah Chen or Janet describing what importers actually
+send, or COLAs Online turning out to export application data in a fixed layout.
+Either supersedes A-14, and the cost is one input adapter.
+
+The original record follows.
 
 FR-8 requires batch submission of labels with their application data. For a
 single label the agent types the field values. For 300 labels that is not

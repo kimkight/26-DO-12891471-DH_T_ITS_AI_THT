@@ -24,10 +24,10 @@ gap register, not decoration.
 | 9b | Net contents in different units are not converted; standards of fill are not validated. | FR-7; A-13 | FR-7; A-13 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | Not written; UAT row 22 | |
 | 10 | "if an agent can't read the label they just reject it and ask for a better image." | Jenny Park | FR-9 | US-7 | [#7](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/7) | Not written; UAT row 6 | |
 | 11 | "If we can't get results back in about 5 seconds, nobody's going to use it. We learned that the hard way." | Sarah Chen | NFR-1 | US-8 | [#8](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/8) | Not written; UAT row 11 | [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
-| 12 | "big importers who dump 200, 300 label applications on us at once... we literally have to process them one at a time." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written; UAT row 9 | |
-| 13 | "Janet from our Seattle office has been asking about this for years." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written | |
-| 14 | Batch resilience implied by the 300-label scenario | Sarah Chen | FR-8, FR-9 | US-10 | [#10](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/10) | Not written; UAT row 10 | |
-| 15 | Batch scale implies visible progress | Sarah Chen | NFR-2 | US-11 | [#11](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/11) | Not written | |
+| 12 | "big importers who dump 200, 300 label applications on us at once... we literally have to process them one at a time." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written; UAT row 9 | [0006](adr/0006-batch-execution-model.md) |
+| 13 | "Janet from our Seattle office has been asking about this for years." | Sarah Chen | FR-8; A-14 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written | [0006](adr/0006-batch-execution-model.md) |
+| 14 | Batch resilience implied by the 300-label scenario | Sarah Chen | FR-8, FR-9 | US-10 | [#10](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/10) | Not written; UAT row 10 | [0006](adr/0006-batch-execution-model.md) |
+| 15 | Batch scale implies visible progress | Sarah Chen | NFR-2 | US-11 | [#11](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/11) | Not written | [0006](adr/0006-batch-execution-model.md) |
 | 16 | "We need something my mother could figure out; she's 73..." and "Clean, obvious, no hunting for buttons." | Sarah Chen | NFR-4 | US-12 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12) | Not written; UAT row 14 | |
 | 17 | "The agents really vary in their tech comfort level... half our team is over 50." | Sarah Chen | NFR-4, NFR-5 | US-12, US-13 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#13](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/13) | Not written; UAT rows 12, 13 | |
 | 18 | "our network blocks outbound traffic to a lot of domains... half their features didn't work because our firewall blocked connections to their ML endpoints." | Marcus Williams | NFR-3 | US-14 | [#14](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/14) | Not written; UAT row 16 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
@@ -56,11 +56,11 @@ Every requirement maps to at least one story. No orphans.
 | FR-5 Warning exact text | US-4 | #4 | No | No |
 | FR-6 Warning capitalization | US-5 | #5 | No | No |
 | FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | No | No |
-| FR-8 Batch verification | US-9, US-10 | #9, #10 | No | No |
+| FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | No: designed in ADR 0006, not built | No |
 | FR-9 Error handling | US-7, US-10 | #7, #10 | No | No |
 | FR-10 Result presentation | US-2 | #2 | No | No |
 | NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | No | No |
-| NFR-2 Batch throughput | US-11 | #11 | No | No |
+| NFR-2 Batch throughput | US-11 | #11 | No: designed in ADR 0006, not built | No |
 | NFR-3 No outbound calls | US-14 | #14 | Partial: default is off in config | No |
 | NFR-4 Simplicity | US-12 | #12 | No | No |
 | NFR-5 Accessibility | US-13 | #13 | No | No |
@@ -82,7 +82,7 @@ Every requirement maps to at least one story. No orphans.
 | Requirements with an automated test | 1 of 21 (NFR-8, by CI itself) |
 | User stories | 21 |
 | Stories with acceptance criteria | 21 of 21 |
-| ADRs | 5 |
+| ADRs | 6 |
 
 The gap between "traced" and "tested" is the honest state of this repository:
 requirements and stories are complete, implementation is not started, and the
@@ -92,12 +92,19 @@ test suite covers only the health endpoint.
 
 | Open question | Blocks |
 | --- | --- |
-| OQ-6 batch latency and job model | FR-8, NFR-2, US-9, US-11 |
 | OQ-7 Section 508 applicability | NFR-5 acceptance, US-13 |
 | OQ-8 accuracy target | US-21 acceptance |
 | OQ-9 threshold defaults | FR-3 tuning |
 | OQ-13 deployment details | NFR-9, US-17 |
-| OQ-16 batch application data format | FR-8, US-9 |
+
+OQ-6 and OQ-16 no longer appear in this table. Both are closed by
+[ADR 0006](adr/0006-batch-execution-model.md): OQ-6 by the decision that batch
+verification is a single synchronous streaming request with a bounded worker
+pool and no job store, and OQ-16 by the CSV contract recorded as assumption
+A-14. Note what OQ-6 could not be given: no source states a batch latency
+target, so the ADR optimizes for the properties NFR-2 does state, which are not
+losing completed work and showing visible progress. OQ-13 item 6, ECS task
+sizing, is still open and interacts with the streaming design.
 
 OQ-4 and OQ-5 no longer appear in this table. They are closed by assumptions
 A-12 and A-13 in [ASSUMPTIONS.md](ASSUMPTIONS.md), and the rules they settle are
