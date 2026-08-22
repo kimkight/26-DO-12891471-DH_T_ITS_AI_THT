@@ -6,7 +6,7 @@
 # Base images are pinned by digest at release time. See
 # docs/06_SECURITY_AND_COMPLIANCE.md; the TODO below tracks that step.
 # TODO: pin both base images by sha256 digest before the first tagged release.
-FROM node:22-bookworm-slim AS frontend-build
+FROM node:26-bookworm-slim AS frontend-build
 
 WORKDIR /build
 
