@@ -1,5 +1,11 @@
 # Cloud platform choice and the ABV tolerance assumption
 
+> **Source record, not maintained.** This is the working note that ADR 0001,
+> assumption A-12, and assumption A-13 were derived from. It is kept because
+> those artifacts cite it as their source. It is not updated going forward; the
+> maintained statements live in [adr/0001-cloud-platform-aws.md](adr/0001-cloud-platform-aws.md)
+> and [ASSUMPTIONS.md](ASSUMPTIONS.md).
+
 ## 1. Why AWS, when Marcus said Azure
 
 The honest record: when we planned this on 2026-08-20, I recommended Azure specifically because Marcus said TTB migrated to Azure in 2019, and you chose AWS because it is the platform you are most comfortable building and defending in an interview. That is a legitimate reason for a one-week take-home, but it is not what the repository currently says. Decision D-11 states that "the agency's intended production environment is AWS GovCloud (US)." No source supports that; Marcus's interview says Azure. D-11 as written is the one place in the repo where something was asserted rather than sourced, and it was my drafting error, not Claude Code's.
