@@ -168,8 +168,8 @@ Consuming the lock files:
   image is verified against the digest recorded at resolution time.
 - The comments in both files that marked the switch as pending are removed.
 
-**Confirmed by CI**, run 32597623435 on the pull request that closes this
-question:
+**Confirmed by CI**, run 32597427155 on the pull request that closes this
+question, and again on run 32597717569:
 
 - `backend lint and test` green. `pip install -r requirements.lock` installed
   all 61 pinned packages, with hash checking enforced automatically because
