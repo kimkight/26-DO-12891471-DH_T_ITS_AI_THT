@@ -28,18 +28,25 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/requirements.lock
+          cache-dependency-path: backend/requirements-dev.lock
 
-      # requirements.lock is the resolved, hash-pinned set for the ocr,
-      # matching and dev extras. It is installed first and on its own, so the
-      # hashes are enforced. The project itself is then installed editable with
+      # This job lints and tests, so it needs the dev lock file:
+      # requirements.lock carries the ocr and matching extras only, and has no
+      # pytest or ruff in it. requirements-dev.lock is the same resolution plus
+      # the dev extra, so the tools are the ones the runtime set resolved
+      # against rather than whatever pip would pick alongside them.
+      #
+      # --require-hashes is explicit rather than left to pip's automatic
+      # detection, so a lock file that lost its hashes fails here instead of
+      # silently installing unverified wheels. The project itself follows with
       # --no-deps, which registers `app` on the path without letting pip
       # re-resolve anything the lock file already decided.
+      #
       # Paths are relative to backend/ (the job's working directory).
-      - name: Install backend from the lock file
+      - name: Install backend from the dev lock file
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.lock
+          pip install --require-hashes -r requirements-dev.lock
           pip install --no-deps -e .
 
       - name: Lint (ruff)
@@ -99,17 +106,27 @@ jobs:
         with:
           node-version: "22"
 
-      # The lock file is audited directly rather than by scanning an installed
-      # environment. --no-deps is what makes that sound: it tells pip-audit to
-      # audit exactly the versions written in the file and to refuse to resolve
-      # anything further, which is only valid because requirements.lock is
-      # fully pinned. Nothing is installed, so nothing outside the lock file
-      # can dilute or mask the result.
-      - name: Audit Python dependencies (pip-audit)
+      # Both lock files are audited directly rather than by scanning an
+      # installed environment. --no-deps is what makes that sound: it tells
+      # pip-audit to audit exactly the versions written in the file and to
+      # refuse to resolve anything further, which is only valid because both
+      # files are fully pinned. Nothing is installed, so nothing outside the
+      # lock files can dilute or mask the result.
+      #
+      # Both are audited, not just one. requirements.lock is what ships in the
+      # image, so it is the one that matters for the product; but an advisory
+      # against a dev-only tool is still an advisory against something a
+      # contributor runs, and requirements-dev.lock is a superset, so auditing
+      # only the runtime file would leave the dev tools unchecked. Each step
+      # gates independently: a finding in either fails the job.
+      - name: Audit Python runtime dependencies (pip-audit)
         run: |
           python -m pip install --upgrade pip
           pip install pip-audit
           pip-audit -r backend/requirements.lock --no-deps --progress-spinner off
+
+      - name: Audit Python development dependencies (pip-audit)
+        run: pip-audit -r backend/requirements-dev.lock --no-deps --progress-spinner off
 
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend

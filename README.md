@@ -55,7 +55,7 @@ Stop with `docker compose down`.
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.lock
+pip install --require-hashes -r requirements-dev.lock
 pip install --no-deps -e .
 pytest
 uvicorn app.main:app --reload

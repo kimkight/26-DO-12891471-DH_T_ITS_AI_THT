@@ -147,10 +147,18 @@ Both lock files were generated outside a session, because the session egress
 policy still denies PyPI and npm (OQ-15), and committed to
 `feature/lockfiles`:
 
-| File | Generated with | Verified with |
-| --- | --- | --- |
-| `frontend/package-lock.json` | npm 10.9.7 on Node 22.22.2 | `npm audit` clean |
-| `backend/requirements.lock` | pip-compile 7.6.1 on Python 3.11, `--allow-unsafe --strip-extras --generate-hashes`, extras ocr, matching and dev | `pip-audit` clean |
+| File | Contents | Generated with | Verified with |
+| --- | --- | --- | --- |
+| `frontend/package-lock.json` | the resolved npm tree | npm on Node 22 | `npm audit` clean |
+| `backend/requirements.lock` | extras ocr and matching, 27 packages | pip-compile on Python 3.11, `--allow-unsafe --strip-extras --generate-hashes` | `pip-audit` clean |
+| `backend/requirements-dev.lock` | the same plus the dev extra, 61 packages | the same, with `--extra dev` | `pip-audit` clean |
+
+**The Python lock is split in two on purpose.** `requirements.lock` is what the
+Dockerfile installs, so anything in it ships in the image. `pytest`, `ruff`,
+`pip-audit` and `httpx` are contributor tools, not product; a single combined
+lock file put all four in the runtime image, which enlarged it and widened its
+surface for no benefit. The dev file is a strict superset generated from the
+same resolution, so the tooling is the version the runtime set resolved against.
 
 The floors in `backend/pyproject.toml` stay as floors. They record the oldest
 safe version and are raised when an advisory requires it; the lock file records
@@ -159,62 +167,51 @@ would recreate the stale-pin problem described above, so it was not done.
 
 Consuming the lock files:
 
-- CI installs the backend with `pip install -r requirements.lock` followed by
-  `pip install --no-deps -e .`, and the frontend with `npm ci`.
-- `pip-audit` runs as `pip-audit -r backend/requirements.lock --no-deps`, which
-  audits exactly the pinned set rather than an installed environment.
+- The `backend lint and test` job installs
+  `pip install --require-hashes -r requirements-dev.lock` followed by
+  `pip install --no-deps -e .`. It needs the dev file, because the runtime file
+  has no pytest and no ruff in it.
+- The `dependency audit` job audits **both** Python files, in two independently
+  gating steps: `pip-audit -r backend/requirements.lock --no-deps` and
+  `pip-audit -r backend/requirements-dev.lock --no-deps`. The runtime file is
+  what ships, but an advisory against a dev tool is still an advisory against
+  something contributors run.
+- The frontend is installed with `npm ci` everywhere.
 - The Dockerfile uses `npm ci` and
-  `pip install --require-hashes -r requirements.lock`, so every artifact in the
-  image is verified against the digest recorded at resolution time.
+  `pip install --require-hashes -r requirements.lock`, the runtime file only, so
+  every artifact in the image is verified against the digest recorded at
+  resolution time and no test tooling is present.
 - The comments in both files that marked the switch as pending are removed.
 
-**Confirmed by CI**, run 32597427155 on the pull request that closes this
-question, and again on run 32597717569:
-
-- `backend lint and test` green. `pip install -r requirements.lock` installed
-  all 61 pinned packages, with hash checking enforced automatically because
-  every entry carries hashes, and the test suite ran against them.
-- `dependency audit`, Python half green:
-  `pip-audit -r backend/requirements.lock --no-deps` reported **"No known
-  vulnerabilities found"** without installing anything.
-
-The Docker half of the backend install,
-`pip install --require-hashes -r requirements.lock`, has **not** been exercised
-yet. The container build fails one stage earlier, at `npm ci`, so that layer was
-cancelled before it ran. See the defect below.
-
-Regeneration is documented in [CONTRIBUTING.md](../CONTRIBUTING.md), section
-"Regenerating lock files", with the rule that a lock file is regenerated and
-never hand-edited.
-
-**One defect carried in, to fix before merge.** The committed
+**A stale frontend lock file was caught by CI and fixed.** The first version of
 `frontend/package-lock.json` was generated before pull requests #32, #34 and #35
 merged into `develop`, and those three raised devDependency ranges in
-`frontend/package.json`:
+`frontend/package.json`. `npm ci` rejected it, in all three jobs that install
+npm dependencies:
 
-| Package | `package.json` range | Version in the lock file |
-| --- | --- | --- |
-| `globals` | `^17.11.0` | 15.15.0 |
-| `eslint-plugin-react-hooks` | `^7.1.1` | 5.2.0 |
-| `eslint-plugin-react-refresh` | `^0.5.4` | 0.4.26 |
+```
+npm error `npm ci` can only install packages when your package.json and
+package-lock.json or npm-shrinkwrap.json are in sync.
+npm error Invalid: lock file's eslint-plugin-react-hooks@5.2.0 does not satisfy eslint-plugin-react-hooks@7.1.1
+npm error Invalid: lock file's eslint-plugin-react-refresh@0.4.26 does not satisfy eslint-plugin-react-refresh@0.5.4
+npm error Invalid: lock file's globals@15.15.0 does not satisfy globals@17.11.0
+```
 
-`npm ci` refuses to run when the two files disagree, which is the behaviour that
-makes it worth using and is exactly what
-[CONTRIBUTING.md](../CONTRIBUTING.md) now warns about. So the `frontend` and
-`container build and SBOM` jobs fail until the lock file is regenerated with
-`npm install` in `frontend/` against the current `package.json`, in a
-network-enabled environment. It cannot be done from a session while OQ-15 stands,
-and it must not be patched by hand.
+This is worth recording rather than quietly fixing, because it is the failure
+mode the switch introduces and it will recur. It was fixed by regenerating the
+lock file against the current `package.json`, not by patching it: the three
+packages cross a major each, so their transitive trees and integrity hashes
+change, and no correct edit could be written by hand.
 
-`backend/requirements.lock` does not have this problem. Every floor in
-`backend/pyproject.toml` is satisfied by the pinned version, checked entry by
-entry, and no merged pull request has changed those floors since it was
-generated.
+The rule that prevents a repeat is in [CONTRIBUTING.md](../CONTRIBUTING.md):
+any pull request that changes `package.json` or `pyproject.toml` regenerates the
+affected lock file in the same pull request. `npm ci` and `--require-hashes`
+both reject a stale lock rather than working around it, so the cost of
+forgetting is a red pull request, not a subtly different build.
 
 **Who answered:** the repository owner, by generating both lock files in a
 network-enabled environment.
-**Blocks:** nothing as a question. The stale frontend lock file above blocks the
-pull request that closes it.
+**Blocks:** nothing.
 
 ## OQ-4
 **What numeric tolerance applies to alcohol content?**
