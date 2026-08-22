@@ -59,17 +59,23 @@ Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `ci`, `build`,
 # Backend
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,matching]"
+pip install -r requirements.lock
+pip install --no-deps -e .
 ruff check . && ruff format --check . && pytest
 
 # Frontend
 cd frontend
-npm install
+npm ci
 npm run lint && npm run format:check && npm run build
 
 # Everything together
 docker compose up -d --build && curl http://localhost:8000/api/health
 ```
+
+Both installs come from a lock file, so a fresh checkout resolves to the same
+versions CI and the container image use. `pip install --no-deps -e .` registers
+the `app` package without letting pip re-resolve anything the lock file already
+decided.
 
 Install the pre-commit hooks so lint failures surface before a push rather than
 in the pull request:
@@ -78,13 +84,67 @@ in the pull request:
 pip install pre-commit && pre-commit install
 ```
 
+## Regenerating lock files
+
+`backend/requirements.lock` and `frontend/package-lock.json` are generated
+files. **Neither is ever hand-edited.** A hand-edited lock file is a lock file
+that no longer describes a resolution anyone can reproduce, and the hashes in
+`requirements.lock` make an edited entry fail the install rather than fail
+quietly.
+
+The declared dependencies live in `backend/pyproject.toml` and
+`frontend/package.json`. `pyproject.toml` keeps **minimum-version floors, not
+exact pins**: the floors state the oldest version that is safe to use (they are
+raised when an advisory requires it), and the lock file records the exact
+versions that floor resolved to on the day it was generated. Change a floor in
+`pyproject.toml`, then regenerate the lock file; never the other way round.
+
+Regenerate the backend lock file after any change to `pyproject.toml`
+dependencies, on Python 3.11 to match CI and the runtime image:
+
+```bash
+cd backend
+pip install pip-tools
+pip-compile --allow-unsafe --strip-extras --generate-hashes \
+    --extra ocr --extra matching --extra dev \
+    --output-file requirements.lock pyproject.toml
+```
+
+- `--generate-hashes` writes a digest for every artifact, which is what lets the
+  Dockerfile install with `--require-hashes`.
+- `--strip-extras` writes plain package names, because extras markers are not
+  meaningful once the set is fully resolved.
+- `--allow-unsafe` pins the packaging tools (`pip`) that pip-compile otherwise
+  leaves out; leaving them unpinned is the unsafe option, despite the flag name.
+- All three extras are included, so one file covers the container runtime, the
+  test run, and the lint and audit tools.
+
+Regenerate the frontend lock file after any change to `package.json`:
+
+```bash
+cd frontend
+npm install
+```
+
+Then verify before committing:
+
+```bash
+cd backend && pip-audit -r requirements.lock --no-deps
+cd frontend && npm ci && npm audit --audit-level=high
+```
+
+Commit the regenerated lock file in the same pull request as the manifest change
+that caused it. A manifest change without its lock file update will fail CI at
+`npm ci`, which refuses to run when the two disagree.
+
 ## Before opening a pull request
 
 Run what CI runs. One validated push beats three speculative ones.
 
 - `ruff check .` and `ruff format --check .` in `backend/`
 - `pytest` in `backend/`
-- `npm run lint`, `npm run format:check`, and `npm run build` in `frontend/`
+- `npm ci`, `npm run lint`, `npm run format:check`, and `npm run build` in
+  `frontend/`
 - `docker build .` from the repository root
 
 ## Pull requests

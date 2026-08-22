@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `frontend/package-lock.json` (npm 10.9.7, Node 22.22.2) and
+  `backend/requirements.lock` (pip-compile 7.6.1, Python 3.11, generated with
+  `--allow-unsafe --strip-extras --generate-hashes` over the ocr, matching and
+  dev extras). Both were generated outside a session, because the session egress
+  policy still denies PyPI and npm (OQ-15), and both audit clean.
+- A "Regenerating lock files" section in `CONTRIBUTING.md` with the exact
+  regeneration commands and the rule that `backend/pyproject.toml` keeps
+  minimum-version floors while the lock file is regenerated and never
+  hand-edited.
 - OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
   with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
   releases are therefore created through the GitHub Releases web interface.
@@ -18,6 +27,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- OQ-3 closed. Builds now install from the committed lock files rather than
+  resolving afresh. CI installs the backend with `pip install -r
+  requirements.lock` followed by `pip install --no-deps -e .`, and the frontend
+  with `npm ci`. `pip-audit` audits the lock file directly
+  (`pip-audit -r backend/requirements.lock --no-deps`) instead of scanning an
+  installed environment. The Dockerfile uses `npm ci` and
+  `pip install --require-hashes -r requirements.lock`, so every artifact in the
+  image is verified against the digest recorded at resolution time, and the
+  comments marking the switch as pending are removed. The "No frontend
+  lockfile" limitation is removed from the README.
+- Known issue, recorded in OQ-3: `frontend/package-lock.json` was generated
+  before pull requests #32, #34 and #35 raised three devDependency ranges, so
+  `npm ci` rejects it until it is regenerated. `backend/requirements.lock`
+  satisfies every floor in `backend/pyproject.toml`.
+- OQ-15 re-checked from a new session on 2026-08-22 and left open. PyPI and npm
+  still return `403 host_not_allowed`, and Tesseract and a Docker daemon are
+  still absent, so the recorded environment fix has not taken effect for
+  sessions.
 - OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
   2026-08-21: pull request required, the `ci` status check required, approvals
   not required, force pushes and deletions blocked. GitHub shows them as "Not
