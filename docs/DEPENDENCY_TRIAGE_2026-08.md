@@ -3,8 +3,10 @@
 Triage of the twelve Dependabot pull requests opened against `develop` on
 2026-08-22, the first run after the repository was initialized.
 
-**Nothing in this document was merged or closed.** These are recommendations
-for the repository owner. The policy change that follows from them is in
+**Nothing was merged or closed by the triage itself.** The table below is
+recommendations for the repository owner. What was actually done with them, and
+what has happened since, is recorded in "What happened after this triage" near
+the end. The policy change that follows from the triage is in
 [.github/dependabot.yml](../.github/dependabot.yml).
 
 Author: Kimberly D. Kight. Date: 2026-08-22.
