@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-08-22
+
 ### Added
 
 - Repository initialization with Git Flow branching: `main` for releases,
@@ -37,6 +41,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-commit configuration for both ecosystems.
 - GitHub Issues for all twenty-one user stories, with epic, priority, and type
   labels.
+- `docs/cloud_choice_and_abv_assumption.md`, the source document for the cloud
+  platform rationale and the alcohol content and net contents assumptions.
+- Assumption A-12: alcohol content on the label and in the application must be
+  numerically identical, with normalization, a proof equals 2 x ABV cross-check
+  per 27 CFR 5.65, and no tolerance band. The tolerances in 27 CFR 5.65, 4.36,
+  and 7.65 govern actual against labeled content, so none of them applies to two
+  values the applicant declared.
+- Assumption A-13: net contents are compared numerically only when units match
+  after normalization; different units are reported as needs human review with
+  no conversion, and standards of fill are not validated.
+- `TTB_ABV_TOLERANCE`, defaulting to `0.0`, so the A-12 position can change
+  without a code change.
+- Section "Why not Azure, given the agency runs Azure" in ADR 0001, recording
+  why the prototype is built on AWS when the agency states it is on Azure, the
+  public Treasury evidence bearing on it, and the negative consequence that the
+  Terraform would need an Azure provider module before a pilot.
+- Manual UAT rows 18 to 22 covering the A-12 and A-13 rules.
+
+### Changed
+
+- Decision D-11 replaced everywhere it appeared. The previous text asserted that
+  the agency's intended production environment is AWS GovCloud (US); no source
+  supports that, and the Marcus Williams interview says Azure. D-11 now records
+  the agency's stated Azure position, the author's choice of AWS commercial
+  `us-east-1` for delivery speed, the container-first portable design, and
+  FedRAMP status confirmed against the FedRAMP Marketplace at deployment time
+  rather than asserted.
+- NFR-10 retitled to "Portability to a FedRAMP-authorized government region
+  (AWS GovCloud or Azure Government)"; its acceptance criteria are unchanged.
+- FR-7 acceptance criteria extended with the A-12 and A-13 rules.
+- OQ-1 marked as answered by ADR 0001, as the author's decision rather than a
+  stakeholder answer. OQ-4 closed by A-12 and OQ-5 closed by A-13.
 
 ### Known limitations
 
@@ -56,4 +92,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See OQ-3.
 - Container base images are pinned by tag rather than by digest.
 
-[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/commits/develop
+[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v0.1.0...develop
+[0.1.0]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/releases/tag/v0.1.0
