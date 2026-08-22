@@ -59,8 +59,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   6 requires a Vite major. Neither half is mergeable alone, so either half
   proposed on its own can only produce a pull request that gets closed. Removing
   both entries together is what reopens the upgrade.
-- `docs/DEPENDENCY_TRIAGE_2026-08.md` records what happened after the triage was
-  acted on, and states the condition for closing #27
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` triages the second Dependabot run: #43
+  (`typescript` 5.9.3) recommended merge, green and within
+  `typescript-eslint`'s `>=4.8.4 <6.1.0` peer window; #42 (`eslint` 10.8.1) and
+  #44 (`@eslint/js` 10.0.1) recommended for merge only as a single combined
+  change, since `@eslint/js` 10 alone fails `npm install` with ERESOLVE against
+  `eslint` 9 while every plugin in the tree already declares an `eslint` 10 peer
+  range. No ignore entries were added for that pair, because the failure is
+  explained by the split rather than by incompatibility.
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` adds a "lock file interaction" section:
+  from now on a merged bump that changes only a manifest leaves `develop` red,
+  because `npm ci` and `--require-hashes` both reject a stale lock. Dependabot
+  carries the npm lock change on branches cut after the lock file exists; #42,
+  #43 and #44 predate it and need a rebase or a follow-up regeneration, and pip
+  bumps always need a manual regeneration.
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` records what happened after the first
+  triage was acted on, and states the condition for closing #27
   (`aws-actions/configure-aws-credentials` 4 to 6): it stays open until
   `deploy.yml` is enabled. Nothing is wrong with the bump, so closing it would
   discard a valid update and invite Dependabot to reopen it weekly, and ignoring

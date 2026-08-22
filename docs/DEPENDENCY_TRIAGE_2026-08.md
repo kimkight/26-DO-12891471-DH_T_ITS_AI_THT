@@ -195,6 +195,144 @@ with any changes the two majors require to the `deploy.yml` step, and confirms
 it by a run that actually assumes a role rather than by a green check on a
 skipped job.
 
+## Second Dependabot run, 2026-08-22
+
+Three more pull requests, all npm, all against `frontend/package.json`. Same
+rule as above: the recommendation turns on what was actually exercised, and
+**nothing here was merged or closed.**
+
+| PR | Bump | Kind | CI | Recommendation |
+| --- | --- | --- | --- | --- |
+| [#43](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/43) | `typescript` 5.7.3 to 5.9.3 | npm, minor | Green, run 32595217249 | **Merge**, then regenerate the lock file |
+| [#44](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/44) | `@eslint/js` 9.39.5 to 10.0.1 | npm, major | **Red**, run 32595220178 | **Merge only together with #42** |
+| [#42](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/42) | `eslint` 9.39.5 to 10.8.1 | npm, major | **Not run**; conflicts with `develop` | **Merge only together with #44** |
+
+### #43, typescript 5.9.3: merge
+
+**It edits the manifest, and it has to.** `frontend/package.json` pins
+`"typescript": "~5.7.2"`. A tilde range admits patch releases only, so 5.9.3 is
+outside it and Dependabot cannot deliver this bump by resolution alone; the
+declared range had to move. The pull request changes exactly that one line,
+`~5.7.2` to `~5.9.3`, and nothing else.
+
+**The peer range admits it.** `typescript-eslint@8.67.0` declares
+`peer typescript ">=4.8.4 <6.1.0"`. 5.9.3 is inside that window, which is the
+whole difference between this and #36: TypeScript 7.0.2 fell outside the same
+range and could not resolve a tree at all. Here npm resolved normally and all
+four jobs are green, including `tsc -b` in the frontend build. That is real
+evidence, not a version-number judgement, because the compiler actually ran.
+
+**One condition on merging it.** The lock file pins `typescript@5.7.3`.
+Merging #43 changes `package.json` without changing `package-lock.json`, and
+once the lock file is on `develop` that combination is exactly what `npm ci`
+refuses. So either regenerate the lock on `develop` immediately after merging,
+or merge it before pull request #45 and let #45 be rebased onto it. Doing
+neither leaves `develop` red.
+
+### #42 and #44, eslint 10: one change or neither
+
+These are the same upgrade split across two pull requests, and the split is why
+#44 fails. `eslint` and `@eslint/js` are published together from the same
+repository at the same version, and `@eslint/js` declares a peer dependency on
+the matching `eslint` major. Raising one alone cannot resolve. CI proves it, on
+run 32595220178:
+
+```
+npm error code ERESOLVE
+npm error While resolving: @eslint/js@10.0.1
+npm error Found: eslint@9.39.5
+npm error   dev eslint@"^9.17.0" from the root project
+npm error Could not resolve dependency:
+npm error peerOptional eslint@"^10.0.0" from @eslint/js@10.0.1
+npm error Conflicting peer dependency: eslint@10.9.0
+```
+
+Three of the four jobs fail, each at its `npm install` step, and none of them
+ever ran ESLint. This says nothing about whether eslint 10 works here; it says
+`@eslint/js` 10 alone does not install.
+
+**Every plugin in the tree already declares eslint 10 support.** Read from the
+resolved `package-lock.json`, so these are the ranges the installed versions
+actually publish:
+
+| Package | Version | Declared `eslint` peer range | Admits 10 |
+| --- | --- | --- | --- |
+| `typescript-eslint` | 8.67.0 | `^8.57.0 \|\| ^9.0.0 \|\| ^10.0.0` | yes |
+| `eslint-plugin-react-hooks` | 7.1.1 | `^3.0.0 \|\| ... \|\| ^9.0.0 \|\| ^10.0.0` | yes |
+| `eslint-plugin-react-refresh` | 0.5.4 | `^9 \|\| ^10` | yes |
+
+`@typescript-eslint/eslint-plugin`, `parser` and `utils` at 8.67.0 declare the
+same range as their umbrella package. So there is no known peer-range obstacle
+to eslint 10, which is the opposite of the situation with #36 and #28.
+
+**#42 also conflicts with `develop` and has never run CI.** `git merge-tree`
+against `develop` reports `CONFLICT (content): Merge conflict in
+frontend/package.json`: the branch was cut before #32, #34 and #35 changed
+adjacent lines in the same `devDependencies` block. It needs
+`@dependabot rebase` before it can be evaluated at all.
+
+**Recommendation: merge the two together, as one change, once it has been run
+as one change.** Not close: closing would discard an upgrade that every
+declared peer range says is available, and the only failure on record is the
+artefact of proposing half of it. Not merge-as-is either: two pull requests
+cannot be merged simultaneously, and merging either one first puts `develop` in
+the broken state #44 already demonstrated.
+
+The way to take it is a single pull request that raises `eslint` and
+`@eslint/js` together and regenerates `package-lock.json` in the same commit,
+after #45 lands. CI on that pull request runs `npm ci` against the combined
+tree and then runs ESLint over the codebase, which is the evidence that is
+missing today. **That evidence does not exist yet**, and it is the reason this
+is a recommendation rather than a decision: the peer ranges say the tree should
+resolve, but no run has resolved it. It could not be produced from the session
+that wrote this, because `registry.npmjs.org` is denied there (OQ-15), so npm
+could not be asked to resolve anything locally.
+
+**No ignore entries were added for `eslint` and `@eslint/js`.** The coupled
+ignore treatment given to `vite` and `@vitejs/plugin-react` fits a pair that is
+known to be unadoptable; this pair is not. Adding it would hide the linter from
+updates on the strength of a failure that is explained by the split rather than
+by incompatibility. If the combined pull request above turns out red, that
+changes, and the ignore group is the right answer then, with the failure quoted
+as the reason.
+
+## Lock file interaction, from 2026-08-22 onward
+
+Every recommendation above has an extra step now that it did not have when the
+first triage was written, because both ecosystems build from committed lock
+files (OQ-3, pull request #45).
+
+**A merged bump that changes only the manifest leaves `develop` red.** This is
+not a subtle drift; it is a hard stop, and it is deliberate:
+
+- `npm ci` refuses to run when `package.json` and `package-lock.json` disagree,
+  and the frontend job, the audit job and the container build all begin with it.
+- `pip install --require-hashes` refuses an entry whose digest is missing or
+  does not match.
+
+So a Dependabot pull request has to either carry its lock file change or be
+followed by a regeneration commit. Which applies depends on when the branch was
+cut:
+
+- **Pull requests Dependabot opens from now on** will carry it. Dependabot
+  updates `package-lock.json` itself whenever a lock file exists on the base
+  branch, so once #45 merges, its npm pull requests contain both files.
+- **#42, #43 and #44 will not**, because all three were branched from a
+  `develop` that had no lock file. Each changes `package.json` only. Merging any
+  of them as they stand, after #45, breaks `develop` until the lock is
+  regenerated. Rebasing them first (`@dependabot rebase`) makes Dependabot
+  regenerate the lock as part of the pull request, which is the cleaner order.
+- **The pip ecosystem never carries it**, because `requirements.lock` and
+  `requirements-dev.lock` are pip-compile output that Dependabot does not
+  generate. A merged pip bump raises a floor in `pyproject.toml` and both lock
+  files must be regenerated by hand afterwards, per
+  [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+The rule this reduces to is in `CONTRIBUTING.md`: **any pull request that
+changes `frontend/package.json` or `backend/pyproject.toml` regenerates the
+affected lock file in the same pull request.** It applies to Dependabot's pull
+requests exactly as it applies to everyone else's.
+
 ## What this triage does not cover
 
 - **No lockfile existed when these recommendations were written** (OQ-3), so
