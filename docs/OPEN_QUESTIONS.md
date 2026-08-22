@@ -11,7 +11,7 @@ updates every artifact the answer affects.
 | ID | Status | Blocks |
 | --- | --- | --- |
 | [OQ-1](#oq-1) | Answered by ADR 0001 (author's decision, not a stakeholder answer) | Nothing now; affects platform strategy beyond the prototype |
-| [OQ-2](#oq-2) | Open | Recording the Tesseract version in the architecture document |
+| [OQ-2](#oq-2) | Closed 2026-08-22 | Nothing; the version is recorded |
 | [OQ-3](#oq-3) | Open | Reproducible frontend builds; `npm ci` in CI and Docker |
 | [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
@@ -21,12 +21,13 @@ updates every artifact the answer affects.
 | [OQ-9](#oq-9) | Open | Matching threshold defaults (FR-3) |
 | [OQ-10](#oq-10) | Open | ATO planning |
 | [OQ-11](#oq-11) | Open | AI governance sign-off |
-| [OQ-12](#oq-12) | Open | Enforcement of branch protection |
+| [OQ-12](#oq-12) | Closed 2026-08-21 | Nothing; rules are declared, enforcement waits on the plan |
 | [OQ-13](#oq-13) | Open | Deployment (a later task) |
-| [OQ-14](#oq-14) | Open | Nothing; a manual step for the repository owner |
-| [OQ-15](#oq-15) | Open | Local verification of the build in this environment |
+| [OQ-14](#oq-14) | Closed 2026-08-21 | Nothing; the board exists and is linked to the repository |
+| [OQ-15](#oq-15) | Open, root cause identified 2026-08-22 | Local verification of the build in this environment |
 | [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
-| [OQ-17](#oq-17) | Open | Setting `develop` as the default branch |
+| [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
+| [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
 
 ---
 
@@ -61,6 +62,22 @@ section 1]
 ## OQ-2
 **What version of Tesseract does the container use?**
 
+**Status: Closed 2026-08-22.** Answer: **Tesseract 5.3.0**, with
+leptonica 1.82.0, the version Debian bookworm ships.
+
+Read from the summary of the most recent successful CI run on `develop`, run
+32574942848 at commit `ef3086a`, step "Report the Tesseract version in the
+image":
+<https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/32574942848>
+
+Recorded in the version table in
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8. The version was read from a
+real run rather than inferred from the base image tag, which is what this
+question asked for. It will change only when the base image moves to a different
+Debian release.
+
+The record of why it could not be read in the initializing session follows.
+
 Section 6 of the build instructions stated that Tesseract was preinstalled in
 this environment and asked for `tesseract --version` to be recorded in
 [05_ARCHITECTURE.md](05_ARCHITECTURE.md). It was not installed, and it could not
@@ -88,14 +105,13 @@ time; the actual version must be read from a built image and recorded.
 against the built image and writes the result to the workflow run summary page.
 The version also appears in the SBOM artifact attached to every run.
 
-**To close this question:** read the version from the summary of any successful
-CI run and record it in the version table in
-[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8, replacing the
-"Not verified in this session" row.
+**How it was closed:** the version was read from the run summary named above and
+recorded in the version table in
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8.
 
-**Who can answer:** anyone reading a CI run summary, or running
-`docker run --rm --entrypoint tesseract <image> --version` locally.
-**Blocks:** the version row in [05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8.
+**Who answered:** CI run 32574942848. The same value can be reproduced locally
+with `docker run --rm --entrypoint tesseract <image> --version`.
+**Blocks:** nothing.
 
 ## OQ-3
 **Should a frontend lockfile be committed, and which package manager?**
@@ -319,6 +335,19 @@ Officer, citing the current controlling documents.
 ## OQ-12
 **Branch protection could not be applied, and could not even be attempted.**
 
+**Status: Closed 2026-08-21.** Rules declared on `main` and `develop` on
+2026-08-21; not enforced by GitHub until the repository is public or moves to a
+Team or Enterprise plan; the required status check is `ci`.
+
+The rules were declared in the GitHub web interface under Settings, Rules, and
+they are: pull request required, the `ci` status check required, approvals not
+required, force pushes blocked, deletions blocked. GitHub displays them as "Not
+enforced" because this repository is private on a Free plan, which is obstacle 2
+below, reached only after obstacle 1 was worked around by declaring the rules by
+hand rather than through an API.
+
+The record of why this could not be done from a session follows.
+
 Decision D-6 requires protection on `main` and `develop`: pull request required,
 the `ci` status check required, stale approvals dismissed, force pushes blocked.
 
@@ -381,7 +410,20 @@ limitation, and it should be an explicit acceptance rather than a default.
 **Manual step: create Project board "TTB Label Verifier" with columns Backlog,
 Ready, In Progress, In Review, Done and add all story issues.**
 
-Decision D-7 calls for a GitHub Project board. It was **not** created. GitHub
+**Status: Closed 2026-08-21.** The board exists at
+<https://github.com/users/kimkight/projects/1> with the columns Backlog, Ready,
+In Progress, In Review, and Done, and issues #1 to #21 sit in Backlog.
+
+It is a **user-owned** project, owned by `kimkight` rather than by an
+organization, linked to this repository. That distinction matters for anyone
+looking for it later: it does not appear under the repository's own Projects tab
+the way an organization project would, and access to it follows the owning user
+account rather than the repository's collaborator list.
+
+The record of why it could not be created from a session follows.
+
+Decision D-7 calls for a GitHub Project board. It was **not** created
+during the initializing session. GitHub
 Projects v2 is a GraphQL-only API, and this session's proxy does not support the
 required GraphQL operations, so there is no REST equivalent to fall back to.
 
@@ -395,6 +437,70 @@ information.
 ## OQ-15
 **How should the build be verified when the session has no package-manager
 network access?**
+
+**Status: Open. Root cause identified 2026-08-22; the fix is applied but not yet
+verified from a session.**
+
+**Root cause.** The cloud environment was set to the Custom network level with
+the box "Also include default list of common package managers" left unchecked.
+At that setting only the domains typed into the allowed-domains list are
+permitted, and the platform's Trusted default list, which does include PyPI,
+npm, and `archive.ubuntu.com` and `security.ubuntu.com`, is not applied at all.
+So every package host was denied.
+
+The denials were easy to misread, because `pypi.org`, `files.pythonhosted.org`,
+and `registry.npmjs.org` all appear in the session's `no_proxy` variable.
+**Being in `no_proxy` is not an allowlist entry.** It only means those hosts
+bypass the local agent proxy on `127.0.0.1`; they still traverse the upstream
+egress gateway, which denied them with an explicit header:
+
+```
+HTTP/2 403
+x-deny-reason: host_not_allowed
+Host not in allowlist: pypi.org. Add this host to your network egress settings
+to allow access.
+```
+
+`deb.debian.org` failed one layer earlier, at the proxy `CONNECT` rather than at
+the response, which is why it produced a transport error rather than a status
+code:
+
+```
+CONNECT tunnel failed, response 403
+connect_rejected: gateway answered 403 to CONNECT (policy denial or upstream
+failure)   host: deb.debian.org:443
+```
+
+**Fix applied.** The `ttb-label-verifier` environment is set to Custom, with
+"Also include default list of common package managers" checked, plus these
+allowed domains: `www.ecfr.gov`, `ecfr.gov`, `unblock.federalregister.gov`,
+`www.ttb.gov`, `ttb.gov`, `deb.debian.org`, `security.debian.org`. The two
+Debian hosts are listed explicitly because the runtime image is
+`python:3.11-slim-bookworm`, which is Debian and not Ubuntu, and the container
+build runs `apt-get` inside it. The Ubuntu hosts come from the default list.
+
+**Not yet verified.** Changing the allowed hosts or the setup script rebuilds
+the environment cache on the next **new** session. The preflight below was run
+on 2026-08-22 from a **resumed** session, which still carries the old cache, so
+it still shows the denials:
+
+| Check | Result |
+| --- | --- |
+| `curl https://pypi.org/simple/requests/` | `403`, `x-deny-reason: host_not_allowed` |
+| `curl https://registry.npmjs.org/express` | `403`, `x-deny-reason: host_not_allowed` |
+| `curl https://deb.debian.org/debian/dists/bookworm/Release` | `000`, CONNECT tunnel failed, response 403 |
+| `curl https://www.ecfr.gov/api/versioner/v1/titles.json` | `200` |
+| `tesseract --version` | `command not found` |
+| `syft version` | `command not found` |
+| `docker info` | unavailable |
+
+This question closes when the same preflight run from a new session returns
+`200` from both registries. Until then the lockfile work in OQ-3 cannot be done
+from a session, and the Docker observation below stands on its own: a Docker
+daemon is a separate capability from egress policy, and no network setting
+provides one.
+
+The original record follows.
 
 Section 6 of the build instructions required running `docker compose up -d`,
 curling `/api/health`, running `pytest`, and running the frontend build in this
@@ -497,6 +603,14 @@ observation, not a decision.
 ## OQ-17
 **The default branch was not changed to `develop`.**
 
+**Status: Closed 2026-08-21.** `develop` is now the repository's default branch,
+set in the GitHub web interface under Settings, General, Default branch. Both
+consequences listed below are therefore resolved: new pull requests opened
+through the web interface default to targeting `develop`, and a fresh
+`git clone` checks out `develop`.
+
+The record of why it could not be done from a session follows.
+
 Decision D-6 makes `develop` the integration branch, and the build instructions
 called for `gh api -X PATCH repos/... -f default_branch=develop`.
 
@@ -521,3 +635,26 @@ Dependabot is unaffected by this.
 Settings, General, Default branch.
 **Blocks:** correct default targeting for new pull requests and clones. It does
 not block any code.
+
+## OQ-18
+**The session git proxy rejects pushes to `refs/tags/*` with HTTP 403.**
+
+Pushing an annotated tag from a session fails at the proxy, not at GitHub. Push
+of a commit to `refs/heads/*` on the same remote, in the same session, with the
+same credentials, succeeds. Only the tag ref is refused, which points at ref
+filtering in the proxy rather than at repository permissions.
+
+**Status: Closed 2026-08-22.** Resolution: tags and releases are created through
+the GitHub Releases web interface rather than pushed from a session. Release
+v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
+
+This is a durable change to the release procedure, not a one-time workaround, so
+it is recorded in [08_SDLC_PROCESS.md](08_SDLC_PROCESS.md) section 7 as the
+normal path. The practical consequence is small: the tag is still created from
+`main` at a reviewed commit, and the deployment workflow still triggers on the
+`v*` tag, because a tag created in the Releases interface fires the same event
+as a pushed one.
+
+**Who can answer:** whoever provisions the session environment, if the
+restriction is ever meant to be lifted.
+**Blocks:** nothing. The web interface path works.

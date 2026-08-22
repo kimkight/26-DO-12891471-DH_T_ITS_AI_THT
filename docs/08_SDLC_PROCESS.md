@@ -192,10 +192,20 @@ not exist yet.
 3. Move `CHANGELOG.md` entries from Unreleased into a dated version section.
 4. Stabilize: fixes only, no new features.
 5. Open a pull request to `main`. CI must be green.
-6. Merge and tag `vX.Y.Z` on `main`.
+6. Merge, then create the `vX.Y.Z` tag through the GitHub Releases web interface
+   with `main` as the target. See below.
 7. Merge `main` back into `develop`.
 8. The `v*` tag is what the deployment workflow triggers on, once that workflow
-   is enabled.
+   is enabled. A tag created in the Releases interface fires the same event as a
+   pushed one, so the trigger is unaffected.
+
+**Tags are created through GitHub Releases from `main`, not pushed from a
+session.** The session git proxy rejects pushes to `refs/tags/*` with HTTP 403
+while accepting pushes to `refs/heads/*` on the same remote with the same
+credentials, so `git push origin vX.Y.Z` is not a usable step. Release v0.1.0
+was created in the Releases interface, tagged at `79d5ac7` on `main`. This is
+the normal path for this repository, not a one-time workaround. Recorded as
+OQ-18 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
 Every commit on `main` is a release. That is the whole point of keeping it
 separate from `develop`.

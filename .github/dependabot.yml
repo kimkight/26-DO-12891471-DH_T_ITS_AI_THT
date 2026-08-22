@@ -1,4 +1,34 @@
 version: 2
+
+# Update policy, set 2026-08-22 after the triage in
+# docs/DEPENDENCY_TRIAGE_2026-08.md.
+#
+# The first Dependabot run opened twelve pull requests at once, ten of them
+# major bumps, against a repository with no lockfile and no application code.
+# Reviewing twelve pull requests to learn that eight of them are noise is not a
+# good use of anyone's time, and a wall of open pull requests trains a reviewer
+# to stop reading them. Two changes follow from that.
+#
+# 1. Minor and patch updates are grouped into one pull request per ecosystem
+#    per week. These are the updates that should be boring: they carry security
+#    and bug fixes, they are what the weekly cadence exists for, and reviewing
+#    them individually adds nothing because the decision is the same for all of
+#    them. One grouped pull request per ecosystem, one CI run, one review.
+#
+#    Major bumps are deliberately NOT grouped. A major bump is a decision, and
+#    a decision needs its own pull request, its own CI run, and its own place
+#    to record why it was taken or refused. Grouping them would hide a
+#    toolchain change behind a routine-looking title.
+#
+# 2. Major bumps of typescript and react are ignored, because both change how
+#    the whole frontend is checked or rendered and neither should arrive
+#    unrequested. See the ignore block for the specific evidence.
+#
+#    "Ignored" means Dependabot will not open the pull request on its own. It
+#    does not mean the upgrade is forbidden. To take one deliberately, remove
+#    or narrow the matching ignore entry in a pull request of its own, which
+#    puts the decision in the history where it belongs.
+
 updates:
   - package-ecosystem: "pip"
     directory: "/backend"
@@ -9,6 +39,13 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -19,6 +56,38 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # TypeScript majors change what compiles. PR #36 (5.7.3 to 7.0.2) failed
+      # CI at `npm install`, before any file was type-checked: typescript-eslint
+      # 8.67.0 declares `peer typescript ">=4.8.4 <6.1.0"`, so npm could not
+      # resolve a tree at all. A TypeScript major is only adoptable once the
+      # lint toolchain has published a matching peer range, and adopting it
+      # then still means reading the compiler's new errors. That is a task, not
+      # a dependency update.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+      # React majors change rendering behaviour and, from 19 onward, what the
+      # hooks lint rules enforce. There is no UI to regression-test yet: the
+      # frontend is a scaffold, so CI passing on a React major would be
+      # evidence of nothing. Revisit once FR-1 has real components.
+      #
+      # NOTE, unresolved: react-dom is deliberately NOT ignored here, because
+      # the triage that produced this file specified typescript and react only.
+      # react and react-dom must move together, so as written Dependabot can
+      # still propose a react-dom major on its own, which cannot be merged
+      # alone. Adding react-dom to this block is the obvious fix and is left as
+      # the repository owner's call. Recorded in
+      # docs/DEPENDENCY_TRIAGE_2026-08.md.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -29,6 +98,13 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -39,3 +115,10 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
