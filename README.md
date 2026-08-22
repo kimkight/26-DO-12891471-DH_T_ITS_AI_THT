@@ -121,13 +121,13 @@ section 6.
 | [02 Project Scope](docs/02_PROJECT_SCOPE.md) | In scope, out of scope, stretch goals, Definition of Done |
 | [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-10, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
 | [04 User Stories](docs/04_USER_STORIES.md) | 21 stories across 5 epics, with Given/When/Then criteria |
-| [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, GovCloud portability |
+| [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, government-region portability |
 | [06 Security and Compliance](docs/06_SECURITY_AND_COMPLIANCE.md) | Threat model, controls, FedRAMP posture, ATO readiness, AI governance |
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
 | [08 SDLC Process](docs/08_SDLC_PROCESS.md) | Phases with entry and exit criteria, Git Flow, PR checklist, DoR and DoD, releases |
 | [09 Deployment](docs/09_DEPLOYMENT.md) | Outline only; infrastructure is a later task |
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 16 unanswered questions, recorded rather than guessed |
-| [Assumptions](docs/ASSUMPTIONS.md) | 11 inferences, each with what would confirm or falsify it |
+| [Assumptions](docs/ASSUMPTIONS.md) | 13 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
 | [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |

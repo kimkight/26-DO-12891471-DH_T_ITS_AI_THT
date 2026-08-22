@@ -82,7 +82,7 @@ used, and assumptions made. [Source: Deliverables]
 | OOS-6 | Label elements beyond the five extracted | The assignment lists bottler name and address and country of origin among common elements but does not include them in the sample label field list. Extraction is limited to the sample's fields. | Technical Requirements, Sample Label section |
 | OOS-7 | Beverage-type-specific rule engines | The assignment states "The exact requirements vary by beverage type (beer, wine, distilled spirits)" but supplies rules for none of them. Encoding them would require inventing regulation. | Technical Requirements, Additional Context |
 | OOS-8 | Determining whether a label is compliant overall | The tool reports per-field agreement between label and application. It does not issue an approval decision. The agent decides. | Decision D-9; Dave Morrison interview |
-| OOS-9 | Production deployment to AWS GovCloud (US) | This assignment deploys to commercial `us-east-1`. The build stays portable but GovCloud is not exercised. | Decision D-11 |
+| OOS-9 | Production deployment to a government region on either platform | This assignment deploys to AWS commercial `us-east-1` by the author's choice. The build stays cloud-portable, but neither AWS GovCloud (US) nor the agency's Azure platform is exercised. | Decision D-11 |
 
 ## 3. Stretch goals
 

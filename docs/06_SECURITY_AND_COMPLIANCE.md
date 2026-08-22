@@ -69,6 +69,14 @@ judgment that the control is unnecessary.
 
 **No FedRAMP status is asserted in this document.**
 
+The production target is the agency platform (Azure per the interview); AWS
+GovCloud if AWS were retained. Both have FedRAMP High government regions, so the
+compliance story is equivalent either way, and the in-scope status that matters
+is the one for whichever platform and region a deployment actually uses.
+[Source: Decision D-11;
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 1]
+
 AWS services this system uses or would use:
 
 | Service | Role |
@@ -82,9 +90,15 @@ AWS services this system uses or would use:
 
 The in-scope status of each of these services, for the relevant impact level and
 for the relevant region, **must be confirmed at deployment time** against the
-authoritative AWS list:
+FedRAMP Marketplace and the authoritative AWS list:
 
+> https://marketplace.fedramp.gov/
+>
 > https://aws.amazon.com/compliance/services-in-scope/FedRAMP/
+
+If the deployment target is the agency platform (Azure per the interview) rather
+than AWS, the equivalent confirmation is against the FedRAMP Marketplace listing
+for the Azure Government services used.
 
 This is a deployment-time gate, not a documentation exercise. Status varies by
 service, by region, and by impact level, and it changes over time; a claim

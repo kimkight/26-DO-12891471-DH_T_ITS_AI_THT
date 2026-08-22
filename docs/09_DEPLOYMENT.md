@@ -9,7 +9,7 @@ this document has been executed, and no AWS resource exists. See
 | | |
 | --- | --- |
 | Prototype target | AWS commercial, `us-east-1` (Decision D-1) |
-| Intended production target | AWS GovCloud (US) (Decision D-11) |
+| Intended production target | The agency's platform, presumed to be Azure Government per the interview; AWS GovCloud (US) if AWS were retained (Decision D-11) |
 | Compute | Amazon ECS with AWS Fargate, behind an Application Load Balancer (Decision D-2) |
 | Image registry | Amazon ECR (Decision D-2) |
 | Deployable unit | One container image containing the FastAPI backend and the built frontend assets |
@@ -78,15 +78,24 @@ secret to run.
   workflow rather than silently leaving a broken service running.
 - Rollback is redeploying the previous task definition revision.
 
-## 6. GovCloud portability
+## 6. Portability to a FedRAMP-authorized government region
+
+Decision D-11 presumes the agency's platform, Azure per the interview, as the
+production target, with AWS GovCloud (US) as the target if AWS were retained.
+Portability is carried by the container image and by how the Terraform is
+written, not by the region this prototype happens to run in.
 
 The rules the Terraform must follow are listed in `infra/README.md`. In short:
 no hardcoded partition, region, or account identifier; ARNs derived from data
-sources, because GovCloud uses the `aws-us-gov` partition; and no dependency on
-a service absent from GovCloud.
+sources, because AWS GovCloud (US) uses the `aws-us-gov` partition; and no
+dependency on a service absent from the target region. A move to Azure runs the
+same image on Azure Container Apps or AKS and requires an Azure provider module
+for the Terraform, which this repository does not contain. See
+[ADR 0001](adr/0001-cloud-platform-aws.md).
 
-Service availability in GovCloud and FedRAMP in-scope status are **not asserted
-here** and must be confirmed at deployment time. See
+Service availability and FedRAMP in-scope status, in AWS GovCloud (US) or in
+Azure Government, are **not asserted here** and must be confirmed against the
+FedRAMP Marketplace at deployment time. See
 [06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md) section 4.
 
 ## 7. Not decided

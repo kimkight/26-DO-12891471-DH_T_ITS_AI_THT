@@ -667,7 +667,7 @@ When  the pull request is viewed
 Then  the ci status check reports failure
 ```
 
-### US-19 Keep the GovCloud path open
+### US-19 Keep the government-region path open
 
 | | |
 | --- | --- |
@@ -679,8 +679,13 @@ Then  the ci status check reports failure
 | Source | Decision D-11 |
 
 **As an** IT systems administrator,
-**I want** the infrastructure code to target AWS GovCloud (US) without redesign,
+**I want** the infrastructure code to target a FedRAMP-authorized government
+region without redesign,
 **so that** the prototype does not have to be rebuilt to move toward production.
+Decision D-11 presumes the agency's platform, Azure per the interview, as the
+eventual target; that path runs the same container image and needs an Azure
+provider module for the Terraform. See
+[adr/0001-cloud-platform-aws.md](adr/0001-cloud-platform-aws.md).
 
 **Acceptance criteria**
 

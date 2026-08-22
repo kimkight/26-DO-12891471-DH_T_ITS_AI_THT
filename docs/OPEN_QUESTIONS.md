@@ -10,11 +10,11 @@ updates every artifact the answer affects.
 
 | ID | Status | Blocks |
 | --- | --- | --- |
-| [OQ-1](#oq-1) | Open | Nothing now; affects platform strategy beyond the prototype |
+| [OQ-1](#oq-1) | Answered by ADR 0001 (author's decision, not a stakeholder answer) | Nothing now; affects platform strategy beyond the prototype |
 | [OQ-2](#oq-2) | Open | Recording the Tesseract version in the architecture document |
 | [OQ-3](#oq-3) | Open | Reproducible frontend builds; `npm ci` in CI and Docker |
-| [OQ-4](#oq-4) | Open | FR-7 implementation |
-| [OQ-5](#oq-5) | Open | FR-7 implementation |
+| [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
+| [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-6](#oq-6) | Open | Batch design (FR-8, NFR-2) |
 | [OQ-7](#oq-7) | Open | Accessibility acceptance (NFR-5) |
 | [OQ-8](#oq-8) | Open | Accuracy acceptance (US-21) |
@@ -33,14 +33,27 @@ updates every artifact the answer affects.
 ## OQ-1
 **Which cloud should this system target beyond the prototype?**
 
+**Status: Answered by ADR 0001 (author's decision, not a stakeholder answer).**
+
 Marcus Williams states "We're on Azure now after the migration in 2019."
 [Source: Marcus Williams interview] Decision D-1 targets AWS commercial for the
-prototype, and Decision D-11 names AWS GovCloud (US) as the intended production
-environment. These are not reconciled by any source available here.
+prototype.
 
-No inference is drawn. Recorded because a reader comparing the charter against
-the interview will notice the discrepancy, and it should be visible rather than
-appear to have been overlooked.
+The earlier text of Decision D-11 named AWS GovCloud (US) as the agency's
+intended production environment. **No source supports that**; it was an
+assertion rather than a sourced statement, and it has been replaced. D-11 now
+records that the agency states it is on Azure, that this prototype deploys to
+AWS commercial `us-east-1` by the author's choice for delivery speed on the
+platform the author knows best, and that a production deployment would target
+the agency's platform, presumed to be Azure Government.
+
+[ADR 0001](adr/0001-cloud-platform-aws.md), section "Why not Azure, given the
+agency runs Azure", gives the reasoning and the public Treasury evidence. That
+is the author's decision for this prototype. It is **not** a stakeholder answer:
+nobody at the agency has stated which cloud a production system would use, and
+the question of agency platform strategy remains open for whoever owns it.
+[Source: [cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 1]
 
 **Who can answer:** Marcus Williams, or whoever owns the agency cloud strategy.
 **Blocks:** nothing in the prototype.
@@ -116,34 +129,70 @@ ecosystems, committing them, and switching CI and the Dockerfile to
 ## OQ-4
 **What numeric tolerance applies to alcohol content?**
 
-FR-7 requires numeric comparison, so `45%` and `45.0%` agree. It does not
-establish whether a near miss is a match, a review, or a mismatch. Is a label
-reading 45.1% against an application reading 45% a mismatch, or within
-tolerance?
+**Status: Closed by assumption [A-12](ASSUMPTIONS.md#a-12).** Answer: none. The
+label ABV and the application ABV must be numerically identical, and
+`TTB_ABV_TOLERANCE` defaults to `0.0`.
 
-TTB regulation defines labeling tolerances for alcohol content, and 27 CFR 4.36
-and 27 CFR 5.37 are the likely locations for wine and distilled spirits
-respectively. **Those sections were not fetched, read, or quoted during this
-work, and no tolerance figure is stated anywhere in this repository**, because
-writing one from memory would be exactly the invention the ground rules prohibit.
+FR-7 requires numeric comparison, so `45%` and `45.0%` agree. It did not
+establish whether a near miss is a match, a review, or a mismatch.
 
-**Who can answer:** Sarah Chen or a compliance agent, confirmed against the
-applicable CFR section fetched from ecfr.gov.
-**Blocks:** FR-7 implementation. A tolerance must be chosen deliberately, since
-either default silently encodes a compliance position.
+The regulations were fetched from eCFR on 2026-08-20 and they do not answer the
+question, because they answer a different one:
+
+- 27 CFR 5.65 (distilled spirits): "A tolerance of plus or minus 0.3 percentage
+  points is allowed for actual alcohol content that is above or below the
+  labeled alcohol content."
+  <https://www.ecfr.gov/current/title-27/section-5.65>
+- 27 CFR 4.36 (wine): 1 percent for wines over 14 percent ABV and 1.5 percent
+  for wines at 14 percent or less, "either above or below" the stated
+  percentage. <https://www.ecfr.gov/current/title-27/section-4.36>
+- 27 CFR 7.65 (malt beverages): "a tolerance of 0.3 percentage points will be
+  permitted, either above or below the stated alcohol content, for malt
+  beverages containing 0.5 percent or more alcohol by volume."
+  <https://www.ecfr.gov/current/title-27/section-7.65>
+
+Every one of those governs the difference between the **actual** alcohol content
+of the liquid and the **labeled** content, which is a laboratory question. This
+tool compares two **declared** values: what the applicant wrote on the label
+artwork and what the applicant typed into the application form. There is no
+regulatory basis for allowing them to differ, and Sarah's description of the
+check is "ABV is correct? Check." A label reading 45.1% against an application
+reading 45% is therefore a **mismatch**.
+
+The full rule, including the proof cross-check and range handling, is A-12 in
+[ASSUMPTIONS.md](ASSUMPTIONS.md) and the FR-7 acceptance criteria in
+[03_REQUIREMENTS.md](03_REQUIREMENTS.md). Reasoning:
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 2.
+
+**What would reopen it:** a compliance agent or Sarah Chen stating that
+applications and labels are routinely accepted with small ABV differences. No
+source says so. `TTB_ABV_TOLERANCE` exists so that answer changes the behaviour
+without a code change.
+**Blocks:** nothing. FR-7 acceptance criteria state the rule.
 
 ## OQ-5
 **How should net contents in different units be compared?**
 
-If the label reads `750 mL` and the application reads `25.4 fl oz`, is that a
-match? FR-7 compares numerically but says nothing about unit conversion.
+**Status: Closed by assumption [A-13](ASSUMPTIONS.md#a-13).** Answer: they are
+not converted. Values are compared numerically only when units match after
+normalization (`mL`/`ml`/`milliliters`, `L`/`liters`, `fl oz`/`fl. oz.`).
+Different units are reported as **needs human review**, and no conversion is
+performed. `750 mL` against `25.4 fl oz` is therefore a review, not a match.
 
-Related: TTB has standards of fill, which constrain permitted container sizes.
-Whether the tool should validate against them is not stated in the assignment
-and is not assumed here.
+Standards of fill are still not validated. Whether the tool should validate
+against them is not stated in the assignment and is not assumed here.
 
-**Who can answer:** Sarah Chen or a compliance agent.
-**Blocks:** FR-7 implementation.
+The reasoning is A-12's: a conversion the tool performs silently is a place a
+false match can be manufactured. See A-13 in [ASSUMPTIONS.md](ASSUMPTIONS.md),
+the FR-7 acceptance criteria in [03_REQUIREMENTS.md](03_REQUIREMENTS.md), and
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 2.
+
+**What would reopen it:** Sarah Chen or a compliance agent stating that
+cross-unit net contents are routinely accepted, or that standards of fill should
+be validated.
+**Blocks:** nothing. FR-7 acceptance criteria state the rule.
 
 ## OQ-6
 **Is there a latency target for a batch, and does a batch need an asynchronous

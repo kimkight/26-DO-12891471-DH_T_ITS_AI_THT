@@ -22,6 +22,8 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-9](#a-9) | Extraction is limited to the sample label's five fields | FR-1, OOS-6 | Medium |
 | [A-10](#a-10) | Frontend dependency versions | Build | Low |
 | [A-11](#a-11) | English-only OCR is sufficient | FR-1 | Low |
+| [A-12](#a-12) | Alcohol content must be numerically identical; no tolerance band | FR-7 | Medium |
+| [A-13](#a-13) | Net contents compared only when units match; no conversion | FR-7 | Low |
 
 ---
 
@@ -170,3 +172,91 @@ non-English labels must be read is not stated.
 **Confirmed or falsified by:** asking whether non-English labels reach this
 workflow.
 **Risk if wrong:** low for the prototype, since it is an explicit instruction.
+
+## A-12
+**Alcohol content on the label and in the application must be numerically
+identical.**
+
+- Normalize both values before comparison: strip "%", "Alc./Vol.", "ABV",
+  "alc. by vol.", whitespace, and trailing zeros, so `45% Alc./Vol.`, `45.0%`,
+  and `45` are the same number.
+- If the label also states proof, cross-check that proof equals 2 x ABV
+  (27 CFR 5.65 defines proof this way for spirits). A proof value that does not
+  equal twice the ABV is reported as **needs human review** with both numbers
+  shown, because it indicates an internal inconsistency on the label itself.
+- If the two normalized ABV numbers are equal: **match**.
+- If they differ by any nonzero amount: **mismatch**, with both values and the
+  difference shown. No tolerance band is applied. The agent can overrule; the
+  tool does not.
+- If either value cannot be parsed as a number: **needs human review**, with the
+  raw strings shown, falling back to text comparison as FR-7 already requires.
+- Range statements (for example "12 to 14% alc/vol", permitted for wine under
+  27 CFR 4.36): if the label states a range and the application states a single
+  value, **needs human review**. The prototype does not evaluate range
+  semantics.
+
+**Why the regulatory tolerances do not apply.** 27 CFR 5.65 allows "a tolerance
+of plus or minus 0.3 percentage points... for actual alcohol content that is
+above or below the labeled alcohol content"
+(<https://www.ecfr.gov/current/title-27/section-5.65>); 27 CFR 4.36 allows 1
+percent for wines over 14 percent ABV and 1.5 percent for wines at 14 percent or
+less, "either above or below" the stated percentage
+(<https://www.ecfr.gov/current/title-27/section-4.36>); 27 CFR 7.65 permits "a
+tolerance of 0.3 percentage points... either above or below the stated alcohol
+content, for malt beverages containing 0.5 percent or more alcohol by volume"
+(<https://www.ecfr.gov/current/title-27/section-7.65>). All three fetched from
+eCFR on 2026-08-20. Every one of those tolerances governs the difference between
+the **actual** alcohol content of the liquid and the **labeled** content, which
+is a laboratory question. This tool compares two **declared** values: what the
+applicant wrote on the label artwork and what the applicant typed into the
+application form. Both are the applicant's own statements of the same number.
+There is no regulatory basis for allowing them to differ, and Sarah's
+description of the check is "ABV is correct? Check," meaning the number on the
+form is the number on the label.
+
+**Why this is the conservative choice:** the only failure that harms the process
+is a false match, where the tool tells an agent two different numbers agree.
+Requiring exact equality makes a false match on this field impossible except
+through an OCR misread, and OCR confidence is shown alongside the value. The
+cost is false mismatches on OCR errors like `45` read as `46`, which land in
+front of an agent with both values visible, which is today's manual check
+anyway.
+
+**What would change it:** a compliance agent or Sarah Chen stating that
+applications and labels are routinely accepted with small ABV differences. No
+source says so. Configurable `TTB_ABV_TOLERANCE` defaults to 0.0 so the
+behaviour can change without a code change if that answer arrives.
+
+**Confirmed or falsified by:** a compliance agent or Sarah Chen stating that
+applications and labels are routinely accepted with small ABV differences.
+**Risk if wrong:** medium. The failure mode is false mismatches, which cost
+agent time rather than allowing a bad label through, and `TTB_ABV_TOLERANCE`
+changes the behaviour without a code change.
+
+**Traceability:** Source: Sarah Chen interview ("ABV is correct? Check");
+27 CFR 5.65, 4.36, 7.65 (fetched 2026-08-20) for why regulatory tolerances are
+out of scope; Decision D-5 (numeric comparison);
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 2. Marks OQ-4 as closed by assumption A-12.
+
+## A-13
+**Net contents are compared numerically only when units match after
+normalization.**
+
+Compare numerically only when units match after normalization (`mL`/`ml`/
+`milliliters`, `L`/`liters`, `fl oz`/`fl. oz.`). Different units: **needs human
+review**, no conversion performed. Standards of fill are not validated.
+
+The reasoning is A-12's: a conversion the tool performs silently is a place a
+false match can be manufactured, and `750 mL` against `25.4 fl oz` is a question
+an agent can settle in a second with both values in front of them.
+
+**Confirmed or falsified by:** Sarah Chen or a compliance agent stating that
+cross-unit net contents are routinely accepted, and whether standards of fill
+should be validated.
+**Risk if wrong:** low. The failure mode is a review outcome where a match was
+possible, which costs agent time only.
+
+**Traceability:** Source: FR-7; Decision D-5;
+[cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md)
+section 2. Marks OQ-5 as closed by assumption A-13.
