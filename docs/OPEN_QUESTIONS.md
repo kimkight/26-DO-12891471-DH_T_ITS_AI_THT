@@ -183,6 +183,20 @@ Consuming the lock files:
   resolution time and no test tooling is present.
 - The comments in both files that marked the switch as pending are removed.
 
+**Confirmed by CI**, run 32600078898 at commit `1d7f59b`, all five checks green:
+
+| Job | What it proves |
+| --- | --- |
+| `backend lint and test` | `pip install --require-hashes -r requirements-dev.lock` installed the 61 pinned packages with every hash verified, then `pip install --no-deps -e .`, then ruff and pytest ran against them |
+| `dependency audit` | both `pip-audit -r backend/requirements.lock --no-deps` and `pip-audit -r backend/requirements-dev.lock --no-deps` passed as separate gating steps, and `npm audit --audit-level=high` passed |
+| `frontend lint and build` | `npm ci` installed the locked tree, then eslint, prettier and `tsc -b && vite build` |
+| `container build and SBOM` | the image built with `npm ci` and `pip install --require-hashes -r requirements.lock`, served `/api/health`, ran as uid 10001, reported its Tesseract version, and produced an SBOM |
+
+The container job is the one that matters most here, because it is the only
+place the hash-verified runtime install actually runs. It had never reached that
+layer before: on the earlier attempts the build failed one stage earlier at
+`npm ci` and the pip layer was cancelled.
+
 **A stale frontend lock file was caught by CI and fixed.** The first version of
 `frontend/package-lock.json` was generated before pull requests #32, #34 and #35
 merged into `develop`, and those three raised devDependency ranges in
