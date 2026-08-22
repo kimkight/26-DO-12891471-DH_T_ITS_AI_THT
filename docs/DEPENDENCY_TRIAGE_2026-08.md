@@ -128,21 +128,78 @@ Grouping is the change that matters most here. Eight of these twelve pull
 requests would have been three grouped ones under the new policy, and the four
 that genuinely needed a decision would have been visible instead of buried.
 
-**One gap, left open deliberately.** The triage that produced this policy
-named `typescript` and `react`. It did not name `react-dom`, and `react` and
-`react-dom` must move together. As written, Dependabot can still open a
-`react-dom` major on its own, which cannot be merged alone and would have to be
-closed. Adding `react-dom` to the same ignore block is the obvious fix; it is
-noted in the file and left to the repository owner rather than taken
-unilaterally, since it goes beyond what was asked for.
+**The gap this triage left open is now closed.** The triage named `typescript`
+and `react` and did not name `react-dom`, even though the two must move
+together, so Dependabot could still open a `react-dom` major on its own that
+nobody could merge alone. `react-dom` has since been added to the same ignore
+block.
+
+The same coupling turned out to apply to the build tooling, and there the
+evidence arrived rather than being predicted. See "What happened after this
+triage" below.
+
+## What happened after this triage
+
+Recorded 2026-08-22, after the recommendations above were acted on.
+
+**Acted on as recommended.** #29, #30, #31, #32, #33, #34 and #35 were merged.
+#25, #26 and #28 were closed with the reasons given above. #36 was closed by
+Dependabot itself once the `typescript` ignore rule was in place, which is the
+rule working as intended.
+
+**#41 is new evidence, and it completes a deadlock.** Dependabot opened
+[#41](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/41),
+`@vitejs/plugin-react` 4 to 6. It was closed, because plugin 6 requires a Vite
+major this repository has not taken.
+
+Read together with #28, the two closures are the same wall approached from
+opposite sides:
+
+| Pull request | Bump | Why it could not be merged |
+| --- | --- | --- |
+| #28 | `vite` 6.4.3 to 8.2.1 | `@vitejs/plugin-react@4.7.0` declares `peer vite "^4.2.0 \|\| ^5.0.0 \|\| ^6.0.0 \|\| ^7.0.0"`. Vite 8 is outside it, so `npm install` fails with ERESOLVE. Needs the plugin major first. |
+| #41 | `@vitejs/plugin-react` 4 to 6 | Plugin 6 requires a Vite major. Needs the Vite major first. |
+
+Neither half is mergeable alone, so any pull request that proposes one half can
+only be closed. `vite` and `@vitejs/plugin-react` are therefore ignored at the
+major level as a coupled pair. The upgrade is one change that raises both at
+once, taken deliberately, with `tsc -b` and `vite build` read afterwards, and it
+belongs with the frontend work that has not started. Removing both ignore
+entries together is what reopens it.
+
+**#27 stays open, and the condition for closing it is now written down.**
+[#27](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/27),
+`aws-actions/configure-aws-credentials` 4 to 6, was recommended **Hold** above
+and is still open. Nothing has changed that would justify merging or closing it:
+
+- The action is used only in `deploy.yml`, where every job still carries
+  `if: false`. CI green on that pull request still means the action never ran.
+- No AWS infrastructure exists yet (OQ-13), so there is nothing for it to
+  authenticate against even if the jobs were enabled.
+- It is a two-major bump of the step that handles credentials. That is the last
+  place to accept a change verified only by the fact that nothing executed it.
+
+**It stays open until `deploy.yml` is enabled.** Not closed, because unlike #25,
+#26, #28, #36 and #41 there is nothing wrong with the bump: it is a routine
+update of a maintained action, waiting only for a workflow that can exercise it.
+Closing it would discard a valid update and invite Dependabot to reopen it every
+week; ignoring it would hide a credential-handling action from updates
+altogether, which is the opposite of what should happen. Holding an open pull
+request is the accurate state, and it is cheap: one pull request, visible,
+labelled, with the reason recorded here.
+
+**Whoever enables the deployment workflow takes it in the same task**, together
+with any changes the two majors require to the `deploy.yml` step, and confirms
+it by a run that actually assumes a role rather than by a green check on a
+skipped job.
 
 ## What this triage does not cover
 
-- **No lockfile exists** (OQ-3), so none of these recommendations is
-  reproducible: resolving the same declared ranges tomorrow can produce a
-  different tree. The lockfile work is blocked on package-manager network
-  access from a session (OQ-15) and is the change that would make dependency
-  review mean something.
+- **No lockfile existed when these recommendations were written** (OQ-3), so
+  none of them was reproducible: resolving the same declared ranges tomorrow
+  could produce a different tree. Both lock files have since been committed and
+  OQ-3 is closed, so dependency review from here on has something fixed to
+  review. That does not retroactively make the table above reproducible.
 - **`npm audit` and `pip-audit` results are not restated here.** Both run in
   the `dependency audit` CI job on every pull request, and both are green on
   `develop` at `ef3086a`. This document is about update policy, not

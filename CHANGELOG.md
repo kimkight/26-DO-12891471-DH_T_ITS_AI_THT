@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- ADR 0006, recording the batch execution model: one synchronous multipart
+  request carrying up to `TTB_MAX_BATCH_FILES` images plus one CSV of
+  application data keyed by image filename, processed concurrently by a bounded
+  worker pool, with per-label results streamed as newline-delimited JSON and no
+  job store, consistent with D-9. Implements FR-8 and NFR-2. (#39)
+- Assumption A-14, stating the batch CSV contract: one CSV keyed by image
+  filename with the columns `filename`, `brand_name`, `class_type`,
+  `alcohol_content`, `net_contents` and `beverage_type`. FR-8 requires batch
+  submission "with their application data" and no source states the format.
+  (#39)
+- `docs/DEPENDENCY_TRIAGE_2026-08.md`, triaging the twelve Dependabot pull
+  requests from the first run against `develop`: six recommended merge, one
+  merge with a caveat, four close, one hold, with the reason for each and a
+  full diagnosis of why the TypeScript 7 bump could not resolve a dependency
+  tree. (#40)
+- `.github/dependabot.yml`, setting the update policy that follows from that
+  triage: minor and patch updates grouped into one pull request per ecosystem
+  per week, major bumps left ungrouped so each keeps its own pull request and
+  recorded decision, and major bumps of `typescript` and `react` ignored. (#40)
 - OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
   with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
   releases are therefore created through the GitHub Releases web interface.
@@ -18,6 +37,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- OQ-2 closed. Tesseract 5.3.0 is the version shipped in the container image,
+  read from `tesseract --version` against the built image in CI run 32574942848
+  at commit `ef3086a` and recorded in the version table in
+  `docs/05_ARCHITECTURE.md` section 8. It was not assumed: the initializing
+  session could not install Tesseract, so CI is the authoritative source. 5.3.0
+  is the LSTM-era line, which is what the extraction path is written against.
+  (#38)
+- OQ-6 and OQ-16 closed by ADR 0006 and assumption A-14. (#39)
+- `react-dom` added to the npm major-version ignore list alongside `react`. The
+  triage named `typescript` and `react` only, but `react` and `react-dom` ship
+  as a matched pair and `react-dom` declares a peer dependency on the exact
+  `react` version, so a `react-dom` major proposed on its own could never be
+  merged alone. This closes the gap `docs/DEPENDENCY_TRIAGE_2026-08.md` recorded
+  as left open.
+- `vite` and `@vitejs/plugin-react` added to the npm major-version ignore list
+  as a coupled pair. The repository has now hit the same deadlock from both
+  sides: #28 (`vite` 6 to 8) failed CI at `npm install` with ERESOLVE because
+  `@vitejs/plugin-react@4.7.0` declares `peer vite "^4.2.0 || ^5.0.0 || ^6.0.0
+  || ^7.0.0"`, and #41 (`@vitejs/plugin-react` 4 to 6) was closed because plugin
+  6 requires a Vite major. Neither half is mergeable alone, so either half
+  proposed on its own can only produce a pull request that gets closed. Removing
+  both entries together is what reopens the upgrade.
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` records what happened after the triage was
+  acted on, and states the condition for closing #27
+  (`aws-actions/configure-aws-credentials` 4 to 6): it stays open until
+  `deploy.yml` is enabled. Nothing is wrong with the bump, so closing it would
+  discard a valid update and invite Dependabot to reopen it weekly, and ignoring
+  it would hide a credential-handling action from updates entirely. It is held
+  open until a workflow exists that can actually exercise it.
 - OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
   2026-08-21: pull request required, the `ci` status check required, approvals
   not required, force pushes and deletions blocked. GitHub shows them as "Not
