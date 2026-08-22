@@ -11,7 +11,7 @@ updates every artifact the answer affects.
 | ID | Status | Blocks |
 | --- | --- | --- |
 | [OQ-1](#oq-1) | Answered by ADR 0001 (author's decision, not a stakeholder answer) | Nothing now; affects platform strategy beyond the prototype |
-| [OQ-2](#oq-2) | Open | Recording the Tesseract version in the architecture document |
+| [OQ-2](#oq-2) | Closed 2026-08-22 | Nothing; the version is recorded |
 | [OQ-3](#oq-3) | Open | Reproducible frontend builds; `npm ci` in CI and Docker |
 | [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
@@ -62,6 +62,22 @@ section 1]
 ## OQ-2
 **What version of Tesseract does the container use?**
 
+**Status: Closed 2026-08-22.** Answer: **Tesseract 5.3.0**, with
+leptonica 1.82.0, the version Debian bookworm ships.
+
+Read from the summary of the most recent successful CI run on `develop`, run
+32574942848 at commit `ef3086a`, step "Report the Tesseract version in the
+image":
+<https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/32574942848>
+
+Recorded in the version table in
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8. The version was read from a
+real run rather than inferred from the base image tag, which is what this
+question asked for. It will change only when the base image moves to a different
+Debian release.
+
+The record of why it could not be read in the initializing session follows.
+
 Section 6 of the build instructions stated that Tesseract was preinstalled in
 this environment and asked for `tesseract --version` to be recorded in
 [05_ARCHITECTURE.md](05_ARCHITECTURE.md). It was not installed, and it could not
@@ -89,14 +105,13 @@ time; the actual version must be read from a built image and recorded.
 against the built image and writes the result to the workflow run summary page.
 The version also appears in the SBOM artifact attached to every run.
 
-**To close this question:** read the version from the summary of any successful
-CI run and record it in the version table in
-[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8, replacing the
-"Not verified in this session" row.
+**How it was closed:** the version was read from the run summary named above and
+recorded in the version table in
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8.
 
-**Who can answer:** anyone reading a CI run summary, or running
-`docker run --rm --entrypoint tesseract <image> --version` locally.
-**Blocks:** the version row in [05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 8.
+**Who answered:** CI run 32574942848. The same value can be reproduced locally
+with `docker run --rm --entrypoint tesseract <image> --version`.
+**Blocks:** nothing.
 
 ## OQ-3
 **Should a frontend lockfile be committed, and which package manager?**

@@ -235,22 +235,36 @@ default path.
 | Python | 3.11 | `python:3.11-slim-bookworm` base image; local `python3 --version` reported 3.11.15 |
 | Node.js | 22 | `node:22-bookworm-slim` build image; local `node --version` reported v22.22.2 |
 | Docker | 29.3.1 | `docker --version` in the build session |
-| Tesseract | **Recorded by CI, not yet transcribed here** | See below |
+| Tesseract | 5.3.0 | `tesseract --version` against the built image, in CI run 32574942848 |
+| Leptonica | 1.82.0 | Reported by the same `tesseract --version` output |
 
-**Tesseract version is not recorded because it could not be verified.** The
-build session had no Tesseract binary, and it could not be installed: the
-session's egress policy returned `403 Forbidden` for `archive.ubuntu.com`, so
-`apt-get install tesseract-ocr` failed for every package. The version is
-therefore unknown rather than assumed, and is tracked as OQ-2 in
-[OPEN_QUESTIONS.md](OPEN_QUESTIONS.md). The Dockerfile installs
-`tesseract-ocr` and `tesseract-ocr-eng` from the Debian bookworm repositories at
-image build time.
+**Tesseract version, verified.** The `container build and SBOM` CI job runs
+`tesseract --version` inside the built image and publishes the result to the
+workflow run summary. Read from the most recent successful CI run on `develop`,
+run 32574942848 at commit `ef3086a`, step "Report the Tesseract version in the
+image":
 
-The version **is** captured automatically: the `container build and SBOM` CI job
-runs `tesseract --version` against the built image and publishes the result to
-the workflow run summary, and the version also appears in the SBOM artifact
-attached to every run. It has not been transcribed into this table yet, because
-doing so from anything other than a real run output would be a guess.
+```
+tesseract 5.3.0
+ leptonica-1.82.0
+  libgif 5.2.1 : libjpeg 6b (libjpeg-turbo 2.1.2) : libpng 1.6.39 :
+  libtiff 4.5.0 : zlib 1.2.13 : libwebp 1.2.4 : libopenjp2 2.5.0
+```
+
+Run URL:
+<https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/32574942848>
+
+That is the version Debian bookworm ships, which is what the Dockerfile installs
+from: `tesseract-ocr` and `tesseract-ocr-eng` are pulled from the bookworm
+repositories at image build time. The version therefore moves only when the
+`python:3.11-slim-bookworm` base image moves to a different Debian release, and
+a base image change should be treated as a change to this row. The version also
+appears in the SBOM artifact attached to every CI run, which is the durable
+record.
+
+**5.3.0 is the LSTM-era Tesseract**, so the OCR path in section 4 uses the
+neural engine rather than the legacy pattern matcher. No claim is made here
+about its accuracy on label artwork; that is OQ-8, and it is unmeasured.
 
 Only English language data is installed, per the build instruction not to add
 OCR models beyond English.
