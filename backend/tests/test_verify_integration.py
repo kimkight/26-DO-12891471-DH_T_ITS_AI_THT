@@ -9,8 +9,11 @@ latency figure this test prints is one measurement on one machine and is not a
 published number; scripts/measure.py produces the reported set.
 """
 
+import logging
+import socket
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 from samples.specs import SAMPLE_LABEL, TITLE_CASE_WARNING
 
@@ -108,3 +111,93 @@ class TestNothingIsPersisted:
         first = verify(sample_label_png, SAMPLE_LABEL.application).json()
         second = verify(sample_label_png, SAMPLE_LABEL.application).json()
         assert [f["outcome"] for f in first["fields"]] == [f["outcome"] for f in second["fields"]]
+
+
+class TestNothingSensitiveReachesTheLogs:
+    """UAT row 17: inspect the logs after a verification (NFR-6)."""
+
+    def test_no_extracted_or_application_value_appears_in_any_log_record(
+        self, sample_label_png, caplog
+    ):
+        caplog.set_level(logging.DEBUG)
+        response = verify(sample_label_png, SAMPLE_LABEL.application)
+        assert response.status_code == 200
+
+        logged = " ".join(record.getMessage() for record in caplog.records)
+        logged += " " + " ".join(str(record.__dict__) for record in caplog.records)
+
+        # Only values distinctive enough for a substring search to mean
+        # something. "45" would match a timestamp or an object address and
+        # report a leak that is not one; the fields it stands for are covered
+        # by the allow-list assertion in the next test.
+        candidates = [
+            SAMPLE_LABEL.brand_name,
+            SAMPLE_LABEL.class_type,
+            SAMPLE_LABEL.alcohol_content,
+            SAMPLE_LABEL.net_contents,
+            *SAMPLE_LABEL.application.values(),
+            "GOVERNMENT WARNING",
+            "Surgeon General",
+        ]
+        forbidden = [value for value in candidates if value and len(value) >= 5]
+        assert len(forbidden) >= 6, "the guard should be checking real values"
+        for value in forbidden:
+            assert value not in logged, f"{value!r} reached the logs"
+
+    def test_the_completion_record_carries_counts_and_timings_only(self, sample_label_png, caplog):
+        caplog.set_level(logging.INFO)
+        verify(sample_label_png, SAMPLE_LABEL.application)
+        completions = [r for r in caplog.records if r.getMessage() == "verification completed"]
+        assert completions, "the verification should log that it completed"
+        record = completions[0]
+        assert isinstance(record.bytes_received, int)
+        assert isinstance(record.ocr_ms, float)
+        assert record.beverage_type_supplied is True
+
+        # An allow-list rather than a search, because this is the one record the
+        # verification path writes and NFR-6 is a statement about what may be in
+        # it. A new field added here has to be added to this list deliberately.
+        standard = set(logging.LogRecord("", 0, "", 0, "", None, None).__dict__)
+        added = set(record.__dict__) - standard - {"taskName", "asctime", "message"}
+        assert added == {"bytes_received", "ocr_ms", "beverage_type_supplied"}
+
+
+class TestEgressBlocked:
+    """UAT row 16 and NFR-3: the default path completes with no network."""
+
+    def test_verification_succeeds_when_every_socket_is_refused(
+        self, sample_label_png, monkeypatch
+    ):
+        """Marcus Williams's constraint, asserted rather than assumed.
+
+        The whole socket constructor is replaced, so any attempt to open a
+        connection during the request raises rather than silently succeeding.
+        The test client speaks to the app in process and does not use one.
+        """
+
+        real_socket = socket.socket
+
+        class RefusedSocket(real_socket):
+            def __init__(self, family=socket.AF_INET, *args, **kwargs):
+                # AF_UNIX is left alone: asyncio builds its own self-pipe from a
+                # Unix socketpair, so refusing that would break the event loop
+                # rather than test the application. Only outbound IP sockets are
+                # what NFR-3 is about.
+                if family in (socket.AF_INET, socket.AF_INET6):
+                    raise OSError("egress is blocked for this test")
+                super().__init__(family, *args, **kwargs)
+
+        def refuse_connection(*args, **kwargs):
+            raise OSError("egress is blocked for this test")
+
+        monkeypatch.setattr(socket, "socket", RefusedSocket)
+        monkeypatch.setattr(socket, "create_connection", refuse_connection)
+
+        # Prove the guard is live, so that a passing test cannot mean the patch
+        # silently stopped working.
+        with pytest.raises(OSError, match="egress is blocked"):
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        response = verify(sample_label_png, SAMPLE_LABEL.application)
+        assert response.status_code == 200
+        assert response.json()["external_call_made"] is False

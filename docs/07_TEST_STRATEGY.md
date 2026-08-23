@@ -74,10 +74,19 @@ committed, so no binary fixture enters the repository.
   **Not built.**
 - A batch exceeding the file-count limit is rejected before any file is
   processed (FR-8). **Not built.**
-- With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted.
-  Partially covered: every response carries `external_call_made`, asserted false
-  on the default path. Running the suite with egress blocked, which is the
-  stronger assertion, is not yet wired into CI (NFR-3).
+- With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted
+  (NFR-3). **Implemented**, as UAT row 16: the test replaces the socket
+  constructor so that any attempt to open an IP socket raises, proves the guard
+  is live by opening one itself, and then asserts the verification still returns
+  200 with `external_call_made` false. AF_UNIX is left alone, because asyncio
+  builds its own self-pipe from a Unix socketpair and refusing that would break
+  the event loop rather than test the application.
+- No image content and no extracted or application value reaches the logs
+  (NFR-6). **Implemented**, as UAT row 17: distinctive values are searched for
+  across every captured record, and the one record the verification path writes
+  is held to an allow-list of `bytes_received`, `ocr_ms` and
+  `beverage_type_supplied`, so a field added to it later has to be added there
+  deliberately.
 
 ## 3. Accuracy tests
 
@@ -206,6 +215,12 @@ against a deployed build before the prototype is presented.
 | 15 | Inspect the warning result wording | It does not state or imply that bold type was checked | OOS-4; FR-6 |
 | 16 | Run a verification with egress blocked | Completes successfully | Marcus Williams interview; NFR-3 |
 | 17 | Inspect logs after a verification | No image content and no extracted field values | NFR-6 |
+
+Rows 16 and 17 are also automated, in `backend/tests/test_verify_integration.py`.
+They stay on the manual checklist because the automated versions test the
+application process, and the row is about the deployed system: the automated
+egress test blocks sockets inside one Python process, and the automated log test
+reads records the application emitted rather than what CloudWatch received.
 | 18 | Alcohol content `45` against application `45.0%` | Match | FR-7; A-12 |
 | 19 | Alcohol content `45` against application `45.1` | Mismatch, with both values and the difference shown. **A match or a needs-human-review outcome is a failure of this test.** | FR-7; A-12 |
 | 20 | Label stating `45% Alc./Vol. (90 Proof)` against application `45` | Proof cross-check passes, because 90 equals 2 x 45; the alcohol content outcome is match | FR-7; A-12; 27 CFR 5.65 |
