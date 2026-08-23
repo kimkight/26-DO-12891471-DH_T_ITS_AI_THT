@@ -128,7 +128,7 @@ sequenceDiagram
     participant W as Per-label processing
     participant R as Result assembler
 
-    A->>API: POST /api/verify/batch (N labels + application data)
+    A->>API: POST /api/verify-batch (N images + one application CSV)
     API->>V: Check batch file count against TTB_MAX_BATCH_FILES
     alt Count exceeds limit
         V-->>A: Rejected before any file is processed, limit named
@@ -171,7 +171,9 @@ file does not have to come back here to find out why it exists.
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
 | `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
-| `api.py` | `POST /api/verify`, the upload-size middleware, the MIME check, and the FR-9 error shapes | FR-1, FR-2, FR-9, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py` |
+| `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
+| `batch.py` | The A-14 CSV parser, reconciliation of images against rows, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, NFR-2, NFR-6 | `tests/test_batch.py` |
+| `api.py` | `POST /api/verify` and `POST /api/verify-batch`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_batch.py` |
 
 Two implementation notes that are not obvious from the table:
 
@@ -183,7 +185,23 @@ Two implementation notes that are not obvious from the table:
   means the body is never consumed.
 - **Starlette's multipart spool threshold is raised to the upload limit.** Its
   default rolls any part over 1 MB onto a temporary file on disk, which NFR-6
-  forbids. Raising the threshold keeps every accepted upload in memory.
+  forbids. Raising the threshold keeps every accepted upload in memory. Note
+  that the parser's neighbouring `max_part_size` is not what bounds an image:
+  it applies to non-file parts only, and a file part streams into the spooled
+  file with no cap of its own. Images are bounded exactly, after parsing, by
+  `verify.check_size`.
+- **`OMP_THREAD_LIMIT` is pinned to 1 by `ocr.py`.** Tesseract is built against
+  OpenMP, and its OpenMP runtime deadlocks when the binary is invoked from a
+  thread other than the process main thread. `POST /api/verify` never met this
+  because an async handler runs OCR on the event loop thread; the batch worker
+  pool does not. Without the pin a batch hangs rather than failing. One thread
+  per invocation is also the right shape, because the pool already parallelizes
+  across images. See ADR 0006.
+- **The batch response is a stream, so its status line is sent before any row
+  is computed.** There is no way to turn a later failure into an HTTP error, so
+  `batch.py` converts every per-row exception into that row's error line. This
+  is what FR-8 and NFR-2 require anyway: one unreadable image must not fail the
+  batch.
 
 **Brand name and class or type are located by type size, and that is a
 heuristic.** Alcohol content, net contents and the warning carry patterns to
@@ -247,6 +265,8 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_BEDROCK_MODEL_ID` | empty | Model identifier for the fallback, when enabled |
 | `TTB_MAX_UPLOAD_BYTES` | `10485760` | Per-file size limit, enforced before the body is read |
 | `TTB_MAX_BATCH_FILES` | `300` | Batch file-count limit, enforced before processing |
+| `TTB_BATCH_WORKERS` | `0` | How many images a batch reads at once. `0` derives it from the cores the process may use, because OCR is CPU bound and runs in-process. |
+| `TTB_MAX_BATCH_BYTES` | `0` | Largest batch request body accepted, checked from Content-Length before the body is read. `0` derives it as `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, about 3 GiB at the defaults. See the note below. |
 | `TTB_ALLOWED_MIME_TYPES` | `image/jpeg`, `image/png`, `image/webp`, `image/tiff` | Accepted upload types, checked before decoding. Set as a JSON array. |
 | `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
@@ -263,6 +283,14 @@ a starting point for tuning. The regulatory tolerances in 27 CFR 5.65, 4.36, and
 declared values, so no tolerance applies. The variable exists so the position can
 change without a code change if a compliance agent states otherwise. See A-12 in
 [ASSUMPTIONS.md](ASSUMPTIONS.md).
+
+`TTB_MAX_BATCH_BYTES` needs reading before a task is sized. FastAPI parses the
+whole multipart envelope while resolving the route's parameters, so a batch is
+in memory before any of it is processed. The derived default is the largest
+batch the two stated limits already permit rather than a figure invented here,
+which makes it an upper bound and not a memory guarantee. Setting a real ceiling
+here, or lowering `TTB_MAX_BATCH_FILES`, is the lever for bounding batch memory.
+Recorded against OQ-13 item 6.
 
 In deployed environments these are supplied by the ECS task definition. Secrets,
 if any are ever introduced, come from AWS Secrets Manager by reference and never
@@ -358,8 +386,8 @@ FedRAMP Marketplace and the provider's documentation at deployment time; see
 | --- | --- |
 | `GET /api/health` | Implemented |
 | `POST /api/verify` | Implemented. Extraction, comparison and the warning checks all run; see the module map in section 5.1. |
-| `POST /api/verify/batch` | Not implemented. Designed in [ADR 0006](adr/0006-batch-execution-model.md); FR-8, NFR-2 and US-9 through US-11 remain open. |
+| `POST /api/verify-batch` | Implemented, per [ADR 0006](adr/0006-batch-execution-model.md). One synchronous multipart request, a bounded worker pool, results streamed as newline-delimited JSON, no job store. FR-8, NFR-2, US-9 through US-11. |
 
-There is no user interface for verification yet. FR-10 and NFR-5, the
-presentation and accessibility requirements, are unbuilt: the engine is reachable
-over HTTP only. See the Status section of the [README](../README.md).
+Nothing is deployed. Accuracy and latency are measured on synthetic labels by
+`scripts/measure.py` and on a session runner, not on the deployed target; see
+the Status section of the [README](../README.md).

@@ -16,6 +16,8 @@ result involved an external call."
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from app.compare import Outcome
@@ -110,3 +112,35 @@ class ErrorDetail(BaseModel):
 
 class ErrorResponse(BaseModel):
     error: ErrorDetail
+
+
+class BatchLine(BaseModel):
+    """One line of the batch NDJSON stream (FR-8, NFR-2, ADR 0006).
+
+    One JSON object per line, one line per item, emitted as each item finishes
+    rather than in submission order. ``filename`` is what FR-8's fourth
+    criterion requires: "The result identifies which label each result belongs
+    to." It is null only on a batch-level error, which is a problem with the
+    submission rather than with any one label.
+
+    ``index`` and ``total`` exist for NFR-2's second criterion, that "batch
+    progress is observable to the user rather than presenting as a frozen
+    page". A client can render "42 of 300" from the first line it receives
+    without waiting for the batch to end or counting parts itself.
+
+    Exactly one of ``result`` and ``error`` is set. An error line carries no
+    field outcomes at all, which is FR-9's last criterion applied per row.
+    """
+
+    filename: str | None = Field(
+        description="The image this line belongs to. Null only on a batch-level error."
+    )
+    index: int = Field(description="1-based position of this line in the emission order.")
+    total: int = Field(description="How many lines this batch will emit in total.")
+    status: Literal["ok", "error"] = Field(description="Whether this item was verified.")
+    result: VerificationResult | None = Field(
+        default=None, description="The verification, on an ok line."
+    )
+    error: ErrorDetail | None = Field(
+        default=None, description="What went wrong, on an error line."
+    )
