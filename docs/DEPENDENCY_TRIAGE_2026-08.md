@@ -375,19 +375,51 @@ change turned out red. It did not, so the pair stays eligible for updates. The
 `vite` and `@vitejs/plugin-react` treatment fits a pair known to be unadoptable;
 this pair is now known to be adoptable, which is the opposite finding.
 
-### #43, typescript 5.9.3, after the rebase
+### #43, typescript 5.9.3: the rebase could not be triggered from a session
 
-`@dependabot rebase` was commented on #43 on 2026-08-23, so that Dependabot would
-regenerate `frontend/package-lock.json` now that one exists on `develop`. Its
-state after the rebase is recorded in the pull request for
-`feature/eslint-10-evaluation` rather than guessed here, because a rebase result
-is something to read rather than predict. **It is not merged**, per the standing
-rule that nothing in this work merges itself.
+**#43 is still un-rebased, and it is still `package.json` only.** Head
+`33491641`, one file changed, based on `d405786`, which predates the merges of
+#45 and #46. Merging it as it stands would leave `develop` red until the lock
+file was regenerated, exactly as the "Lock file interaction" section below says.
 
-Note the interaction if both land: #43 raises `typescript` and the combined
-eslint change raises the eslint pair, and both regenerate the same lock file.
-Whichever merges second needs a rebase, for the same reason as everything else in
-the "Lock file interaction" section below.
+A rebase comment was posted to #43 on 2026-08-23 and **Dependabot did not
+receive it**. The session's GitHub tooling rewrites bot mentions before posting,
+inserting `U+00B7` middle dots into the mention and into the command word. The
+comment landed on the pull request reading:
+
+```
+·@·d·ependabot r·ebase
+```
+
+That is a deliberate guardrail against an agent driving another automation, not
+a bug to work around, and no attempt was made to evade it. Recorded as
+[OQ-19](OPEN_QUESTIONS.md#oq-19).
+
+**Three alternatives were considered and rejected.**
+
+- **Use the "Update branch" button** (merge `develop` into the pull request).
+  This makes #43 red rather than green. It would bring `develop`'s lock file in,
+  which still pins `typescript` 5.7.3, against a `package.json` asking for
+  5.9.3. `npm ci` refuses a lock that disagrees with its manifest, so all three
+  npm jobs would fail at install.
+- **Push a regenerated lock to Dependabot's branch.** Dependabot states in the
+  pull request body that it resolves conflicts "as long as you don't alter it
+  yourself", so a manual push takes the pull request out of its management. It
+  is also someone else's branch.
+- **Recreate the bump by hand on a new branch.** That produces a pull request
+  Dependabot does not know about, and leaves #43 open to be closed manually
+  anyway. It trades one manual step for two.
+
+**So it stays a manual step for the repository owner:** comment
+`@dependabot rebase` on #43. Dependabot then regenerates
+`frontend/package-lock.json` as part of the pull request, which is the clean
+order for all three of #42, #43 and #44.
+
+Note the interaction if both #43 and the eslint change land: both regenerate the
+same lock file, so whichever merges second needs a rebase, for the same reason as
+everything else in the "Lock file interaction" section below.
+
+**Nothing here was merged.**
 
 ## Lock file interaction, from 2026-08-22 onward
 

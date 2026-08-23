@@ -50,6 +50,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `eslint` and `@eslint/js` raised to 10 together, with `frontend/package-lock.json`
+  regenerated in the same commit. This is the evidence
+  `docs/DEPENDENCY_TRIAGE_2026-08.md` said did not exist: `npm ci` resolves with
+  no ERESOLVE, `eslint .` is clean, prettier is clean, `tsc -b && vite build`
+  succeeds and `npm audit` finds nothing. `frontend/eslint.config.js` needed no
+  change. The recommendation is to close #42 and #44, each of which is half of
+  this upgrade, in its favour. The lock entry being replaced carried an upstream
+  deprecation notice, so `develop` was pinned to an unsupported eslint.
+- OQ-19 recorded: the session's GitHub tooling rewrites bot mentions before
+  posting, inserting `U+00B7` middle dots into the mention and the command word,
+  so `@dependabot rebase` cannot be issued from a session. #43 is therefore still
+  un-rebased and still `package.json` only. The three ways around it were
+  considered and rejected in the triage document; the command stays a manual step
+  for the repository owner.
+- `*.tsbuildinfo` added to `.gitignore`. `tsc -b` writes it next to each tsconfig
+  it builds, and it showed up untracked after every frontend build.
+
 - OQ-3 closed. Builds now install from the committed lock files rather than
   resolving afresh. The `backend lint and test` job installs
   `pip install --require-hashes -r requirements-dev.lock` followed by
