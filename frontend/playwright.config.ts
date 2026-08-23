@@ -46,9 +46,21 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `npm run preview -- --port ${PORT} --strictPort`,
+    // --host 127.0.0.1 is not redundant with the url below, it is what makes
+    // the two agree. `vite preview` binds to "localhost" by default, and on a
+    // host where localhost resolves to ::1 first it can end up listening on
+    // IPv6 only while this readiness probe polls IPv4. That fails as a silent
+    // 120-second timeout, which is exactly how it presented in CI. Binding the
+    // literal address removes the ambiguity rather than relying on how the
+    // runner resolves a name.
+    command: `npm run preview -- --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: !process.env.CI,
+    // Piped so the server's own output reaches the log. Playwright swallows it
+    // by default, so a server that fails to start produces a timeout with
+    // nothing to diagnose it from.
+    stdout: 'pipe',
+    stderr: 'pipe',
     timeout: 120_000,
   },
 })
