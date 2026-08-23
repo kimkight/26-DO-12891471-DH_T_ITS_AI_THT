@@ -73,6 +73,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TTB_ALLOWED_MIME_TYPES` and `TTB_OCR_LONG_EDGE_PX`, both mirrored in
   `.env.example` alongside `TTB_ABV_TOLERANCE`, which the settings class had not
   previously read.
+- The agent-facing interface, implementing FR-10, NFR-4 and NFR-5. One screen,
+  two tabs, plain React with no new runtime dependency beyond `react` and
+  `react-dom`.
+
+  The first tab is the primary task and is open on load, so verifying one label
+  needs no navigation (NFR-4). Left: a large drop zone and the five labelled
+  inputs, with one "Check this label" button. Right: five result cards, each
+  showing the field name, the value found on the label, the value from the
+  application, the outcome as text and shape and colour, and the API's reason
+  string. Needs-review cards are visually distinct from both match and
+  mismatch by tint and edge weight as well as hue. The government warning card
+  reports the prefix capitalization in its own labelled section and repeats the
+  bold-type note verbatim (FR-6, OOS-4). Total time is shown as the round trip
+  the agent waited for, with the server's own elapsed figure as the detail.
+
+  The second tab is batch: a multi-file picker, a CSV picker, a progress
+  indicator driven by the NDJSON stream rather than by an animation, a sortable
+  results table with a status chip per row, summary counts, and a "Download
+  results CSV" button that builds the file in the browser because D-9 leaves no
+  server-side copy to download.
+
+  FR-9 errors render as plain language ("We couldn't read this label. Try a
+  clearer photo.") with the API's own message kept underneath as the detail.
+- Accessibility work against NFR-5: every input has a programmatically
+  associated label, every control is keyboard reachable with a visible focus
+  ring, results are announced through a polite live region that is in the DOM
+  before the results exist, the tab strip follows the ARIA tabs pattern with
+  arrow-key navigation, and a skip link is the first thing in the tab order.
+- `axe-core` as a dev dependency and an automated accessibility test that runs
+  it in Chromium against the built page, in CI. It covers the landing page, the
+  batch tab, and a rendered result set including a needs-review card. A
+  keyboard walk and a focus-visibility assertion run alongside it, because axe
+  cannot check whether a control can actually be operated.
+- `frontend/src/__tests__/contrast.test.ts`, computing WCAG 2.1 contrast ratios
+  from the tokens in `index.css` and asserting 4.5:1 for every foreground on
+  every surface it can appear on, including pairs no component happens to
+  combine today.
+- 61 frontend component tests covering outcome rendering as text and shape and
+  colour, the live region, the timing line, the plain-language error path, the
+  batch table's sorting and status chips, and the results CSV.
+- `vitest`, `@testing-library/react`, `jsdom` and `@playwright/test` as dev
+  dependencies, and `npm run test` and `npm run test:a11y`. The npm lock file
+  is regenerated in the same change, per the standing rule in
+  `CONTRIBUTING.md`.
 
 ### Changed
 
@@ -193,6 +237,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discard a valid update and invite Dependabot to reopen it weekly, and ignoring
   it would hide a credential-handling action from updates entirely. It is held
   open until a workflow exists that can actually exercise it.
+
+### Fixed
+
+- `frontend/*.tsbuildinfo` is git-ignored, and the two files that had been
+  committed before that rule existed are removed. They are machine-specific
+  TypeScript incremental build state, regenerated on every build.
+- `Dockerfile` and the CI frontend and audit jobs set
+  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`. `@playwright/test` downloads browser
+  binaries from its own postinstall script; the image build never opens a
+  browser, and in CI the explicit `playwright install chromium` step is now the
+  single place a browser is fetched.
+- The `react` and `vite` ignore entries in `.github/dependabot.yml` carried a
+  reason that has stopped being true: that CI passing on a frontend major would
+  be evidence of nothing because the frontend was a scaffold. There is now a
+  real interface with component tests and an accessibility run. The entries
+  stay, because each upgrade is still a decision wanting its own pull request,
+  but the recorded reason now says so rather than claiming there is nothing to
+  test.
 
 ## [0.1.0] - 2026-08-22
 

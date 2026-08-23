@@ -47,6 +47,17 @@ pnpm-debug.log*
 frontend/dist/
 frontend/dist-ssr/
 frontend/.vite/
+
+# TypeScript incremental build state. Machine-specific and regenerated on every
+# build; two of these were committed before this rule existed and are removed
+# in the same change that adds it.
+frontend/*.tsbuildinfo
+
+# Playwright output from the accessibility run. The report is a local artifact;
+# CI reads the run's exit status, not these directories.
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
 *.local
 .eslintcache
 # tsc -b writes these next to the tsconfig files it builds.

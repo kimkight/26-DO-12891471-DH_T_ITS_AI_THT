@@ -77,9 +77,16 @@ updates:
         update-types: ["version-update:semver-major"]
 
       # React majors change rendering behaviour and, from 19 onward, what the
-      # hooks lint rules enforce. There is no UI to regression-test yet: the
-      # frontend is a scaffold, so CI passing on a React major would be
-      # evidence of nothing. Revisit once FR-1 has real components.
+      # hooks lint rules enforce.
+      #
+      # The original reason for this entry was that CI passing on a React major
+      # would be evidence of nothing, because the frontend was a scaffold with
+      # one component. **That is no longer true.** FR-10 landed a real interface
+      # with 61 component tests and an axe run against the built page, so a
+      # React major now has something to regression-test against. The entry
+      # stays because the upgrade is still a decision that wants its own pull
+      # request and its own reading of the test output, not because there is
+      # nothing to test. Removing it is a reasonable next task.
       #
       # react-dom is ignored on the same terms because the two are one unit:
       # they ship as a matched pair and react-dom declares a peer dependency on
@@ -108,9 +115,14 @@ updates:
       # Neither half is mergeable alone, so proposing either half separately
       # can only generate a pull request that gets closed. The upgrade is a
       # single change that raises both at once, taken deliberately in its own
-      # pull request with `tsc -b` and `vite build` read afterwards, and it
-      # belongs with the frontend work that has not started. Removing both
-      # entries together is what reopens it.
+      # pull request with `tsc -b` and `vite build` read afterwards. Removing
+      # both entries together is what reopens it.
+      #
+      # The original entry said this belonged with "the frontend work that has
+      # not started". That work has now landed (FR-10), and the deadlock is
+      # unchanged: it is a property of the two packages' peer ranges, not of
+      # this repository's readiness. What has changed is that a Vite major now
+      # has a real bundle and a real accessibility run to be judged against.
       - dependency-name: "vite"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@vitejs/plugin-react"

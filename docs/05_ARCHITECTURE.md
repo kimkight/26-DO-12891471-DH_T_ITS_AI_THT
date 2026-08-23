@@ -73,6 +73,11 @@ React application to static files, and the FastAPI process serves them. This
 keeps the prototype to a single deployable unit and removes the need for a
 separate origin, bucket, or CDN.
 
+It also means the interface is same-origin with the API, so there is no CORS
+configuration and no second hostname to get right at deployment time. The
+frontend calls `/api/verify` and `/api/verify-batch` with a relative path and
+nothing else.
+
 ## 3. Request flow: single label verification
 
 ```mermaid
@@ -159,9 +164,10 @@ rather than a single request, are unresolved; see OQ-6 in
 
 ### 5.1 Module map
 
-The single-label path is implemented in `backend/app/`. Each module names the
-requirement it exists to satisfy in its own docstring, so a reader arriving at a
-file does not have to come back here to find out why it exists.
+The verification engine is implemented in `backend/app/` and the interface in
+`frontend/src/`. Each module names the requirement it exists to satisfy in its
+own docstring, so a reader arriving at a file does not have to come back here to
+find out why it exists.
 
 | Module | Responsibility | Governing requirements | Tests |
 | --- | --- | --- | --- |
@@ -194,11 +200,60 @@ first, so a brand name set across two lines stays one brand name. Where the
 heuristic fails, the field reports not found rather than a guess (FR-1). How
 often it fails is measured by `scripts/measure.py` rather than asserted here.
 
+#### Frontend modules
+
+Plain React with no state manager, no component library, no CSS framework and no
+runtime dependency beyond `react` and `react-dom`. Two endpoints and one screen
+do not need more, and every layer added between an agent and a form is a layer
+NFR-4 has to survive.
+
+| Module | Responsibility | Governing requirements | Tests |
+| --- | --- | --- | --- |
+| `App.tsx` | The one screen: the skip link, the two tabs, and the ARIA tabs keyboard behaviour | NFR-4, NFR-5 | `tests/a11y.spec.ts` |
+| `components/SingleLabelTab.tsx` | The drop zone, the five labelled inputs, the check button, the result cards, the timing line, and the live region | FR-10, NFR-1, NFR-4, NFR-5 | `src/__tests__/liveRegion.test.tsx` |
+| `components/BatchTab.tsx` | The two pickers, the progress indicator driven by the stream, the summary counts, and the CSV download | FR-8, NFR-2 | `src/__tests__/batchTable.test.tsx` |
+| `components/BatchTable.tsx` | The sortable results table with a status chip per row | FR-8, FR-10, NFR-5 | `src/__tests__/batchTable.test.tsx` |
+| `components/ResultCard.tsx` | One field's card, and the warning's separate capitalization and bold-type sections | FR-3, FR-6, FR-10, OOS-4 | `src/__tests__/outcomes.test.tsx` |
+| `components/OutcomeBadge.tsx` | An outcome as text, then shape, then colour | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
+| `components/DropZone.tsx` | A real file input with a bound label, plus drag and drop on top | NFR-4, NFR-5 | `tests/a11y.spec.ts` |
+| `components/ErrorMessage.tsx` | A failure as a plain-language line plus the API's own detail | FR-9, NFR-4 | `src/__tests__/liveRegion.test.tsx` |
+| `lib/api.ts` | The two calls, including reading the batch NDJSON stream incrementally | FR-8, NFR-2 | `src/__tests__/batchTable.test.tsx` |
+| `lib/outcomes.ts` | The text, shape and tone for each outcome, and the live-region sentence | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
+| `lib/plainLanguage.ts` | API error codes rendered as something an agent can act on | FR-9, NFR-4 | `src/__tests__/liveRegion.test.tsx` |
+| `lib/csv.ts` | The results CSV, built in the browser | FR-8, D-9 | `src/__tests__/batchTable.test.tsx` |
+| `index.css` | One light palette, defined as tokens, with every contrast pair checked | NFR-5 | `src/__tests__/contrast.test.ts` |
+
+Four notes that are not obvious from the table:
+
+- **The batch response is read from the body stream, not awaited whole.** A
+  client that waits for the last byte reinstates the frozen page NFR-2 forbids,
+  however the server sends it. `lib/api.ts` reads chunks and holds a partial
+  line back until its newline arrives, because chunk boundaries fall wherever
+  the network puts them rather than on record boundaries.
+- **An outcome is carried by three independent things: a word, a shape, and a
+  colour, in that order.** Removing the colour entirely would leave the
+  interface usable, which is the test NFR-5's first criterion sets. The four
+  shapes are different silhouettes, not one shape recoloured.
+- **There is one light palette and no dark mode.** `color-scheme: light dark`
+  hands the background colour to the browser, which makes the contrast ratio a
+  property of the visitor's settings rather than of the stylesheet. NFR-5 asks
+  for 4.5:1, so every colour is explicit and every pair is checked. A dark
+  palette is a good addition later; it is a second palette to verify, not a
+  toggle.
+- **Accessibility is checked two ways, because neither is sufficient alone.**
+  `contrast.test.ts` computes WCAG ratios from the tokens in `index.css`,
+  covering pairs no component happens to combine today. `tests/a11y.spec.ts`
+  runs axe-core in Chromium against the built page, which is the only way to
+  evaluate contrast as rendered: under jsdom axe reports the colour-contrast
+  rule as incomplete rather than passing, so a jsdom run would go green having
+  never checked it. Neither is a conformance claim. Automated tools find a
+  subset of WCAG failures, and no tool replaces testing with a screen reader.
+
 ### 5.2 Responsibilities and non-responsibilities
 
 | Component | Responsibility | Explicitly not responsible for |
 | --- | --- | --- |
-| React SPA | Collect the image and application data; present per-field outcomes accessibly; show batch progress | Any comparison logic; any judgment about compliance |
+| React SPA | Collect the image and application data; present per-field outcomes accessibly; show batch progress; build the results CSV in the browser | Any comparison logic; any judgment about compliance; retaining anything past the page |
 | FastAPI routing layer | HTTP contract, request lifecycle, error shaping | Image decoding; matching |
 | Validation | Size, MIME type, and batch count limits, enforced before decoding | Content correctness |
 | Extraction (Tesseract, OpenCV) | Turn image pixels into text for the five fields | Deciding whether a value is correct |
