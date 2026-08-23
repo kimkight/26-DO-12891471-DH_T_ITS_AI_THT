@@ -28,6 +28,7 @@ updates every artifact the answer affects.
 | [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
 | [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
 | [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
+| [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 
 ---
 
@@ -871,3 +872,47 @@ as a pushed one.
 **Who can answer:** whoever provisions the session environment, if the
 restriction is ever meant to be lifted.
 **Blocks:** nothing. The web interface path works.
+
+## OQ-19
+**How is a Dependabot command issued when the session's GitHub tooling rewrites
+bot mentions?**
+
+**Status: Open, 2026-08-23.**
+
+`docs/DEPENDENCY_TRIAGE_2026-08.md` recommends `@dependabot rebase` as the clean
+way to bring #42, #43 and #44 onto a `develop` that now has a lock file:
+Dependabot regenerates `frontend/package-lock.json` as part of the pull request,
+so the bump and its lock arrive together.
+
+A rebase comment was posted to #43 and Dependabot did not act on it. Reading the
+comment back through the API shows why. The session's GitHub tooling inserted
+`U+00B7` middle dots into the mention and into the command word before posting:
+
+```
+·@·d·ependabot r·ebase
+```
+
+so what reached the pull request was not a command Dependabot recognizes. The
+same rewriting is visible in the body of #45, where the identical string appears
+in the merge-order note.
+
+**This is a guardrail, not a defect.** It stops an agent from driving another
+automation on the repository, which is a reasonable thing to stop. No attempt
+was made to evade it, and none should be: the point of the rule is that a person
+decides when a bot acts.
+
+**What it costs.** Every Dependabot command in the triage document, `rebase`,
+`recreate`, `ignore this major version`, has to be issued by the repository
+owner rather than from a session. Three alternatives were considered and
+rejected in the triage document: the "Update branch" button makes the pull
+request red rather than green, pushing to Dependabot's branch takes the pull
+request out of its management, and recreating the bump by hand replaces one
+manual step with two.
+
+**Who can answer:** whoever configures the session's GitHub integration, on
+whether bot commands are meant to be issuable from a session at all. The answer
+may well be no, in which case this entry stands as the record of why the triage
+document's recommendations carry a manual step.
+**Blocks:** nothing in the prototype. It makes Dependabot triage a two-party
+operation: a session can read the pull requests and write the recommendation,
+and a person issues the command.
