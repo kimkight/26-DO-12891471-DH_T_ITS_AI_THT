@@ -157,6 +157,45 @@ rather than a single request, are unresolved; see OQ-6 in
 
 ## 5. Component responsibilities
 
+### 5.1 Module map
+
+The single-label path is implemented in `backend/app/`. Each module names the
+requirement it exists to satisfy in its own docstring, so a reader arriving at a
+file does not have to come back here to find out why it exists.
+
+| Module | Responsibility | Governing requirements | Tests |
+| --- | --- | --- | --- |
+| `config.py` | Every tunable value, read once from the environment at startup | NFR-11, NFR-3, NFR-7 | `tests/test_compare.py` reads the thresholds it asserts against |
+| `ocr.py` | Decode, preprocess (long edge to 1600 px, grayscale, adaptive threshold, bounded deskew), run Tesseract, return text with word confidence, line geometry and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
+| `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
+| `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
+| `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
+| `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
+| `api.py` | `POST /api/verify`, the upload-size middleware, the MIME check, and the FR-9 error shapes | FR-1, FR-2, FR-9, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py` |
+
+Two implementation notes that are not obvious from the table:
+
+- **The size check is middleware, not a route dependency.** NFR-7 requires the
+  size to be checked "before the body is read into memory". FastAPI parses the
+  multipart body while resolving the endpoint's parameters, so by the time any
+  handler or dependency code runs the body has already been read. Middleware
+  runs before routing, and returning from it without calling the next handler
+  means the body is never consumed.
+- **Starlette's multipart spool threshold is raised to the upload limit.** Its
+  default rolls any part over 1 MB onto a temporary file on disk, which NFR-6
+  forbids. Raising the threshold keeps every accepted upload in memory.
+
+**Brand name and class or type are located by type size, and that is a
+heuristic.** Alcohol content, net contents and the warning carry patterns to
+match. The other two do not, and no source states a layout rule for them, so
+`parse.py` ranks the remaining text by the glyph height Tesseract reports and
+takes the largest as the brand name. Adjacent lines of similar size are grouped
+first, so a brand name set across two lines stays one brand name. Where the
+heuristic fails, the field reports not found rather than a guess (FR-1). How
+often it fails is measured by `scripts/measure.py` rather than asserted here.
+
+### 5.2 Responsibilities and non-responsibilities
+
 | Component | Responsibility | Explicitly not responsible for |
 | --- | --- | --- |
 | React SPA | Collect the image and application data; present per-field outcomes accessibly; show batch progress | Any comparison logic; any judgment about compliance |
@@ -208,6 +247,8 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_BEDROCK_MODEL_ID` | empty | Model identifier for the fallback, when enabled |
 | `TTB_MAX_UPLOAD_BYTES` | `10485760` | Per-file size limit, enforced before the body is read |
 | `TTB_MAX_BATCH_FILES` | `300` | Batch file-count limit, enforced before processing |
+| `TTB_ALLOWED_MIME_TYPES` | `image/jpeg`, `image/png`, `image/webp`, `image/tiff` | Accepted upload types, checked before decoding. Set as a JSON array. |
+| `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
 | `TTB_REVIEW_THRESHOLD` | `80` | Between this and the match threshold, a field needs human review |
 | `TTB_ABV_TOLERANCE` | `0.0` | Allowed difference, in percentage points, between the label ABV and the application ABV. Zero means the two declared values must be identical (A-12). |
@@ -313,7 +354,12 @@ FedRAMP Marketplace and the provider's documentation at deployment time; see
 
 ## 10. Current implementation status
 
-Only `GET /api/health` exists. The extraction, matching, and verification
-components described above are designed but not implemented. `/api/verify` and
-`/api/verify/batch` do not exist yet. See the Status section of the
-[README](../README.md).
+| Endpoint | State |
+| --- | --- |
+| `GET /api/health` | Implemented |
+| `POST /api/verify` | Implemented. Extraction, comparison and the warning checks all run; see the module map in section 5.1. |
+| `POST /api/verify/batch` | Not implemented. Designed in [ADR 0006](adr/0006-batch-execution-model.md); FR-8, NFR-2 and US-9 through US-11 remain open. |
+
+There is no user interface for verification yet. FR-10 and NFR-5, the
+presentation and accessibility requirements, are unbuilt: the engine is reachable
+over HTTP only. See the Status section of the [README](../README.md).

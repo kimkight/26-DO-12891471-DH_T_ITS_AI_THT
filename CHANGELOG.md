@@ -47,8 +47,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   triage: minor and patch updates grouped into one pull request per ecosystem
   per week, major bumps left ungrouped so each keeps its own pull request and
   recorded decision, and major bumps of `typescript` and `react` ignored. (#40)
+- The single-label verification engine: `POST /api/verify`, implementing FR-1
+  through FR-7 and FR-9 for one label, and US-1 through US-7 at the API level.
+  Six new modules under `backend/app/`, each naming the requirement it exists
+  to satisfy in its own docstring, mapped in `docs/05_ARCHITECTURE.md` section
+  5.1. There is no user interface for it; FR-10, NFR-4 and NFR-5 remain unbuilt.
+- The 27 CFR 16.21 statement as a constant in `backend/app/warning.py`, compared
+  exactly after whitespace normalization, with the `GOVERNMENT WARNING:` prefix
+  carrying a separate capitalization check. Every warning result states that
+  bold type was not checked (FR-5, FR-6, OOS-4).
+- 101 backend tests across the unit and integration tiers, covering every UAT
+  row in `docs/07_TEST_STRATEGY.md` section 6 that does not need a user
+  interface or batch processing.
+- The sample set: `samples/specs.py` describes twelve synthetic labels across
+  spirits, wine and malt beverage, carrying a title-case warning, altered
+  warning wording, an absent warning, a wrong ABV, missing net contents, an
+  inconsistent proof statement, cross-unit net contents, one rotated image and
+  one low-contrast image. `samples/generate_samples.py` renders them and writes
+  `samples/expected.csv` and `samples/applications/applications.csv`. Images
+  stay git-ignored; the script and both CSVs are committed.
+- `scripts/measure.py`, which runs the engine over the sample set and prints
+  per-field precision, recall, review rate, false match rate and latency as
+  Markdown. It writes nothing into `docs/`: a number belongs in a document once
+  it has been measured on hardware the document describes.
+- `TTB_ALLOWED_MIME_TYPES` and `TTB_OCR_LONG_EDGE_PX`, both mirrored in
+  `.env.example` alongside `TTB_ABV_TOLERANCE`, which the settings class had not
+  previously read.
 
 ### Changed
+
+- OQ-15 closed. The preflight it named as its own closing condition returned
+  `200` from PyPI and from the npm registry in a new session, with Tesseract
+  5.3.4 present, so the lock files generated outside a session under OQ-3 are now
+  verified to install and the OCR tier runs locally. Two caveats are recorded
+  rather than dropped: the session Tesseract is 5.3.4 while the container ships
+  the 5.3.0 Debian bookworm builds, and sessions still have no Docker daemon.
+- The README's "could not reach PyPI, npm, or the Ubuntu package archive"
+  limitation removed, along with the question counts it stated, which were stale.
+
+- CI installs Tesseract, its English language data and a TrueType font in the
+  backend job. Without them the integration tier skipped itself rather than
+  failing, which would have left the OCR path untested while CI stayed green.
+- CI lints and format-checks `samples/` and `scripts/` with the same ruff
+  configuration as `backend/`, so no corner of the repository holds Python that
+  CI never reads.
+- The multipart spool threshold is raised to `TTB_MAX_UPLOAD_BYTES`. Starlette's
+  default rolls any part over 1 MB onto a temporary file on disk, which NFR-6
+  forbids outright.
+- The upload size check moved from a route dependency into middleware. NFR-7
+  requires it "before the body is read into memory", and FastAPI parses the
+  multipart body while resolving the endpoint's parameters, so a dependency
+  cannot satisfy that wording.
 
 - OQ-3 closed. Builds now install from the committed lock files rather than
   resolving afresh. The `backend lint and test` job installs

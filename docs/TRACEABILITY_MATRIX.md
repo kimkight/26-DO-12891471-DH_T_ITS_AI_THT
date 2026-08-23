@@ -11,19 +11,19 @@ gap register, not decoration.
 
 | # | Stakeholder statement | Source | Requirement | Story | Issue | Test | ADR |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | "An agent pulls up an application, looks at the label artwork, and checks that what's on the label matches what's in the application." | Sarah Chen | FR-1, FR-2 | US-1 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1) | Not written | |
-| 2 | "a lot of what we do is just... matching... My agents spend half their day doing what's essentially data entry verification." | Sarah Chen | FR-2 | US-1 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1) | Not written | |
-| 3 | "You need judgment." | Dave Morrison | FR-3 | US-2 | [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | Not written | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
+| 1 | "An agent pulls up an application, looks at the label artwork, and checks that what's on the label matches what's in the application." | Sarah Chen | FR-1, FR-2 | US-1 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1) | `backend/tests/test_parse.py`, `test_verify_integration.py` | |
+| 2 | "a lot of what we do is just... matching... My agents spend half their day doing what's essentially data entry verification." | Sarah Chen | FR-2 | US-1 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1) | `backend/tests/test_compare.py`, `test_verify_integration.py` | |
+| 3 | "You need judgment." | Dave Morrison | FR-3 | US-2 | [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | `backend/tests/test_compare.py::TestOutcomeClassification` | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
 | 4 | "Just don't make my life harder in the process." | Dave Morrison | FR-10 | US-2 | [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | Not written | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
-| 5 | "the brand name was 'STONE'S THROW' on the label but 'Stone's Throw' in the application... it's obviously the same thing." | Dave Morrison | FR-4 | US-3 | [#3](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/3) | Not written; UAT row 2 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
-| 6 | "It has to be exact. Like, word-for-word." | Jenny Park | FR-5 | US-4 | [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | Not written; UAT rows 4, 5 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
-| 7 | "I caught one last month where they used 'Government Warning' in title case instead of all caps. Rejected." | Jenny Park | FR-6 | US-5 | [#5](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/5) | Not written; UAT row 3 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
-| 8 | "the 'GOVERNMENT WARNING:' part has to be in all caps and bold." Confirmed by 27 CFR 16.22(a)(2). | Jenny Park; eCFR | FR-6; OOS-4 | US-5 | [#5](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/5) | Not written; UAT row 15 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
-| 9 | Sample label: "45% Alc./Vol. (90 Proof)", "750 mL" | Technical Requirements | FR-7 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | Not written; UAT rows 7, 8, 18, 20 | |
-| 9a | "ABV is correct? Check." Tolerances in 27 CFR 5.65, 4.36, 7.65 govern actual against labeled content, so none applies to two declared values. | Sarah Chen; eCFR | FR-7; A-12 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | Not written; UAT rows 18, 19, 20, 21 | |
-| 9b | Net contents in different units are not converted; standards of fill are not validated. | FR-7; A-13 | FR-7; A-13 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | Not written; UAT row 22 | |
-| 10 | "if an agent can't read the label they just reject it and ask for a better image." | Jenny Park | FR-9 | US-7 | [#7](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/7) | Not written; UAT row 6 | |
-| 11 | "If we can't get results back in about 5 seconds, nobody's going to use it. We learned that the hard way." | Sarah Chen | NFR-1 | US-8 | [#8](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/8) | Not written; UAT row 11 | [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
+| 5 | "the brand name was 'STONE'S THROW' on the label but 'Stone's Throw' in the application... it's obviously the same thing." | Dave Morrison | FR-4 | US-3 | [#3](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/3) | `backend/tests/test_compare.py::TestBrandName`, `test_verify_integration.py`; UAT row 2 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
+| 6 | "It has to be exact. Like, word-for-word." | Jenny Park | FR-5 | US-4 | [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | `backend/tests/test_warning.py::TestWarningBody`; UAT rows 4, 5 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
+| 7 | "I caught one last month where they used 'Government Warning' in title case instead of all caps. Rejected." | Jenny Park | FR-6 | US-5 | [#5](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/5) | `backend/tests/test_warning.py::TestWarningCapitalization`; UAT row 3 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
+| 8 | "the 'GOVERNMENT WARNING:' part has to be in all caps and bold." Confirmed by 27 CFR 16.22(a)(2). | Jenny Park; eCFR | FR-6; OOS-4 | US-5 | [#5](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/5) | `backend/tests/test_warning.py::TestBoldTypeIsNeverClaimed`; UAT row 15 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
+| 9 | Sample label: "45% Alc./Vol. (90 Proof)", "750 mL" | Technical Requirements | FR-7 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | `backend/tests/test_compare.py::TestAlcoholContentComparison`, `TestNetContents`; UAT rows 7, 8, 18, 20 | |
+| 9a | "ABV is correct? Check." Tolerances in 27 CFR 5.65, 4.36, 7.65 govern actual against labeled content, so none applies to two declared values. | Sarah Chen; eCFR | FR-7; A-12 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | `backend/tests/test_compare.py::TestAlcoholContentComparison`; UAT rows 18, 19, 20, 21 | |
+| 9b | Net contents in different units are not converted; standards of fill are not validated. | FR-7; A-13 | FR-7; A-13 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | `backend/tests/test_compare.py::TestNetContents`; UAT row 22 | |
+| 10 | "if an agent can't read the label they just reject it and ask for a better image." | Jenny Park | FR-9 | US-7 | [#7](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/7) | `backend/tests/test_api_validation.py`; UAT row 6 | |
+| 11 | "If we can't get results back in about 5 seconds, nobody's going to use it. We learned that the hard way." | Sarah Chen | NFR-1 | US-8 | [#8](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/8) | `backend/tests/test_verify_integration.py`, `scripts/measure.py`; UAT row 11 | [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
 | 12 | "big importers who dump 200, 300 label applications on us at once... we literally have to process them one at a time." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written; UAT row 9 | [0006](adr/0006-batch-execution-model.md) |
 | 13 | "Janet from our Seattle office has been asking about this for years." | Sarah Chen | FR-8; A-14 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written | [0006](adr/0006-batch-execution-model.md) |
 | 14 | Batch resilience implied by the 300-label scenario | Sarah Chen | FR-8, FR-9 | US-10 | [#10](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/10) | Not written; UAT row 10 | [0006](adr/0006-batch-execution-model.md) |
@@ -49,23 +49,23 @@ Every requirement maps to at least one story. No orphans.
 
 | Requirement | Stories | Issues | Implemented | Tested |
 | --- | --- | --- | --- | --- |
-| FR-1 Field extraction | US-1 | #1 | No | No |
-| FR-2 Comparison against application data | US-1 | #1 | No | No |
-| FR-3 Three-outcome result | US-1, US-2 | #1, #2 | No | No |
-| FR-4 Case and punctuation tolerance | US-3 | #3 | No | No |
-| FR-5 Warning exact text | US-4 | #4 | No | No |
-| FR-6 Warning capitalization | US-5 | #5 | No | No |
-| FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | No | No |
+| FR-1 Field extraction | US-1 | #1 | **Yes**: `app/ocr.py`, `app/parse.py` | **Yes**: `test_parse.py`, `test_ocr.py`, `test_verify_integration.py` |
+| FR-2 Comparison against application data | US-1 | #1 | **Yes**: `app/api.py` `build_result` | **Yes**: `test_compare.py`, `test_verify_integration.py` |
+| FR-3 Three-outcome result | US-1, US-2 | #1, #2 | **Yes**: `app/compare.py`, `app/schemas.py` | **Yes**: `test_compare.py::TestOutcomeClassification` |
+| FR-4 Case and punctuation tolerance | US-3 | #3 | **Yes**: `app/compare.py` `normalize_text` | **Yes**: `test_compare.py::TestNormalization`, `TestBrandName` |
+| FR-5 Warning exact text | US-4 | #4 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningBody` |
+| FR-6 Warning capitalization | US-5 | #5 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningCapitalization`, `TestBoldTypeIsNeverClaimed` |
+| FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | **Yes**: `app/compare.py` `compare_abv`, `compare_net_contents` | **Yes**: `test_compare.py::TestAlcoholContentComparison`, `TestNetContents` |
 | FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | No: designed in ADR 0006, not built | No |
-| FR-9 Error handling | US-7, US-10 | #7, #10 | No | No |
+| FR-9 Error handling | US-7, US-10 | #7, #10 | Partial: single label done in `app/api.py`; batch is FR-8 and unbuilt | **Yes**: `test_api_validation.py` |
 | FR-10 Result presentation | US-2 | #2 | No | No |
-| NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | No | No |
+| NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
 | NFR-2 Batch throughput | US-11 | #11 | No: designed in ADR 0006, not built | No |
-| NFR-3 No outbound calls | US-14 | #14 | Partial: default is off in config | No |
+| NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
 | NFR-4 Simplicity | US-12 | #12 | No | No |
 | NFR-5 Accessibility | US-13 | #13 | No | No |
-| NFR-6 No persistence | US-15 | #15 | Partial: no volumes, no datastore exists | No |
-| NFR-7 Input validation | US-16 | #16 | Partial: limits defined, not enforced | No |
+| NFR-6 No persistence | US-15 | #15 | **Yes**: in-memory only, multipart spool threshold raised so no upload reaches disk | **Yes**: `test_verify_integration.py::TestNothingIsPersisted` |
+| NFR-7 Input validation | US-16 | #16 | **Yes**: size in middleware before the body is read, MIME before decoding | **Yes**: `test_api_validation.py` |
 | NFR-8 Code quality gates | US-18 | #18 | **Yes** | CI |
 | NFR-9 Deployability | US-17 | #17 | Partial: image builds, nothing deployed | CI container job |
 | NFR-10 Government-region portability | US-19 | #19 | No: no infrastructure code exists | No |
@@ -78,15 +78,23 @@ Every requirement maps to at least one story. No orphans.
 | Requirements defined | 21 (10 functional, 11 non-functional) |
 | Requirements traced to a story | 21 of 21 |
 | Requirements traced to a GitHub issue | 21 of 21 |
-| Requirements fully implemented | 2 of 21 |
-| Requirements with an automated test | 1 of 21 (NFR-8, by CI itself) |
+| Requirements fully implemented | 12 of 21 |
+| Requirements with an automated test | 12 of 21 |
 | User stories | 21 |
 | Stories with acceptance criteria | 21 of 21 |
 | ADRs | 6 |
 
-The gap between "traced" and "tested" is the honest state of this repository:
-requirements and stories are complete, implementation is not started, and the
-test suite covers only the health endpoint.
+The gap between "traced" and "tested" is the honest state of this repository.
+The single-label verification path (FR-1 through FR-7, FR-9 for one label, and
+NFR-1, NFR-3, NFR-6, NFR-7) is built and covered by 101 tests. What is not built
+is everything the agent would actually touch: there is no user interface, so
+FR-10, NFR-4 and NFR-5 have nothing to test, and batch verification, FR-8 and
+NFR-2, is designed in ADR 0006 and unbuilt. Nothing is deployed.
+
+Accuracy and latency have been measured over a twelve-label synthetic sample set
+by `scripts/measure.py`, not over real label artwork. Per-field accuracy against
+real artwork remains unmeasured and is the largest open technical risk in the
+prototype (ADR 0003).
 
 ## 4. Open questions blocking requirements
 
