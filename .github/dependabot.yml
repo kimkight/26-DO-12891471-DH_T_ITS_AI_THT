@@ -20,9 +20,11 @@ version: 2
 #    to record why it was taken or refused. Grouping them would hide a
 #    toolchain change behind a routine-looking title.
 #
-# 2. Major bumps of typescript and react are ignored, because both change how
-#    the whole frontend is checked or rendered and neither should arrive
-#    unrequested. See the ignore block for the specific evidence.
+# 2. Major bumps of typescript, the react pair, and the vite pair are ignored,
+#    because each changes how the whole frontend is checked, rendered or built,
+#    and none should arrive unrequested. Two of those are pairs precisely
+#    because a major in one is unmergeable without the matching major in the
+#    other. See the ignore block for the specific evidence.
 #
 #    "Ignored" means Dependabot will not open the pull request on its own. It
 #    does not mean the upgrade is forbidden. To take one deliberately, remove
@@ -79,14 +81,39 @@ updates:
       # frontend is a scaffold, so CI passing on a React major would be
       # evidence of nothing. Revisit once FR-1 has real components.
       #
-      # NOTE, unresolved: react-dom is deliberately NOT ignored here, because
-      # the triage that produced this file specified typescript and react only.
-      # react and react-dom must move together, so as written Dependabot can
-      # still propose a react-dom major on its own, which cannot be merged
-      # alone. Adding react-dom to this block is the obvious fix and is left as
-      # the repository owner's call. Recorded in
+      # react-dom is ignored on the same terms because the two are one unit:
+      # they ship as a matched pair and react-dom declares a peer dependency on
+      # the exact react version. A react-dom major proposed on its own cannot
+      # be merged alone, so leaving it out only produced pull requests that had
+      # to be closed. This closes the gap the triage recorded in
       # docs/DEPENDENCY_TRIAGE_2026-08.md.
       - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+
+      # vite and @vitejs/plugin-react are ignored as a coupled pair, because
+      # the repository has now seen the deadlock from both sides and closed a
+      # pull request each time:
+      #
+      #   PR #28, vite 6.4.3 to 8.2.1, failed CI at `npm install` with
+      #   ERESOLVE. @vitejs/plugin-react@4.7.0 declares
+      #   `peer vite "^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"`, and Vite 8 is
+      #   outside it. The Vite major needs the plugin major first.
+      #
+      #   PR #41, @vitejs/plugin-react 4 to 6, was closed because plugin 6
+      #   requires a Vite major this repository has not taken. The plugin
+      #   major needs the Vite major first.
+      #
+      # Neither half is mergeable alone, so proposing either half separately
+      # can only generate a pull request that gets closed. The upgrade is a
+      # single change that raises both at once, taken deliberately in its own
+      # pull request with `tsc -b` and `vite build` read afterwards, and it
+      # belongs with the frontend work that has not started. Removing both
+      # entries together is what reopens it.
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"

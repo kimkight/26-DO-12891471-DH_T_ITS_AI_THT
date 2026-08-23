@@ -675,6 +675,47 @@ Verification was therefore delegated to GitHub Actions, which has package
 network access. The CI run result is reported in the final summary for this
 work, and it is the only place where these checks have actually executed.
 
+**A second capability is missing from the same session, unrelated to egress.**
+Creating the two repository labels that `.github/dependabot.yml` applies,
+`dependencies` and `type:task`, could not be done either. Neither label exists,
+so Dependabot posts "labels could not be found" on every pull request it opens.
+The `gh` CLI is not installed in the session, and the GitHub REST API is refused
+before it reaches GitHub:
+
+```
+$ curl -sS -i -X POST \
+    https://api.github.com/repos/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/labels
+HTTP/1.1 403 Forbidden
+{"message":"GitHub access is not enabled for this session. An org admin must
+connect the Claude GitHub App for this organization."}
+```
+
+This is a different denial from the package-manager one and does not have the
+same cause. The session does reach GitHub through its own tooling, which
+confirms the labels are absent rather than merely unreadable:
+
+```
+get_label(name="dependencies") -> label 'dependencies' not found
+get_label(name="type:task")    -> label 'type:task' not found
+```
+
+That tooling can read labels but exposes no operation that creates one, and no
+network setting changes that. The two labels must therefore be created by the
+repository owner, either on the repository's Labels page or with:
+
+```
+gh api repos/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/labels \
+  -f name='dependencies' -f color='0366d6' \
+  -f description='Dependency updates, usually opened by Dependabot'
+gh api repos/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/labels \
+  -f name='type:task' -f color='c2e0c6' \
+  -f description='Maintenance or tooling work, not a user-facing change'
+```
+
+Until they exist, Dependabot still opens its pull requests; it just cannot label
+them. Recorded here rather than left implicit, because it is the second thing
+this session could not do that the work assumed it could.
+
 **Who can answer:** whoever provisions the session environment. If the intent
 was for the environment to allow the default package-manager list, the policy
 does not currently match that intent.
