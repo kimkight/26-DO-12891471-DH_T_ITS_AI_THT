@@ -28,12 +28,26 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements-dev.lock
 
-      - name: Install backend with development extras
+      # This job lints and tests, so it needs the dev lock file:
+      # requirements.lock carries the ocr and matching extras only, and has no
+      # pytest or ruff in it. requirements-dev.lock is the same resolution plus
+      # the dev extra, so the tools are the ones the runtime set resolved
+      # against rather than whatever pip would pick alongside them.
+      #
+      # --require-hashes is explicit rather than left to pip's automatic
+      # detection, so a lock file that lost its hashes fails here instead of
+      # silently installing unverified wheels. The project itself follows with
+      # --no-deps, which registers `app` on the path without letting pip
+      # re-resolve anything the lock file already decided.
+      #
+      # Paths are relative to backend/ (the job's working directory).
+      - name: Install backend from the dev lock file
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,matching]"
+          pip install --require-hashes -r requirements-dev.lock
+          pip install --no-deps -e .
 
       - name: Lint (ruff)
         run: ruff check .
@@ -56,11 +70,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      # No package-lock.json is committed yet (docs/OPEN_QUESTIONS.md, OQ-3),
-      # so `npm ci` cannot be used. Switch to `npm ci` once a lockfile exists.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Lint (eslint)
         run: npm run lint
@@ -92,28 +106,32 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Audit Python dependencies (pip-audit)
-        working-directory: backend
+      # Both lock files are audited directly rather than by scanning an
+      # installed environment. --no-deps is what makes that sound: it tells
+      # pip-audit to audit exactly the versions written in the file and to
+      # refuse to resolve anything further, which is only valid because both
+      # files are fully pinned. Nothing is installed, so nothing outside the
+      # lock files can dilute or mask the result.
+      #
+      # Both are audited, not just one. requirements.lock is what ships in the
+      # image, so it is the one that matters for the product; but an advisory
+      # against a dev-only tool is still an advisory against something a
+      # contributor runs, and requirements-dev.lock is a superset, so auditing
+      # only the runtime file would leave the dev tools unchecked. Each step
+      # gates independently: a finding in either fails the job.
+      - name: Audit Python runtime dependencies (pip-audit)
         run: |
-          # setuptools is upgraded because the version shipped by
-          # actions/setup-python is affected by PYSEC-2026-3447, fixed in
-          # 83.0.0. It is part of the audited environment even though it is
-          # not a declared project dependency.
-          python -m pip install --upgrade pip "setuptools>=83.0.0"
+          python -m pip install --upgrade pip
           pip install pip-audit
-          pip install -e ".[matching]"
-          # --skip-editable excludes this repository's own package, which is
-          # installed editable and is not published to PyPI.
-          # --strict is deliberately not used: it fails on *any* skipped
-          # distribution, including the one skipped just above. Without it,
-          # pip-audit still exits non-zero when a real vulnerability is found,
-          # which is the gate this job exists to enforce.
-          pip-audit --skip-editable --progress-spinner off
+          pip-audit -r backend/requirements.lock --no-deps --progress-spinner off
+
+      - name: Audit Python development dependencies (pip-audit)
+        run: pip-audit -r backend/requirements-dev.lock --no-deps --progress-spinner off
 
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm audit --audit-level=high
 
   container:

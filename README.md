@@ -55,7 +55,8 @@ Stop with `docker compose down`.
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,matching]"
+pip install --require-hashes -r requirements-dev.lock
+pip install --no-deps -e .
 pytest
 uvicorn app.main:app --reload
 ```
@@ -64,7 +65,7 @@ uvicorn app.main:app --reload
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -165,7 +166,6 @@ one per user story.
   only capitals and must not imply otherwise.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
   no audit record that a verification occurred.
-- **No frontend lockfile**, so frontend builds are not yet reproducible (OQ-3).
 - **Container base images are pinned by tag, not digest.**
 - **The build session could not reach PyPI, npm, or the Ubuntu package archive**,
   so tests, the frontend build, and the container build were not run locally.

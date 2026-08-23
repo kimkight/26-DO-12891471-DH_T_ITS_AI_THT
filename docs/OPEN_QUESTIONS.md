@@ -12,7 +12,7 @@ updates every artifact the answer affects.
 | --- | --- | --- |
 | [OQ-1](#oq-1) | Answered by ADR 0001 (author's decision, not a stakeholder answer) | Nothing now; affects platform strategy beyond the prototype |
 | [OQ-2](#oq-2) | Closed 2026-08-22 | Nothing; the version is recorded |
-| [OQ-3](#oq-3) | Open | Reproducible frontend builds; `npm ci` in CI and Docker |
+| [OQ-3](#oq-3) | Closed 2026-08-22 | Nothing; both ecosystems build from a committed lock file |
 | [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-6](#oq-6) | Closed by ADR 0006 | Nothing; the execution model is decided |
@@ -24,7 +24,7 @@ updates every artifact the answer affects.
 | [OQ-12](#oq-12) | Closed 2026-08-21 | Nothing; rules are declared, enforcement waits on the plan |
 | [OQ-13](#oq-13) | Open | Deployment (a later task) |
 | [OQ-14](#oq-14) | Closed 2026-08-21 | Nothing; the board exists and is linked to the repository |
-| [OQ-15](#oq-15) | Open, root cause identified 2026-08-22 | Local verification of the build in this environment |
+| [OQ-15](#oq-15) | Open, root cause identified 2026-08-22, still denied on re-check | Local verification of the build in this environment |
 | [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
 | [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
 | [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
@@ -116,14 +116,14 @@ with `docker run --rm --entrypoint tesseract <image> --version`.
 ## OQ-3
 **Should a frontend lockfile be committed, and which package manager?**
 
-No `package-lock.json` exists, because `npm install` could not run in this
-session (see OQ-15). Without a lockfile, CI and the Docker build must use
-`npm install` rather than `npm ci`, so dependency resolution is not reproducible
-and a transitive update can change a build without any commit.
+**Status: Closed 2026-08-22.** Answer: yes, and npm. `frontend/package-lock.json`
+and `backend/requirements.lock` are both committed, and CI, the Dockerfile and
+the documented local setup all install from them.
 
-This should be closed by running `npm install` in a network-enabled environment
-and committing the resulting lockfile, then switching CI and the Dockerfile to
-`npm ci`. Both places carry a comment marking the switch.
+Originally no `package-lock.json` existed, because `npm install` could not run in
+the initializing session (see OQ-15). Without a lockfile, CI and the Docker build
+had to use `npm install` rather than `npm ci`, so dependency resolution was not
+reproducible and a transitive update could change a build without any commit.
 
 **The same issue applies to the backend, and it had teeth.** `backend/pyproject.toml`
 originally carried exact `==` pins written by hand. Those pins were stale, and
@@ -135,12 +135,97 @@ current releases.
 
 Floors are the right answer for security but the wrong answer for
 reproducibility: two builds a week apart can now resolve different versions.
-Closing this question properly means generating real lockfiles for both
-ecosystems, committing them, and switching CI and the Dockerfile to
-`npm ci` and to installing from a locked requirements file.
+Closing this question properly therefore meant generating real lock files for
+both ecosystems, committing them, and switching CI and the Dockerfile to
+`npm ci` and to installing from a locked requirements file. That is what was
+done.
 
-**Who can answer:** the repository owner.
-**Blocks:** reproducible builds in both ecosystems.
+**How it was closed.** npm is the package manager, because the frontend was
+scaffolded with npm and nothing in the assignment or the recorded decisions asks
+for another one; adding pnpm or yarn would be a change with no stated reason.
+Both lock files were generated outside a session, because the session egress
+policy still denies PyPI and npm (OQ-15), and committed to
+`feature/lockfiles`:
+
+| File | Contents | Generated with | Verified with |
+| --- | --- | --- | --- |
+| `frontend/package-lock.json` | the resolved npm tree | npm on Node 22 | `npm audit` clean |
+| `backend/requirements.lock` | extras ocr and matching, 27 packages | pip-compile on Python 3.11, `--allow-unsafe --strip-extras --generate-hashes` | `pip-audit` clean |
+| `backend/requirements-dev.lock` | the same plus the dev extra, 61 packages | the same, with `--extra dev` | `pip-audit` clean |
+
+**The Python lock is split in two on purpose.** `requirements.lock` is what the
+Dockerfile installs, so anything in it ships in the image. `pytest`, `ruff`,
+`pip-audit` and `httpx` are contributor tools, not product; a single combined
+lock file put all four in the runtime image, which enlarged it and widened its
+surface for no benefit. The dev file is a strict superset generated from the
+same resolution, so the tooling is the version the runtime set resolved against.
+
+The floors in `backend/pyproject.toml` stay as floors. They record the oldest
+safe version and are raised when an advisory requires it; the lock file records
+what those floors resolved to. Restoring exact `==` pins to `pyproject.toml`
+would recreate the stale-pin problem described above, so it was not done.
+
+Consuming the lock files:
+
+- The `backend lint and test` job installs
+  `pip install --require-hashes -r requirements-dev.lock` followed by
+  `pip install --no-deps -e .`. It needs the dev file, because the runtime file
+  has no pytest and no ruff in it.
+- The `dependency audit` job audits **both** Python files, in two independently
+  gating steps: `pip-audit -r backend/requirements.lock --no-deps` and
+  `pip-audit -r backend/requirements-dev.lock --no-deps`. The runtime file is
+  what ships, but an advisory against a dev tool is still an advisory against
+  something contributors run.
+- The frontend is installed with `npm ci` everywhere.
+- The Dockerfile uses `npm ci` and
+  `pip install --require-hashes -r requirements.lock`, the runtime file only, so
+  every artifact in the image is verified against the digest recorded at
+  resolution time and no test tooling is present.
+- The comments in both files that marked the switch as pending are removed.
+
+**Confirmed by CI**, run 32600078898 at commit `1d7f59b`, all five checks green:
+
+| Job | What it proves |
+| --- | --- |
+| `backend lint and test` | `pip install --require-hashes -r requirements-dev.lock` installed the 61 pinned packages with every hash verified, then `pip install --no-deps -e .`, then ruff and pytest ran against them |
+| `dependency audit` | both `pip-audit -r backend/requirements.lock --no-deps` and `pip-audit -r backend/requirements-dev.lock --no-deps` passed as separate gating steps, and `npm audit --audit-level=high` passed |
+| `frontend lint and build` | `npm ci` installed the locked tree, then eslint, prettier and `tsc -b && vite build` |
+| `container build and SBOM` | the image built with `npm ci` and `pip install --require-hashes -r requirements.lock`, served `/api/health`, ran as uid 10001, reported its Tesseract version, and produced an SBOM |
+
+The container job is the one that matters most here, because it is the only
+place the hash-verified runtime install actually runs. It had never reached that
+layer before: on the earlier attempts the build failed one stage earlier at
+`npm ci` and the pip layer was cancelled.
+
+**A stale frontend lock file was caught by CI and fixed.** The first version of
+`frontend/package-lock.json` was generated before pull requests #32, #34 and #35
+merged into `develop`, and those three raised devDependency ranges in
+`frontend/package.json`. `npm ci` rejected it, in all three jobs that install
+npm dependencies:
+
+```
+npm error `npm ci` can only install packages when your package.json and
+package-lock.json or npm-shrinkwrap.json are in sync.
+npm error Invalid: lock file's eslint-plugin-react-hooks@5.2.0 does not satisfy eslint-plugin-react-hooks@7.1.1
+npm error Invalid: lock file's eslint-plugin-react-refresh@0.4.26 does not satisfy eslint-plugin-react-refresh@0.5.4
+npm error Invalid: lock file's globals@15.15.0 does not satisfy globals@17.11.0
+```
+
+This is worth recording rather than quietly fixing, because it is the failure
+mode the switch introduces and it will recur. It was fixed by regenerating the
+lock file against the current `package.json`, not by patching it: the three
+packages cross a major each, so their transitive trees and integrity hashes
+change, and no correct edit could be written by hand.
+
+The rule that prevents a repeat is in [CONTRIBUTING.md](../CONTRIBUTING.md):
+any pull request that changes `package.json` or `pyproject.toml` regenerates the
+affected lock file in the same pull request. `npm ci` and `--require-hashes`
+both reject a stale lock rather than working around it, so the cost of
+forgetting is a red pull request, not a subtly different build.
+
+**Who answered:** the repository owner, by generating both lock files in a
+network-enabled environment.
+**Blocks:** nothing.
 
 ## OQ-4
 **What numeric tolerance applies to alcohol content?**
@@ -438,8 +523,9 @@ information.
 **How should the build be verified when the session has no package-manager
 network access?**
 
-**Status: Open. Root cause identified 2026-08-22; the fix is applied but not yet
-verified from a session.**
+**Status: Open. Root cause identified 2026-08-22. The fix was applied to the
+environment but three sessions later the preflight still returns `403`, so it is
+still unverified.**
 
 **Root cause.** The cloud environment was set to the Custom network level with
 the box "Also include default list of common package managers" left unchecked.
@@ -499,6 +585,46 @@ This question closes when the same preflight run from a new session returns
 from a session, and the Docker observation below stands on its own: a Docker
 daemon is a separate capability from egress policy, and no network setting
 provides one.
+
+**Still denied on 2026-08-22, third session.** The preflight was run again at
+the start of the session that closed OQ-3. Raw output:
+
+```
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/simple/requests/
+403
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://registry.npmjs.org/express
+403
+$ tesseract --version 2>&1 | head -1
+/bin/bash: line 1: tesseract: command not found
+$ docker info >/dev/null 2>&1 && echo "docker: ok" || echo "docker: unavailable"
+docker: unavailable
+```
+
+The denial is the same one, from the same layer, with the response body naming
+the host:
+
+```
+HTTP/2 403
+x-deny-reason: host_not_allowed
+Host not in allowlist: pypi.org. Add this host to your network egress settings
+to allow access.
+```
+
+```
+HTTP/2 403
+x-deny-reason: host_not_allowed
+Host not in allowlist: registry.npmjs.org. Add this host to your network egress
+settings to allow access.
+```
+
+Both hosts are still listed in the session's `no_proxy`, which is again the
+misleading part and again means nothing for egress. So the environment change
+recorded above has not taken effect for sessions: either it was not saved, or
+this session was served from the pre-change environment cache. **The question
+stays open.** It is no longer blocking, because both lock files were generated
+outside a session and committed (OQ-3 is closed), but the local verification
+this question is about still cannot be done, and neither can any work that needs
+Tesseract or a Docker daemon.
 
 The original record follows.
 

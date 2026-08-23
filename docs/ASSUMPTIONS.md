@@ -156,7 +156,9 @@ because `npm create vite@latest` could not run: `registry.npmjs.org` returned
 403 in the build session (OQ-15). No install or build has verified them.
 
 **Confirmed or falsified by:** the `frontend` job in CI, which runs
-`npm install`, `eslint`, `prettier --check`, `tsc -b`, and `vite build`.
+`npm ci`, `eslint`, `prettier --check`, `tsc -b`, and `vite build`. Partly
+confirmed already: `frontend/package-lock.json` exists (OQ-3), so npm did
+resolve the declared versions into one tree. That does not confirm the build.
 **Risk if wrong:** low. A version or configuration mismatch fails CI loudly and
 is fixed in one commit.
 
