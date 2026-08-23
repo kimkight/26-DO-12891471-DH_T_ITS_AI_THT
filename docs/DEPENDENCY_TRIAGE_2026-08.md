@@ -296,6 +296,99 @@ by incompatibility. If the combined pull request above turns out red, that
 changes, and the ignore group is the right answer then, with the failure quoted
 as the reason.
 
+## The eslint 10 evidence, 2026-08-23
+
+The second-run triage above recommended eslint 10 as "one change or neither" and
+said the evidence for it did not exist, because `registry.npmjs.org` was denied
+in the session that wrote it (OQ-15). **OQ-15 is now closed and the evidence
+exists.** It was produced on `feature/eslint-10-evaluation`, which raises
+`eslint` and `@eslint/js` to `^10.0.0` together in `frontend/package.json` and
+regenerates `frontend/package-lock.json` in the same commit.
+
+**Verdict: green. Recommend closing #42 and #44 in favour of the combined pull
+request.**
+
+Every step of the `frontend lint and build` job and the npm half of
+`dependency audit`, run against the combined tree:
+
+| Step | Result |
+| --- | --- |
+| `npm ci --no-audit --no-fund` | 159 packages, no ERESOLVE |
+| `npm run lint` (`eslint .`) | Clean, no errors and no warnings |
+| `npm run format:check` (`prettier --check`) | All matched files use Prettier code style |
+| `npm run build` (`tsc -b && vite build`) | 29 modules transformed, built in 975 ms |
+| `npm audit --audit-level=high` | found 0 vulnerabilities |
+
+The resolved tree confirms what the peer ranges predicted. Every plugin
+deduplicates onto the single `eslint@10.9.0`:
+
+```
++-- @eslint/js@10.0.1
+| `-- eslint@10.9.0 deduped
++-- eslint-plugin-react-hooks@7.1.1
+| `-- eslint@10.9.0 deduped
++-- eslint-plugin-react-refresh@0.5.4
+| `-- eslint@10.9.0 deduped
++-- eslint@10.9.0
+`-- typescript-eslint@8.67.0
+  +-- @typescript-eslint/eslint-plugin@8.67.0
+  +-- @typescript-eslint/parser@8.67.0
+  +-- @typescript-eslint/utils@8.67.0
+  `-- eslint@10.9.0 deduped
+```
+
+**No flat-config change was needed.** `frontend/eslint.config.js` is unmodified.
+This was the open risk in the recommendation: peer ranges only promise that a
+tree resolves, not that the config still parses or that the rules still exist.
+Both held.
+
+**The lock regeneration touched the eslint tree and nothing else.** `typescript`
+stays at 5.7.3, `typescript-eslint` at 8.67.0, `vite` at 6.4.3, `react` at
+19.2.8, `prettier` at 3.9.6 and `globals` at 17.11.0. The diff is 99 insertions
+against 348 deletions, which is eslint 10 carrying fewer transitive dependencies
+than eslint 9 did: `@eslint/eslintrc` and its `js-yaml`, `chalk`, `import-fresh`
+and `strip-json-comments` subtree are gone, which is the eslintrc compatibility
+layer eslint 10 dropped.
+
+**One thing worth recording that the triage did not anticipate.** The lock entry
+being replaced carried a deprecation notice:
+
+```
+"deprecated": "This version is no longer supported. Please see
+https://eslint.org/version-support for other options."
+```
+
+So `develop` is currently pinned to an eslint version upstream has stopped
+supporting. That does not change the verdict, but it moves this from an optional
+upgrade to one with a reason to take it.
+
+**What to do with #42 and #44.** Close both, unmerged, citing the combined pull
+request. #42 also conflicts with `develop` and has never run CI; #44 is red for
+the reason the triage identified, which is that it is half of an upgrade. Neither
+carries a lock file, so merging either as it stands would leave `develop` red
+until the lock was regenerated. The combined pull request carries both files and
+has been run as one change, which is what the recommendation asked for.
+
+**No coupled ignore group was added for `eslint` and `@eslint/js`.** The second
+run's triage said an ignore group would be the right answer only if the combined
+change turned out red. It did not, so the pair stays eligible for updates. The
+`vite` and `@vitejs/plugin-react` treatment fits a pair known to be unadoptable;
+this pair is now known to be adoptable, which is the opposite finding.
+
+### #43, typescript 5.9.3, after the rebase
+
+`@dependabot rebase` was commented on #43 on 2026-08-23, so that Dependabot would
+regenerate `frontend/package-lock.json` now that one exists on `develop`. Its
+state after the rebase is recorded in the pull request for
+`feature/eslint-10-evaluation` rather than guessed here, because a rebase result
+is something to read rather than predict. **It is not merged**, per the standing
+rule that nothing in this work merges itself.
+
+Note the interaction if both land: #43 raises `typescript` and the combined
+eslint change raises the eslint pair, and both regenerate the same lock file.
+Whichever merges second needs a rebase, for the same reason as everything else in
+the "Lock file interaction" section below.
+
 ## Lock file interaction, from 2026-08-22 onward
 
 Every recommendation above has an extra step now that it did not have when the
@@ -335,6 +428,12 @@ requests exactly as it applies to everyone else's.
 
 ## What this triage does not cover
 
+- **The eslint 10 result is a scaffold result.** `eslint .` over a Vite scaffold
+  with one component exercises very little of what a linter does. It proves the
+  toolchain installs, the flat config parses and the rules load; it does not
+  prove that eslint 10 is quiet over the application code, because there is
+  barely any. That is the same caveat this document applies to every frontend
+  toolchain bump, and it applies here too.
 - **No lockfile existed when these recommendations were written** (OQ-3), so
   none of them was reproducible: resolving the same declared ranges tomorrow
   could produce a different tree. Both lock files have since been committed and
