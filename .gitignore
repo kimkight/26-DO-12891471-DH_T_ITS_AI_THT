@@ -49,6 +49,8 @@ frontend/dist-ssr/
 frontend/.vite/
 *.local
 .eslintcache
+# tsc -b writes these next to the tsconfig files it builds.
+*.tsbuildinfo
 
 # ---- Docker ----
 .dockerignore.local
