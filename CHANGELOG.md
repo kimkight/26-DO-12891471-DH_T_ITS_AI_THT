@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
+  with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
+  releases are therefore created through the GitHub Releases web interface.
+  v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
+- A header on `docs/cloud_choice_and_abv_assumption.md` marking it as the source
+  record for ADR 0001, A-12, and A-13, and as not maintained going forward.
 - ADR 0006, recording the batch execution model: one synchronous multipart
   request carrying up to `TTB_MAX_BATCH_FILES` images plus one CSV of
   application data keyed by image filename, processed concurrently by a bounded
@@ -28,15 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   triage: minor and patch updates grouped into one pull request per ecosystem
   per week, major bumps left ungrouped so each keeps its own pull request and
   recorded decision, and major bumps of `typescript` and `react` ignored. (#40)
-- OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
-  with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
-  releases are therefore created through the GitHub Releases web interface.
-  v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
-- A header on `docs/cloud_choice_and_abv_assumption.md` marking it as the source
-  record for ADR 0001, A-12, and A-13, and as not maintained going forward.
 
 ### Changed
 
+- OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
+  2026-08-21: pull request required, the `ci` status check required, approvals
+  not required, force pushes and deletions blocked. GitHub shows them as "Not
+  enforced" because the repository is private on a Free plan.
+- OQ-14 closed. The Project board "TTB Label Verifier" exists at
+  <https://github.com/users/kimkight/projects/1>, a user-owned project linked to
+  this repository, with issues #1 to #21 in Backlog.
+- OQ-17 closed. `develop` is now the repository's default branch.
+- OQ-15 updated with the root cause of the package-manager denials: the cloud
+  environment was at the Custom network level without the default package
+  manager list included, so PyPI, npm, and the apt archives were denied with
+  `host_not_allowed` even though they appear in `no_proxy`. Being in `no_proxy`
+  is not an allowlist entry. The environment fix is recorded; the question stays
+  open until a preflight from a new session confirms it.
+- `docs/08_SDLC_PROCESS.md` section 7 now states that tags are created through
+  GitHub Releases from `main` rather than pushed from a session, and why.
 - OQ-2 closed. Tesseract 5.3.0 is the version shipped in the container image,
   read from `tesseract --version` against the built image in CI run 32574942848
   at commit `ef3086a` and recorded in the version table in
@@ -80,22 +96,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discard a valid update and invite Dependabot to reopen it weekly, and ignoring
   it would hide a credential-handling action from updates entirely. It is held
   open until a workflow exists that can actually exercise it.
-- OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
-  2026-08-21: pull request required, the `ci` status check required, approvals
-  not required, force pushes and deletions blocked. GitHub shows them as "Not
-  enforced" because the repository is private on a Free plan.
-- OQ-14 closed. The Project board "TTB Label Verifier" exists at
-  <https://github.com/users/kimkight/projects/1>, a user-owned project linked to
-  this repository, with issues #1 to #21 in Backlog.
-- OQ-17 closed. `develop` is now the repository's default branch.
-- OQ-15 updated with the root cause of the package-manager denials: the cloud
-  environment was at the Custom network level without the default package
-  manager list included, so PyPI, npm, and the apt archives were denied with
-  `host_not_allowed` even though they appear in `no_proxy`. Being in `no_proxy`
-  is not an allowlist entry. The environment fix is recorded; the question stays
-  open until a preflight from a new session confirms it.
-- `docs/08_SDLC_PROCESS.md` section 7 now states that tags are created through
-  GitHub Releases from `main` rather than pushed from a session, and why.
 
 ## [0.1.0] - 2026-08-22
 
