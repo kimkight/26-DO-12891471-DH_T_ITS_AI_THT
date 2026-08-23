@@ -193,6 +193,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discard a valid update and invite Dependabot to reopen it weekly, and ignoring
   it would hide a credential-handling action from updates entirely. It is held
   open until a workflow exists that can actually exercise it.
+- `.github/dependabot.yml` now ignores runtime-line bumps of the `python` and
+  `node` Docker base images. #25 and #26 had already been closed for splitting
+  the tested runtime from the shipped one, and #47 reintroduced the same
+  `python` 3.11 to 3.14 bump inside a grouped "minor-and-patch" pull request.
+  Docker tags are not semver: Dependabot reads `node:22` to `node:26` as a
+  semver major but `python:3.11` to `python:3.14` as a semver minor, so `python`
+  is ignored for both major and minor and `node` for major only. Patch updates
+  are still proposed for both, so security rebuilds inside the pinned line
+  still arrive. Recorded in `docs/DEPENDENCY_TRIAGE_2026-08.md`.
 
 ## [0.1.0] - 2026-08-22
 
