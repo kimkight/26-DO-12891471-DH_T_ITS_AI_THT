@@ -3,18 +3,24 @@
 Testing is organized in five tiers. Each tier states what it covers, what it
 deliberately does not, and how it is run.
 
-**Current state:** only the unit tier exists, and it covers only the health
-endpoint. Every other tier is designed and not yet built. Nothing below is
-described as passing unless it has actually been run.
+**Current state:** the unit, integration, accuracy and performance tiers exist
+for the single-label path. Accessibility has nothing to test yet, because there
+is no user interface. Nothing below is described as passing unless it has
+actually been run.
 
 | Tier | Exists today | Blocked on |
 | --- | --- | --- |
-| Unit | Partially: `backend/tests/test_health.py` only | Application logic |
-| Integration | No | The `/api/verify` endpoints |
-| Accuracy | No | The labeled sample set in `samples/` |
-| Performance | No | A working verification path |
+| Unit | Yes: `test_compare.py`, `test_warning.py`, `test_parse.py`, `test_ocr.py`, `test_samples.py`, `test_health.py` | Nothing for the single-label path |
+| Integration | Yes: `test_api_validation.py`, `test_verify_integration.py` | Batch, which needs FR-8 |
+| Accuracy | Yes: `scripts/measure.py` over `samples/` | Real label artwork; the set is synthetic |
+| Performance | Yes: single-label latency, measured by the same script | Batch throughput, which needs FR-8 |
 | Accessibility | No | The verification UI |
-| Manual UAT | Checklist written, section 6 | A working prototype |
+| Manual UAT | Checklist written, section 6 | A user interface for rows 12, 13 and 14 |
+
+The integration tier needs Tesseract, which is a system package rather than a
+Python one. CI installs it; a checkout without it skips those tests rather than
+failing them, so a green local run on a machine with no Tesseract is not
+evidence that the OCR path works.
 
 ## 1. Unit tests
 
@@ -22,16 +28,19 @@ described as passing unless it has actually been run.
 
 **Runner:** `pytest` for the backend. Run in CI on every pull request.
 
-**What the unit tier must cover once the logic exists:**
+**What the unit tier covers.** Every row below is implemented; the file that
+implements it is named alongside.
 
 | Area | Cases |
 | --- | --- |
-| Text normalization | Case folding; whitespace collapse; straight against typographic apostrophes; punctuation stripping. The `STONE'S THROW` against `Stone's Throw` pair is a unit case before it is anything else (FR-4). |
-| Outcome classification | Scores at, just above, and just below each threshold. Boundary values are the point, not the middle of the band (FR-3). |
-| Numeric parsing | `45% Alc./Vol. (90 Proof)` yields 45; `750 mL` yields 750 with unit `mL`; `45` and `45.0` compare equal; an unparseable value falls back to text comparison (FR-7). |
-| Government warning body | Exact text from 27 CFR 16.21 after whitespace normalization matches; a single changed, added, or removed word does not (FR-5). |
-| Warning capitalization | `GOVERNMENT WARNING:` passes; `Government Warning:` fails; `government warning:` fails (FR-6). |
-| Validation | Size, MIME type, and batch count limits reject before any decoding happens (NFR-7). |
+| Text normalization, `test_compare.py` | Case folding; whitespace collapse; straight against typographic apostrophes; punctuation stripping. The `STONE'S THROW` against `Stone's Throw` pair is a unit case before it is anything else (FR-4). |
+| Outcome classification, `test_compare.py` | Scores at, just above, and just below each threshold. Boundary values are the point, not the middle of the band (FR-3). |
+| Numeric parsing, `test_compare.py` | `45% Alc./Vol. (90 Proof)` yields 45; `750 mL` yields 750 with unit `mL`; `45` and `45.0` compare equal; an unparseable value falls back to text comparison (FR-7). |
+| Government warning body, `test_warning.py` | Exact text from 27 CFR 16.21 after whitespace normalization matches; a single changed, added, or removed word does not (FR-5). |
+| Warning capitalization, `test_warning.py` | `GOVERNMENT WARNING:` passes; `Government Warning:` fails; `government warning:` fails (FR-6). |
+| Validation, `test_api_validation.py` | Size and MIME type limits reject before any decoding happens (NFR-7). The batch count limit is unbuilt with FR-8. |
+| Image preprocessing, `test_ocr.py` | The long edge lands on the configured size and the aspect ratio holds; a rotated image comes back closer to upright, and an upright one is left alone. |
+| Sample set integrity, `test_samples.py` | The sample warning text is the regulation's; each labelled defect is actually defective. |
 
 **Deliberately not covered by this tier:** anything involving Tesseract, which
 is slow and environment dependent, and therefore belongs in the integration and
@@ -44,22 +53,40 @@ fixture images.
 
 **Runner:** `pytest` with FastAPI's `TestClient`.
 
+Label artwork is rendered by `samples/labelmaker.py` at test time rather than
+committed, so no binary fixture enters the repository.
+
 **Cases:**
 
 - `POST /api/verify` with a clean label and matching application data returns
-  200 with an outcome for each of the five fields.
+  200 with an outcome for each of the five fields. **Implemented.**
 - The same endpoint with a corrupt file returns a 4xx and no field reporting a
-  match (FR-9).
-- An oversized file is rejected before the body is read (NFR-7).
-- A disallowed MIME type is rejected before decoding (NFR-7).
+  match (FR-9). **Implemented.**
+- An oversized file is rejected before the body is read (NFR-7). **Implemented.**
+- A disallowed MIME type is rejected before decoding (NFR-7). **Implemented.**
+- An image with no text reads differently from fields that did not match (FR-9).
+  **Implemented.**
 - `POST /api/verify/batch` returns one identified result set per label (FR-8).
+  **Not built.**
 - A batch containing one unreadable image returns results for every other label
   in the batch (US-10). This is the single most important integration case,
   because it is the property that makes batch handling worth having.
+  **Not built.**
 - A batch exceeding the file-count limit is rejected before any file is
-  processed (FR-8).
-- With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted.
-  Asserted by running the suite with egress blocked (NFR-3).
+  processed (FR-8). **Not built.**
+- With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted
+  (NFR-3). **Implemented**, as UAT row 16: the test replaces the socket
+  constructor so that any attempt to open an IP socket raises, proves the guard
+  is live by opening one itself, and then asserts the verification still returns
+  200 with `external_call_made` false. AF_UNIX is left alone, because asyncio
+  builds its own self-pipe from a Unix socketpair and refusing that would break
+  the event loop rather than test the application.
+- No image content and no extracted or application value reaches the logs
+  (NFR-6). **Implemented**, as UAT row 17: distinctive values are searched for
+  across every captured record, and the one record the verification path writes
+  is held to an allow-list of `bytes_received`, `ocr_ms` and
+  `beverage_type_supplied`, so a field added to it later has to be added there
+  deliberately.
 
 ## 3. Accuracy tests
 
@@ -90,8 +117,19 @@ contents, government warning):
 threshold invented in this document would be unfalsifiable. Recorded as OQ-8 in
 [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
-**Blocked:** the sample set does not exist. See `samples/README.md` for the
-seven cases it must cover.
+**How it is run:** `python samples/generate_samples.py` renders the set, then
+`python scripts/measure.py` prints the table. The set is twelve synthetic labels
+across spirits, wine and malt beverage, carrying the defects `samples/README.md`
+lists.
+
+**What the numbers do and do not measure.** Ground truth outcomes are computed
+by running the same comparison rules over the values rendered onto the artwork,
+so a disagreement is an extraction error: OCR misread a value, or `parse.py` put
+it in the wrong field. The figures do not evaluate the comparison rules, which
+are tested directly in `backend/tests/test_compare.py`. And the artwork is
+rendered text, not photographed bottles: accuracy against real label artwork is
+unmeasured and remains the largest open technical risk in the prototype
+(ADR 0003).
 
 ## 4. Performance tests
 
@@ -177,6 +215,12 @@ against a deployed build before the prototype is presented.
 | 15 | Inspect the warning result wording | It does not state or imply that bold type was checked | OOS-4; FR-6 |
 | 16 | Run a verification with egress blocked | Completes successfully | Marcus Williams interview; NFR-3 |
 | 17 | Inspect logs after a verification | No image content and no extracted field values | NFR-6 |
+
+Rows 16 and 17 are also automated, in `backend/tests/test_verify_integration.py`.
+They stay on the manual checklist because the automated versions test the
+application process, and the row is about the deployed system: the automated
+egress test blocks sockets inside one Python process, and the automated log test
+reads records the application emitted rather than what CloudWatch received.
 | 18 | Alcohol content `45` against application `45.0%` | Match | FR-7; A-12 |
 | 19 | Alcohol content `45` against application `45.1` | Mismatch, with both values and the difference shown. **A match or a needs-human-review outcome is a failure of this test.** | FR-7; A-12 |
 | 20 | Label stating `45% Alc./Vol. (90 Proof)` against application `45` | Proof cross-check passes, because 90 equals 2 x 45; the alcohol content outcome is match | FR-7; A-12; 27 CFR 5.65 |
@@ -194,15 +238,20 @@ Defined in `.github/workflows/ci.yml`. All jobs gate the aggregate `ci` check.
 
 | Job | Contents |
 | --- | --- |
-| `backend` | `ruff check`, `ruff format --check`, `pytest` with coverage |
+| `backend` | Installs Tesseract and a TrueType font, then `ruff check`, `ruff format --check` over `backend/`, `samples/` and `scripts/`, and `pytest` with coverage |
 | `frontend` | `eslint`, `prettier --check`, `tsc -b`, `vite build` |
 | `audit` | `pip-audit --strict`, `npm audit --audit-level=high` |
 | `container` | Docker build, health endpoint probe against the running container, non-root user assertion, SBOM generation and upload |
 | `ci` | Aggregate gate; fails if any job above failed or was cancelled |
 
-The accuracy, performance, and accessibility tiers are **not** in CI yet. The
-first two need the sample set; the third needs the UI. Adding them is tracked as
-part of the work in `samples/README.md`.
+The accuracy and performance tiers run as scripts rather than as CI gates.
+`scripts/measure.py` is run by hand and its output is quoted in the pull request
+that changes the engine, because a runner's timings vary enough that gating on
+them would produce failures that say nothing about the change. The single-label
+latency assertion in `test_verify_integration.py` does gate, against the
+5-second target rather than against a tighter number.
+
+The accessibility tier is **not** in CI, because there is no UI to scan.
 
 ## 8. Test data policy
 

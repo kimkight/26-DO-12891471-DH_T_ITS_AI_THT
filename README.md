@@ -127,8 +127,8 @@ section 6.
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
 | [08 SDLC Process](docs/08_SDLC_PROCESS.md) | Phases with entry and exit criteria, Git Flow, PR checklist, DoR and DoD, releases |
 | [09 Deployment](docs/09_DEPLOYMENT.md) | Outline only; infrastructure is a later task |
-| [Open Questions](docs/OPEN_QUESTIONS.md) | 16 unanswered questions, recorded rather than guessed |
-| [Assumptions](docs/ASSUMPTIONS.md) | 13 inferences, each with what would confirm or falsify it |
+| [Open Questions](docs/OPEN_QUESTIONS.md) | 18 questions, 6 still open, each recorded rather than guessed |
+| [Assumptions](docs/ASSUMPTIONS.md) | 14 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
 | [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
@@ -137,20 +137,23 @@ section 6.
 
 ## Status
 
-**The application logic is not yet implemented.**
+**The single-label verification engine works over HTTP. There is no user
+interface for it.**
 
 | Capability | State |
 | --- | --- |
 | `GET /api/health` | Works |
+| `POST /api/verify` (one label against its application data) | Works |
+| Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
+| Comparison against application data | Works: `backend/app/compare.py` |
+| Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
 | Frontend shell showing backend status | Works |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Field extraction from label artwork | **Not implemented** |
-| Comparison against application data | **Not implemented** |
-| Government warning checks | **Not implemented** |
-| Batch verification | **Not implemented** |
+| Verification user interface | **Not implemented.** The engine is reachable over HTTP only, so FR-10, NFR-4 and NFR-5 are untested. |
+| Batch verification | **Not implemented.** Designed in ADR 0006. |
 | Deployed URL | **Not deployed.** No AWS infrastructure exists. |
-| Accuracy and latency measurements | **Not measured.** No sample set exists. |
+| Accuracy and latency measurements | Measured over a synthetic sample set only; see below. |
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
@@ -158,18 +161,25 @@ one per user story.
 
 ### Known limitations
 
-- **No accuracy or latency numbers are published, because none have been
-  measured.** The labeled sample set does not exist yet. No target is claimed
+- **Accuracy has been measured against synthetic labels only.** `samples/`
+  renders twelve labels from text with Pillow; `scripts/measure.py` scores the
+  engine against them. Rendered text is far easier to read than a photographed
+  bottle, so those figures set an upper bound and nothing more. Per-field
+  accuracy against real label artwork is unmeasured and is the largest open
+  technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
+- **Latency figures come from a session container, not production hardware.**
+  The 5-second target (NFR-1) is asserted in the integration test, which is the
+  gate; the published numbers are measurements on whatever machine ran them and
+  say so.
 - **Capitalization is checked; boldness is not.** 27 CFR 16.22(a)(2) requires
   the warning prefix in "capital letters and in bold type." The prototype checks
   only capitals and must not imply otherwise.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
   no audit record that a verification occurred.
 - **Container base images are pinned by tag, not digest.**
-- **The build session could not reach PyPI, npm, or the Ubuntu package archive**,
-  so tests, the frontend build, and the container build were not run locally.
-  They run in CI (OQ-15).
+- **The frontend build and the container build are verified in CI**, not in a
+  session. The backend test suite now runs in both.
 
 ## License
 

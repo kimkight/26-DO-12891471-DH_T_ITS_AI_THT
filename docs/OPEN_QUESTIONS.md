@@ -24,7 +24,7 @@ updates every artifact the answer affects.
 | [OQ-12](#oq-12) | Closed 2026-08-21 | Nothing; rules are declared, enforcement waits on the plan |
 | [OQ-13](#oq-13) | Open | Deployment (a later task) |
 | [OQ-14](#oq-14) | Closed 2026-08-21 | Nothing; the board exists and is linked to the repository |
-| [OQ-15](#oq-15) | Open, root cause identified 2026-08-22, still denied on re-check | Local verification of the build in this environment |
+| [OQ-15](#oq-15) | Closed 2026-08-23 | Nothing; both registries and Tesseract are reachable from a session |
 | [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
 | [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
 | [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
@@ -524,9 +524,53 @@ information.
 **How should the build be verified when the session has no package-manager
 network access?**
 
-**Status: Open. Root cause identified 2026-08-22. The fix was applied to the
-environment but three sessions later the preflight still returns `403`, so it is
-still unverified.**
+**Status: Closed 2026-08-23.** The environment change described below took
+effect. The preflight this question named as its own closing condition, "the
+same preflight run from a new session returns `200` from both registries", was
+run at the start of the session that built the verification engine and returned
+`200` from both, with Tesseract present:
+
+```
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://pypi.org/simple/requests/
+200
+$ curl -sS -o /dev/null -w "%{http_code}\n" https://registry.npmjs.org/express
+200
+$ tesseract --version 2>&1 | head -1
+tesseract 5.3.4
+```
+
+**What that made possible in the same session**, which is the point of recording
+it rather than just noting a status change:
+
+- `pip install --require-hashes -r backend/requirements-dev.lock` installed all
+  61 packages from the committed lock file, so the lock files generated outside
+  a session under OQ-3 are now verified to install.
+- The backend test suite ran locally, including the OCR tier, against
+  Tesseract 5.3.4.
+- `scripts/measure.py` ran the engine over the sample set and produced real
+  per-field accuracy and latency numbers.
+
+**Two caveats that the `200` does not remove.**
+
+- **The session Tesseract is 5.3.4; the container ships 5.3.0.** The local
+  binary comes from whatever the session image carries, and the container
+  installs from Debian bookworm, which is the version recorded in OQ-2 and in
+  `docs/05_ARCHITECTURE.md` section 8. A local OCR result is therefore not
+  byte-for-byte evidence about the deployed one. The CI job that reports the
+  version from inside the built image remains the authoritative record.
+- **There is still no Docker daemon in a session.** That is a separate
+  capability from egress policy and no network setting provides one, exactly as
+  the original entry says. The container build and the health probe against a
+  running container still happen only in CI.
+
+The record of the three sessions in which this was denied follows, unchanged,
+because the root cause and the way the denial presented are worth keeping.
+
+---
+
+**Original status, 2026-08-22: Open. Root cause identified. The fix was applied
+to the environment but three sessions later the preflight still returned `403`,
+so it was still unverified.**
 
 **Root cause.** The cloud environment was set to the Custom network level with
 the box "Also include default list of common package managers" left unchecked.
@@ -585,7 +629,8 @@ This question closes when the same preflight run from a new session returns
 `200` from both registries. Until then the lockfile work in OQ-3 cannot be done
 from a session, and the Docker observation below stands on its own: a Docker
 daemon is a separate capability from egress policy, and no network setting
-provides one.
+provides one. **That condition was met on 2026-08-23; see the status at the top
+of this entry.**
 
 **Still denied on 2026-08-22, third session.** The preflight was run again at
 the start of the session that closed OQ-3. Raw output:
@@ -717,10 +762,11 @@ Until they exist, Dependabot still opens its pull requests; it just cannot label
 them. Recorded here rather than left implicit, because it is the second thing
 this session could not do that the work assumed it could.
 
-**Who can answer:** whoever provisions the session environment. If the intent
-was for the environment to allow the default package-manager list, the policy
-does not currently match that intent.
-**Blocks:** local verification only.
+**Who can answer:** answered by the environment itself on 2026-08-23. The
+allowed-domains change recorded above took effect once a session was served from
+a rebuilt environment cache.
+**Blocks:** nothing. A Docker daemon is still absent from sessions, but that was
+never this question, and it is recorded above rather than left implicit.
 
 ## OQ-16
 **How is application data supplied for a batch?**

@@ -2,6 +2,10 @@
 
 No secrets are stored in the repository. See .env.example for the shape of the
 environment and docs/05_ARCHITECTURE.md for how configuration is injected.
+
+Governing requirements: NFR-11 (configuration through environment variables),
+NFR-3 (no outbound calls on the default path), NFR-7 (input validation),
+FR-3 and FR-7 (the thresholds and the ABV tolerance the comparison rules read).
 """
 
 from __future__ import annotations
@@ -36,6 +40,17 @@ class Settings(BaseSettings):
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
     review_threshold: int = 80
+
+    # Allowed difference between the label ABV and the application ABV, in
+    # percentage points. 0.0 is a compliance position rather than a tuning
+    # starting point: the regulatory tolerances in 27 CFR 5.65, 4.36 and 7.65
+    # govern actual against labeled content, and this tool compares two values
+    # the applicant declared. See assumption A-12 in docs/ASSUMPTIONS.md.
+    abv_tolerance: float = 0.0
+
+    # Image preprocessing. The long edge the image is scaled to before OCR.
+    # See docs/07_TEST_STRATEGY.md section 4 for the latency budget this feeds.
+    ocr_long_edge_px: int = 1600
 
 
 settings = Settings()
