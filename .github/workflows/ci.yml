@@ -30,6 +30,19 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements-dev.lock
 
+      # Tesseract is a system package, not a Python one, so it is not in either
+      # lock file. Without it the integration tier skips itself rather than
+      # failing, which would leave the OCR path untested while CI stayed green.
+      # fonts-dejavu-core is installed for the same reason: samples/labelmaker.py
+      # renders label artwork at test time and skips when no TrueType font is
+      # present.
+      - name: Install Tesseract and a TrueType font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+          tesseract --version
+
       # This job lints and tests, so it needs the dev lock file:
       # requirements.lock carries the ocr and matching extras only, and has no
       # pytest or ruff in it. requirements-dev.lock is the same resolution plus
@@ -49,11 +62,16 @@ jobs:
           pip install --require-hashes -r requirements-dev.lock
           pip install --no-deps -e .
 
+      # samples/ and scripts/ are linted with the same configuration as the
+      # application. They hold real Python that the accuracy and performance
+      # tiers depend on; leaving them outside the lint would create a corner of
+      # the repository that CI never reads. The config is named explicitly
+      # because neither directory has a pyproject.toml of its own.
       - name: Lint (ruff)
-        run: ruff check .
+        run: ruff check --config pyproject.toml . ../samples ../scripts
 
       - name: Format check (ruff)
-        run: ruff format --check --diff .
+        run: ruff format --check --diff --config pyproject.toml . ../samples ../scripts
 
       - name: Test (pytest)
         run: pytest --cov=app --cov-report=term-missing
