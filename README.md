@@ -12,18 +12,24 @@ seconds, or agents go back to doing it manually.
 
 **Author:** Kimberly D. Kight
 
-> **Status: scaffold only.** The application logic is **not implemented**. Only
-> `GET /api/health` exists. See [Status](#status) below for exactly what works.
+> **Status: the prototype works, and nothing is deployed.** Single-label and
+> batch verification and the agent-facing interface are built and tested.
+> Accuracy and latency are measured on synthetic labels and on developer
+> hardware, not on a deployed target, and there is no deployed URL. See
+> [Status](#status) below for exactly what works and
+> [Known limitations](#known-limitations) for what those measurements do not
+> cover.
 
 ## Repository map
 
 | Path | Contents |
 | --- | --- |
-| `backend/` | FastAPI application, Python 3.11. Health endpoint only. |
-| `frontend/` | React and TypeScript, built with Vite. Placeholder shell. |
+| `backend/` | FastAPI application, Python 3.11. The verification engine and both endpoints. |
+| `frontend/` | React and TypeScript, built with Vite. The agent-facing interface. |
 | `docs/` | Charter, scope, requirements, stories, architecture, security, test strategy, SDLC process, deployment outline. |
 | `docs/adr/` | Architecture decision records. |
-| `samples/` | Where labeled test images and ground truth will live. Empty today. |
+| `samples/` | Twelve label specifications, the renderer that draws them, and the ground truth CSVs. Images are generated locally and git-ignored. |
+| `scripts/` | `measure.py`, which runs the engine over the sample set and reports per-field accuracy and latency. |
 | `infra/` | Placeholder for Terraform. Not written. |
 | `.github/` | CI and deployment workflows, issue and pull request templates, CODEOWNERS, Dependabot. |
 | `Dockerfile` | Multi-stage build: frontend, then backend. Runs as a non-root user. |
@@ -45,8 +51,20 @@ Expected response:
 {"status":"ok","service":"TTB Label Verifier","version":"0.1.0","environment":"local"}
 ```
 
-The frontend shell is at <http://localhost:8000/> and shows the backend status.
-It does not verify labels, because that logic does not exist yet.
+The interface is at <http://localhost:8000/>. The first tab checks one label:
+choose a label image, type what the application says, and select **Check this
+label**. The second tab checks many at once, taking the images plus one CSV of
+application data keyed by image filename.
+
+To try it without artwork of your own, generate the sample set first:
+
+```bash
+python samples/generate_samples.py
+```
+
+That writes twelve labels into `samples/images/` and the matching application
+data into `samples/applications/applications.csv`, which is exactly the shape
+the batch tab expects.
 
 Stop with `docker compose down`.
 
@@ -72,6 +90,10 @@ npm run dev
 The dev server proxies `/api` to `http://localhost:8000`, so run the backend
 alongside it.
 
+The frontend checks are `npm run lint`, `npm run test` (component tests) and
+`npm run test:a11y` (axe-core against the built page, which needs `npm run
+build` first and downloads Chromium on its first run).
+
 ## Approach
 
 **Extraction runs locally.** OCR happens inside the container with Tesseract and
@@ -96,9 +118,24 @@ prefix is upper case. The reference text is quoted verbatim from 27 CFR 16.21,
 fetched from eCFR and cited in
 [docs/03_REQUIREMENTS.md](docs/03_REQUIREMENTS.md).
 
+**A batch is one streaming request, not a job queue.** Up to 300 images plus one
+CSV of application data go in a single submission; a bounded worker pool reads
+them and each result is written to the response as it finishes, so progress is
+visible while the batch runs and one unreadable image costs only its own row.
+There is no job store, because nothing is persisted. See
+[ADR 0006](docs/adr/0006-batch-execution-model.md).
+
+**The interface is one screen.** The primary task is on the landing page with
+nothing to navigate, every outcome is carried by a word and a shape before it is
+carried by a colour, and the field needing a human's attention is the one that
+looks unfinished. The requirement behind it is a stakeholder's, not a
+designer's: "clean, obvious, no hunting for buttons," for a team where technology
+comfort varies widely.
+
 **The tool recommends; the agent decides.** Nothing here issues an approval or a
 rejection, and every result carries the label value, the application value, and
-the score so an agent can overrule it. See
+the score so an agent can overrule it. The interface says so on screen, beneath
+the results, rather than only in this file. See
 [docs/06_SECURITY_AND_COMPLIANCE.md](docs/06_SECURITY_AND_COMPLIANCE.md)
 section 6.
 
@@ -111,7 +148,8 @@ section 6.
 | OCR | Tesseract via pytesseract, OpenCV for preprocessing |
 | Matching | rapidfuzz |
 | Container | Docker, multi-stage, non-root |
-| CI | GitHub Actions: ruff, pytest, eslint, prettier, pip-audit, npm audit, Syft SBOM |
+| Frontend testing | Vitest, React Testing Library, axe-core run in Chromium by Playwright |
+| CI | GitHub Actions: ruff, pytest, eslint, prettier, vitest, axe-core, pip-audit, npm audit, Syft SBOM |
 | Target platform | AWS ECS on Fargate behind an ALB, image in ECR, `us-east-1` |
 
 ## Documentation
@@ -130,30 +168,39 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 18 questions, 6 still open, each recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 14 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
 
 ## Status
 
-**The single-label verification engine works over HTTP. There is no user
-interface for it.**
+**Every functional requirement is built and tested. Nothing is deployed, and no
+figure in this repository was measured on a deployed target.**
 
 | Capability | State |
 | --- | --- |
 | `GET /api/health` | Works |
 | `POST /api/verify` (one label against its application data) | Works |
+| `POST /api/verify-batch` (many labels plus one CSV of application data) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md). |
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Frontend shell showing backend status | Works |
+| Verification interface, one label | Works: one screen, a drop zone, the five application fields, five result cards |
+| Verification interface, batch | Works: a second tab with progress driven by the stream, a sortable results table, and a results CSV built in the browser |
+| Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
+| One bad image failing only its own row in a batch | Works; covered by tests |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Verification user interface | **Not implemented.** The engine is reachable over HTTP only, so FR-10, NFR-4 and NFR-5 are untested. |
-| Batch verification | **Not implemented.** Designed in ADR 0006. |
-| Deployed URL | **Not deployed.** No AWS infrastructure exists. |
-| Accuracy and latency measurements | Measured over a synthetic sample set only; see below. |
+| Deployed URL | **Not deployed.** No AWS infrastructure exists (OQ-13). |
+| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware; see below. |
+| Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
+
+Numbers are deliberately absent from this table. Accuracy and latency figures
+belong here once they have been measured on the target they describe, and the
+target does not exist yet. `scripts/measure.py` prints the current figures for
+whatever machine runs it, and each pull request that measured something records
+its numbers with the hardware they came from.
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
@@ -171,15 +218,35 @@ one per user story.
 - **Latency figures come from a session container, not production hardware.**
   The 5-second target (NFR-1) is asserted in the integration test, which is the
   gate; the published numbers are measurements on whatever machine ran them and
-  say so.
+  say so. The same applies to batch: throughput has been measured at twelve and
+  one hundred labels, never at the 300 the configured limit allows, and never on
+  a deployed target. Scaling from one to the other is arithmetic, not a
+  measurement, and no source states a batch latency target anyway (OQ-6).
 - **Capitalization is checked; boldness is not.** 27 CFR 16.22(a)(2) requires
   the warning prefix in "capital letters and in bold type." The prototype checks
-  only capitals and must not imply otherwise.
+  only capitals and must not imply otherwise. The API says so in every warning
+  result and the interface repeats it verbatim on the warning card, so the gap
+  is visible to the agent rather than only to a reader of this file.
+- **A clean accessibility run is not a conformance claim.** axe-core finds a
+  subset of WCAG failures, and no automated tool replaces testing with an actual
+  screen reader. What the CI run holds is the regressions that are cheap to
+  introduce and expensive to notice: an input that loses its label, a heading
+  level skipped, a contrast pair broken by a token change. Whether Section 508
+  applies to this prototype is unanswered (OQ-7), and that is what would turn
+  NFR-5 from a target into an obligation.
+- **The interface has one light palette and no dark mode.** Contrast is asserted
+  against that palette. A dark palette is a second palette to verify, not a
+  toggle.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
-  no audit record that a verification occurred.
+  no audit record that a verification occurred. For batch, the same decision
+  means a dropped connection loses the whole submission: there is no
+  server-side copy of the results, so the stream is the only one. This is the
+  strongest argument for the job model ADR 0006 records as its expected
+  successor.
 - **Container base images are pinned by tag, not digest.**
-- **The frontend build and the container build are verified in CI**, not in a
-  session. The backend test suite now runs in both.
+- **The container build is verified in CI**, not in a session. The backend
+  suite, the frontend component tests and the accessibility run execute in
+  both.
 
 ## License
 
