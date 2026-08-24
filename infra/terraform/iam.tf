@@ -171,7 +171,9 @@ data "aws_iam_policy_document" "deploy" {
       "ecs:DescribeServices",
       "ecs:UpdateService",
     ]
-    resources = [aws_ecs_service.app.arn]
+    # `id` rather than `arn`: aws_ecs_service exports the service ARN as its
+    # id, and has no separate `arn` attribute in provider v5.
+    resources = [aws_ecs_service.app.id]
   }
 
   # The deploy action reads task state while it waits for stability. These
