@@ -22,7 +22,7 @@ updates every artifact the answer affects.
 | [OQ-10](#oq-10) | Open | ATO planning |
 | [OQ-11](#oq-11) | Open | AI governance sign-off |
 | [OQ-12](#oq-12) | Closed 2026-08-21 | Nothing; rules are declared, enforcement waits on the plan |
-| [OQ-13](#oq-13) | Open | Deployment (a later task) |
+| [OQ-13](#oq-13) | Closed 2026-08-24 | Nothing; the infrastructure code exists and 09_DEPLOYMENT.md is the runbook. Nothing is applied |
 | [OQ-14](#oq-14) | Closed 2026-08-21 | Nothing; the board exists and is linked to the repository |
 | [OQ-15](#oq-15) | Closed 2026-08-23 | Nothing; both registries and Tesseract are reachable from a session |
 | [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
@@ -470,44 +470,126 @@ Settings, Branches. The required `ci` status check is named `ci`.
 ## OQ-13
 **Deployment details not yet decided.**
 
-All of the following are needed before infrastructure can be written, and none
-is stated in any source:
+**Status: Closed 2026-08-24.** Answered by the author, who owns the AWS account
+this prototype deploys to. The decisions are recorded item by item below, and
+each one is now built or written down somewhere: the Terraform in
+`infra/terraform/`, the runbook in [09_DEPLOYMENT.md](09_DEPLOYMENT.md), and
+the limitations table in
+[06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md) section 3.
 
-1. Custom domain, and where the TLS certificate comes from.
-2. Whether the load balancer is internet-facing or internal. Reviewers need
-   access to test the prototype, which suggests internet-facing, but that
-   conflicts with there being no authentication (D-9).
-3. VPC and subnet topology: create new, or use existing.
-4. Terraform state backend: S3 bucket and DynamoDB lock table, or alternative.
-5. CloudWatch log retention period.
-6. ECS task CPU and memory sizing. Cannot be chosen before the performance tier
-   produces a latency measurement, since OCR is CPU bound.
+**Nothing has been applied.** Closing this question means the decisions exist
+and the code that implements them exists, not that any AWS resource does. The
+author applies from her own machine; no session in this project has ever held
+AWS credentials.
 
-   Two figures from the batch implementation (FR-8, ADR 0006) feed this, and
-   both are now measurable rather than open:
+The eight items, as asked and as answered.
 
-   - **CPU.** The batch worker pool is sized from the cores the task may use,
-     so task vCPU directly sets batch throughput. Below one vCPU the pool
-     collapses to a single worker and a batch runs sequentially.
-   - **Memory, and this is the trap.** FastAPI parses the whole multipart
-     envelope before the route runs, so a batch is resident in memory before
-     any of it is processed. `TTB_MAX_BATCH_BYTES` defaults to
-     `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, which at the defaults is
-     about 3 GiB. That is an upper bound derived from limits already stated,
-     not a sizing recommendation. Sizing a task for it would be wasteful;
-     sizing a task below it without lowering the limit means a large batch
-     kills the task. Whoever writes the task definition sets
-     `TTB_MAX_BATCH_BYTES` and `TTB_MAX_BATCH_FILES` to values the chosen
-     memory can hold, and says so in the same change.
-7. Desired task count and whether autoscaling is configured.
-8. Who pays for the AWS resources, and what the cost ceiling is.
+**1. Custom domain, and where the TLS certificate comes from.**
+Neither. The prototype is reached at the load balancer's own DNS name over
+plain HTTP. There is no domain to attach a certificate to and no certificate.
+Recorded as a known limitation, with the production fix named as an ACM
+certificate plus an HTTPS listener and a redirect from port 80, in
+[06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md) section 3.
 
-Item 2 deserves attention: an internet-facing prototype with no authentication is
-reachable by anyone who learns the URL. That is a deliberate prototype
-limitation, and it should be an explicit acceptance rather than a default.
+**2. Internet-facing or internal.**
+Internet-facing, with no authentication, deliberately and with the conflict
+this question raised accepted rather than resolved. The deliverable is a URL
+an evaluator can open; an internal load balancer would not be one. What makes
+it acceptable is bounded and stated: nothing is stored (NFR-6), so there is no
+data to reach, and the residual risks are open compute use and unencrypted
+transit. The production fix is an authentication layer at the edge. The
+`ingress_cidr_blocks` variable narrows the exposure to a single address between
+demonstrations, which is a mitigation the author can use without changing the
+posture.
 
-**Who can answer:** Marcus Williams, and whoever owns the AWS account.
-**Blocks:** the deployment task.
+**3. VPC and subnet topology.**
+A new VPC, created by this configuration, with two public subnets across two
+availability zones and no NAT gateway. The task runs in a public subnet with a
+public IP because a Fargate task must reach ECR and CloudWatch Logs to start at
+all, and the alternatives, a NAT gateway or four interface endpoints, each cost
+more per hour than the task they would be serving. The task's security group
+accepts inbound traffic only from the load balancer's security group, so the
+public IP is an egress path rather than an entrance. Private subnets are the
+production shape and are named as such in `infra/terraform/network.tf`.
+
+**4. Terraform state backend.**
+Local state, and no backend block. One operator, one machine, and a stack whose
+resting state is destroyed. The production alternative, an S3 bucket with
+versioning and encryption plus a DynamoDB lock table, is named and not built;
+see [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 11 for why standing up a
+second stack to hold the state of a stack that is usually destroyed was not
+worth it here.
+
+**5. CloudWatch log retention.**
+Seven days, set explicitly rather than left to the ECS default of never
+expiring. A prototype that is applied and destroyed repeatedly should not leave
+log data outliving every stack that produced it. A production retention period
+is set by records management, not by this repository.
+
+**6. ECS task CPU and memory sizing.** This is the item that had the most in
+it, and the answer is arithmetic rather than a measurement.
+
+**1 vCPU and 8 GiB** (`task_cpu = 1024`, `task_memory = 8192`, the largest
+memory Fargate offers at that CPU). Sized to hold the assignment's own
+scenario, 300 labels in one submission, because that scenario is the load
+model.
+
+The memory question this item raised is answered as it asked to be: the task
+was sized first, then the caps were set to what that memory holds, and the
+working is shown. `TTB_MAX_BATCH_BYTES` is set to **3 145 728 000 bytes**,
+3 000 MiB exactly, with `TTB_MAX_BATCH_FILES` at 300 and `TTB_MAX_UPLOAD_BYTES`
+at 10 MiB. The budget that leaves 4 322 MiB of the 8 192 unused, and why that
+headroom is deliberate rather than waste, is
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 4.3.
+
+Two things were found while doing it that were not in the question:
+
+- **`TTB_BATCH_WORKERS` has to be pinned, not derived.** The application sizes
+  its pool from `os.sched_getaffinity`, which reports a cpuset. Fargate
+  enforces task CPU as a CFS quota instead, so the affinity mask can report
+  more cores than the task may use and the derived pool would oversubscribe a
+  quota it cannot see. It is set to 1 in the task definition.
+- **`OMP_THREAD_LIMIT` must stay out of the task definition entirely.**
+  `backend/app/ocr.py` pins it with `setdefault`, so any value set in the
+  environment wins, and any value other than 1 reinstates the Tesseract
+  deadlock that hangs the batch path with no error. There is a comment saying
+  so next to the environment block.
+
+**7. Desired task count and autoscaling.**
+One task, no autoscaling. That follows from the cost posture rather than from a
+capacity judgment: a single task means a deployment has a brief window with no
+healthy target and a task failure is an outage until ECS replaces it, and both
+are acceptable for a prototype that is destroyed between demonstrations. It
+does mean the "desired count >= 2" that appeared in the topology diagram of
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) was wrong; that document has been rewritten
+as the runbook and no longer says it.
+
+**8. Who pays, and what the cost ceiling is.**
+The author, from her own AWS account, with a posture of minimize: deploy,
+demonstrate, destroy. `terraform destroy` is the resting state of the stack and
+the runbook is written that way. The running stack is estimated at about **$0.12
+an hour**, or about **$90 a month** if it were left up, from AWS published list
+prices for `us-east-1`. Those are estimates and not measurements; nothing in
+this repository has ever been billed. The itemized table is
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 5.
+
+**What remains open after this closure**, because closing a question honestly
+means naming what it did not answer:
+
+- Nothing has been measured on the deployed target. Every performance figure in
+  this repository names the hardware it came from and none names production.
+  The checklist that changes that is [09_DEPLOYMENT.md](09_DEPLOYMENT.md)
+  section 9, and the README's claims do not move until it is done.
+- Whether the NDJSON stream survives the load balancer unbuffered is
+  **unverified**. `X-Accel-Buffering: no` is a hint to intermediaries, not a
+  guarantee. Section 8.4 of the runbook is the test, and it can only be run
+  against a real deployment.
+- NFR-10 portability is argued, not demonstrated. No apply has been run in any
+  region.
+
+**Answered by:** the author, who owns the AWS account.
+**Blocked:** nothing further. The deployment task is done to the boundary of
+what a session without credentials can do.
 
 ## OQ-14
 **Manual step: create Project board "TTB Label Verifier" with columns Backlog,

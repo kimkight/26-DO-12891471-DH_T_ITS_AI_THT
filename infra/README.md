@@ -1,46 +1,91 @@
 # Infrastructure
 
-**Nothing in this directory is written yet.** Infrastructure as code is a
-separate, later task; this file records the intended shape so that the
-architecture and deployment documents have something concrete to reference.
+Terraform for the prototype's AWS deployment, in
+[`terraform/`](terraform/). The runbook that drives it, including every command
+and every value's origin, is
+[docs/09_DEPLOYMENT.md](../docs/09_DEPLOYMENT.md).
 
-## Planned contents
+**Nothing here has been applied.** The configuration is formatted and validated
+against the AWS provider schema on every pull request (the `infrastructure
+format and validate` job in `.github/workflows/ci.yml`), which is a statement
+about the code and not about any account. No plan or apply has been run,
+because the sessions that wrote it had no AWS credentials.
 
-Terraform, targeting AWS commercial `us-east-1` for the prototype and written so
-that the same modules apply to AWS GovCloud (US) without redesign
-(Decisions D-1 and D-11). Decision D-11 presumes the agency's platform, Azure
-per the interview, as the eventual production target; the Terraform here does
-not cover that path and would need an Azure provider module before a pilot. See
-[docs/adr/0001-cloud-platform-aws.md](../docs/adr/0001-cloud-platform-aws.md).
+## What is here
 
-| Resource | Purpose |
+| File | Contents |
 | --- | --- |
-| Amazon ECR repository | Stores the container image built by CI. Image scanning on push. |
-| Amazon ECS cluster and service on AWS Fargate | Runs the container. No EC2 hosts to patch. |
-| Application Load Balancer | Public entry point; forwards to the ECS target group; terminates TLS. |
-| Target group with health check | Points at `GET /api/health`. |
-| IAM role for GitHub Actions via OIDC | Lets CI push images and update the service without long-lived access keys. |
-| ECS task execution role and task role | Least-privilege separation between pulling the image and running the workload. |
-| Amazon CloudWatch log group | Container logs, with a retention period set explicitly. |
-| Security groups | Load balancer accepts inbound HTTPS; tasks accept traffic only from the load balancer. |
+| `versions.tf` | Terraform and provider constraints. No backend block: state is local. |
+| `providers.tf` | Provider, region variable, default tags, and the partition, region, and availability zone data sources. |
+| `variables.tf` | Every input, with its default and the reasoning for it. |
+| `locals.tf` | Container port and name, and the GitHub OIDC subject patterns. |
+| `network.tf` | VPC, public subnets in two availability zones, internet gateway, two security groups. |
+| `ecr.tf` | Repository with scan-on-push and a lifecycle policy. |
+| `logs.tf` | CloudWatch log group with explicit retention. |
+| `iam.tf` | Task role, task execution role, GitHub OIDC provider, deploy role and its policy. |
+| `alb.tf` | Load balancer, target group, HTTP listener. |
+| `ecs.tf` | Cluster, task definition, Fargate service. |
+| `outputs.tf` | ALB DNS name, ECR repository URL and name, deploy role ARN, and the rest of the repository variable values. |
+| `terraform.tfvars.example` | Copy to `terraform.tfvars`, which is git-ignored. |
+
+Only services on the AWS FedRAMP services-in-scope list are used, per
+[ADR 0001](../docs/adr/0001-cloud-platform-aws.md) and
+[ADR 0002](../docs/adr/0002-compute-ecs-fargate-not-app-runner.md): ECR, ECS on
+Fargate, Elastic Load Balancing, CloudWatch Logs, IAM.
+
+## What is not here, and where it is written down
+
+- **No AWS account identifier, ARN containing one, or credential.** Terraform
+  reads credentials from the operator's environment. Values that identify an
+  account leave through `terraform output` and go into GitHub repository
+  variables. `terraform.tfvars`, `terraform.tfstate`, and `*.tfplan` are
+  git-ignored.
+- **No remote state.** State is local, which is right for one operator and
+  wrong for anything else. The production alternative, S3 with a DynamoDB lock
+  table, is named in [docs/09_DEPLOYMENT.md](../docs/09_DEPLOYMENT.md)
+  section 11 and not built.
+- **No TLS, no custom domain, no authentication, no WAF.** Recorded as
+  accepted prototype limitations with their production fixes in
+  [docs/06_SECURITY_AND_COMPLIANCE.md](../docs/06_SECURITY_AND_COMPLIANCE.md)
+  section 3.
+- **No Azure module.** A production deployment to the agency's platform runs
+  the same image on Azure Container Apps or AKS and needs a provider module
+  this repository does not contain (Decision D-11,
+  [ADR 0001](../docs/adr/0001-cloud-platform-aws.md)).
+- **`.terraform.lock.hcl` is not committed yet.** It should be. The session
+  that wrote this configuration had no route to `registry.terraform.io`, so no
+  provider could be resolved to lock. The runbook's first step generates it for
+  linux and both macOS architectures and asks for it to be committed.
+
+## Two things in here that are load-bearing
+
+**`OMP_THREAD_LIMIT` must never appear in the task definition's environment
+block.** Tesseract's OpenMP runtime deadlocks when the binary is invoked off
+the process's main thread, which is what the batch worker pool does on every
+image, and the symptom is a request that never returns rather than an error.
+`backend/app/ocr.py` pins it with `os.environ.setdefault`, so a value set in
+the task definition would win. The comment next to the environment block in
+`ecs.tf` says so at length.
+
+**The memory figure is the batch path's, not the OCR path's.** FastAPI parses
+the whole multipart envelope before the route runs, so a batch is resident in
+memory before any of it is processed, and `TTB_MAX_BATCH_BYTES` is set to what
+the chosen task memory holds rather than left to the application's derivation.
+The arithmetic is in [docs/09_DEPLOYMENT.md](../docs/09_DEPLOYMENT.md)
+section 4. Change `task_memory` and that section has to change with it.
 
 ## Portability constraints for a government region
 
-These are the rules the modules must follow so an AWS GovCloud (US) target needs
-no redesign. They are constraints on how the Terraform is written, not claims
-about what has been tested.
+Rules this configuration follows so an AWS GovCloud (US) target needs no
+redesign. They are constraints on how the Terraform is written, not claims
+about what has been tested, and **nothing has been tested**: NFR-10 is argued,
+not demonstrated.
 
-- No hardcoded region, partition, or account identifiers. Derive ARNs from
-  `aws_partition` and `aws_region` data sources, because GovCloud uses the
-  `aws-us-gov` partition rather than `aws`.
-- Use only services that exist in GovCloud. Service availability must be
-  confirmed against AWS documentation before the GovCloud target is attempted.
-- Keep region-specific values, such as availability zone counts, in variables.
-
-## Not decided yet
-
-The following are unresolved and are tracked in
-[docs/OPEN_QUESTIONS.md](../docs/OPEN_QUESTIONS.md): custom domain and TLS
-certificate source, whether the load balancer is internet-facing or internal,
-VPC and subnet topology (new or existing), Terraform state backend, and log
-retention period.
+- No hardcoded region, partition, or account identifier. ARNs built by hand
+  derive their partition from `data.aws_partition.current`, because GovCloud is
+  the `aws-us-gov` partition rather than `aws`.
+- Availability zones come from `data.aws_availability_zones` with Local Zones
+  and Wavelength Zones filtered out, rather than being named.
+- Region-specific values, such as the availability zone count, are variables.
+- Only services that exist in the target region, confirmed against AWS
+  documentation before a GovCloud target is attempted.

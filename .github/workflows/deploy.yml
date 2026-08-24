@@ -1,93 +1,267 @@
 name: deploy
 
 # ---------------------------------------------------------------------------
-# DISABLED ON PURPOSE.
+# Builds the container image, pushes it to ECR, and points the ECS service at
+# the digest that push produced.
 #
-# Every job carries `if: false`. The workflow is committed now so that the
-# deployment path is reviewable alongside the architecture, but it cannot run
-# because none of the infrastructure it targets exists yet: there is no ECR
-# repository, no ECS cluster or service, no load balancer, and no IAM role for
-# GitHub Actions to assume through OIDC. See infra/README.md, which is itself
-# still a placeholder, and docs/09_DEPLOYMENT.md.
+# This workflow is enabled. It runs only on its own triggers, so no pull
+# request and no push to develop can start it, and CI never needs AWS
+# credentials.
 #
-# Running this as written would fail at the credential step. Leaving it enabled
-# would also mean a workflow with `id-token: write` sits on the default branch
-# before the trust policy that scopes it has been reviewed.
+# It authenticates with GitHub's OIDC token and assumes an IAM role whose trust
+# policy names this repository. No static AWS access key exists anywhere in
+# this system (Decision D-8). The role's trust policy and permissions are in
+# infra/terraform/iam.tf.
 #
-# To enable, in this order:
-#   1. Apply the Terraform in infra/ so the ECR repository, ECS service, load
-#      balancer, and OIDC role exist.
-#   2. Set the repository variables AWS_REGION, AWS_ROLE_ARN, ECR_REPOSITORY,
-#      ECS_CLUSTER, ECS_SERVICE, and ECS_CONTAINER_NAME. These are
-#      configuration, not secrets; no static AWS access keys are used
-#      (Decision D-8 and docs/06_SECURITY_AND_COMPLIANCE.md).
-#   3. Remove the `if: false` guard from each job.
+# Before the first run, the infrastructure has to exist and six repository
+# variables have to be set. The preflight job below fails with a readable list
+# if any is missing, rather than letting the build run and the deploy step fail
+# on an empty role ARN. Settings > Secrets and variables > Actions > Variables:
+#
+#   AWS_REGION           us-east-1
+#   AWS_ROLE_ARN         terraform output deploy_role_arn
+#   ECR_REPOSITORY       terraform output ecr_repository_name
+#   ECS_CLUSTER          terraform output ecs_cluster_name
+#   ECS_SERVICE          terraform output ecs_service_name
+#   ECS_CONTAINER_NAME   terraform output ecs_container_name
+#
+# These are configuration, not secrets, which is why they are variables rather
+# than secrets. AWS_ROLE_ARN does contain the AWS account number, and that is
+# the reason it is a repository variable instead of a committed string.
+#
+# The full runbook is docs/09_DEPLOYMENT.md.
 # ---------------------------------------------------------------------------
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - "v*"
+    inputs:
+      image_tag:
+        description: "Tag to push the image under. Defaults to the short commit SHA."
+        required: false
+        type: string
+  release:
+    types: [published]
 
 permissions:
   contents: read
   id-token: write
 
+# One deployment at a time. Two concurrent runs would race on the same ECS
+# service and the loser would win, because whichever UpdateService lands last
+# decides what runs. cancel-in-progress is false: a cancelled deploy leaves a
+# half-finished rollout rather than no rollout.
+concurrency:
+  group: deploy-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
+  # -------------------------------------------------------------------------
+  # Fail early and legibly when the repository is not configured, rather than
+  # half-running. Every missing variable is reported in one pass, so the
+  # operator sets all of them once instead of discovering them one run at a
+  # time. This job touches no AWS API and needs no credentials.
+  # -------------------------------------------------------------------------
+  preflight:
+    name: check the repository variables
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every deployment variable
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION }}
+          AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+          ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+          ECS_SERVICE: ${{ vars.ECS_SERVICE }}
+          ECS_CONTAINER_NAME: ${{ vars.ECS_CONTAINER_NAME }}
+        run: |
+          missing=()
+          for name in AWS_REGION AWS_ROLE_ARN ECR_REPOSITORY ECS_CLUSTER \
+                      ECS_SERVICE ECS_CONTAINER_NAME; do
+            if [ -z "${!name}" ]; then
+              missing+=("${name}")
+            fi
+          done
+
+          if [ ${#missing[@]} -ne 0 ]; then
+            {
+              echo "### Deployment is not configured"
+              echo ""
+              echo "These repository variables are unset:"
+              echo ""
+              for name in "${missing[@]}"; do
+                echo "- \`${name}\`"
+              done
+              echo ""
+              echo "Set them under Settings > Secrets and variables > Actions >"
+              echo "Variables. The values come from \`terraform output\` in"
+              echo "\`infra/terraform\`; see \`docs/09_DEPLOYMENT.md\` section 6."
+            } | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "All six deployment variables are set."
+
   build-and-push:
     name: build and push image
-    if: false
+    needs: preflight
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.meta.outputs.image }}
+      image: ${{ steps.image.outputs.image }}
+      tag: ${{ steps.image.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
 
+      # Adopted at v6 directly, from v4, which is what pull request #27 was
+      # held for: the action is used only here, so CI could never exercise the
+      # bump and merging it while this workflow was disabled would have proved
+      # nothing. See docs/DEPENDENCY_TRIAGE_2026-08.md.
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: deploy-${{ github.run_id }}
 
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+      # A release names its own tag. A manual run takes the input if one was
+      # given and otherwise the short SHA, so a dispatch always produces a tag
+      # that identifies the commit it came from.
+      - name: Choose the image tag
+        id: tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [ -n "${RELEASE_TAG}" ]; then
+            tag="${RELEASE_TAG}"
+          elif [ -n "${INPUT_TAG}" ]; then
+            tag="${INPUT_TAG}"
+          else
+            tag="sha-${GITHUB_SHA::7}"
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Image tag: ${tag}"
+
+      - uses: docker/setup-buildx-action@v4
+
       - name: Build and push
-        id: meta
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ vars.ECR_REPOSITORY }}:${{ steps.tag.outputs.tag }}
+          # The runtime is x86_64, and the task definition says so
+          # (runtime_platform in infra/terraform/ecs.tf). Building for one
+          # platform explicitly means an architecture mismatch fails here
+          # rather than at task start.
+          platforms: linux/amd64
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The tag is how a human finds the image; the digest is what gets
+      # deployed. A tag can be moved by the next push, and a service that
+      # references one would silently change what it runs the next time a task
+      # restarts. The digest cannot move.
+      - name: Resolve the pushed image by digest
+        id: image
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           REPOSITORY: ${{ vars.ECR_REPOSITORY }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          docker build -t "$REGISTRY/$REPOSITORY:$TAG" .
-          docker push "$REGISTRY/$REPOSITORY:$TAG"
-          echo "image=$REGISTRY/$REPOSITORY:$TAG" >> "$GITHUB_OUTPUT"
+          if [ -z "${DIGEST}" ]; then
+            echo "::error::The build step returned no image digest."
+            exit 1
+          fi
+          image="${REGISTRY}/${REPOSITORY}@${DIGEST}"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Image pushed"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Tag | \`${TAG}\` |"
+            echo "| Digest | \`${DIGEST}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
     name: deploy to ECS
-    if: false
-    needs: build-and-push
+    needs: [preflight, build-and-push]
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v7
-
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: deploy-${{ github.run_id }}
 
-      - name: Render the task definition
+      # The task definition is read from the running service rather than from a
+      # file in this repository. Two reasons, and the first is a hard one: a
+      # committed task definition would have to carry the execution role ARN,
+      # which contains the AWS account number, and no account identifier is
+      # committed to this repository. The second is drift: Terraform owns the
+      # shape of the task definition, so a committed copy would be a second
+      # source of truth that nobody remembers to update.
+      #
+      # The query strips the read-only fields the API adds
+      # (taskDefinitionArn, revision, status, requiresAttributes,
+      # compatibilities, registeredAt, registeredBy). RegisterTaskDefinition
+      # rejects them.
+      - name: Read the current task definition
+        env:
+          CLUSTER: ${{ vars.ECS_CLUSTER }}
+          SERVICE: ${{ vars.ECS_SERVICE }}
+        run: |
+          family=$(aws ecs describe-services \
+            --cluster "${CLUSTER}" --services "${SERVICE}" \
+            --query 'services[0].taskDefinition' --output text)
+
+          if [ -z "${family}" ] || [ "${family}" = "None" ]; then
+            echo "::error::Service ${SERVICE} was not found in cluster ${CLUSTER}. Has the Terraform in infra/terraform been applied?"
+            exit 1
+          fi
+
+          echo "Current task definition: ${family}"
+
+          aws ecs describe-task-definition \
+            --task-definition "${family}" \
+            --query 'taskDefinition | {
+              family: family,
+              taskRoleArn: taskRoleArn,
+              executionRoleArn: executionRoleArn,
+              networkMode: networkMode,
+              containerDefinitions: containerDefinitions,
+              volumes: volumes,
+              placementConstraints: placementConstraints,
+              requiresCompatibilities: requiresCompatibilities,
+              cpu: cpu,
+              memory: memory,
+              runtimePlatform: runtimePlatform
+            }' \
+            --output json > task-definition.json
+
+      - name: Render the task definition with the new image
         id: task-def
         uses: aws-actions/amazon-ecs-render-task-definition@v1
         with:
-          task-definition: infra/task-definition.json
+          task-definition: task-definition.json
           container-name: ${{ vars.ECS_CONTAINER_NAME }}
           image: ${{ needs.build-and-push.outputs.image }}
 
+      # wait-for-service-stability turns a deployment that never becomes
+      # healthy into a failed workflow run. Without it the run goes green the
+      # moment UpdateService is accepted, which says nothing about whether the
+      # new task ever passed a health check. The service's circuit breaker
+      # rolls the deployment back; this is what makes the rollback visible.
       - name: Deploy and wait for the service to stabilise
         uses: aws-actions/amazon-ecs-deploy-task-definition@v2
         with:
@@ -95,3 +269,20 @@ jobs:
           cluster: ${{ vars.ECS_CLUSTER }}
           service: ${{ vars.ECS_SERVICE }}
           wait-for-service-stability: true
+
+      - name: Report what is running
+        env:
+          IMAGE: ${{ needs.build-and-push.outputs.image }}
+          TAG: ${{ needs.build-and-push.outputs.tag }}
+        run: |
+          {
+            echo "### Deployed"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Tag | \`${TAG}\` |"
+            echo "| Image | \`${IMAGE}\` |"
+            echo ""
+            echo "The URL is the load balancer DNS name from \`terraform output alb_dns_name\`."
+            echo "Post-deploy verification is in \`docs/09_DEPLOYMENT.md\` section 8."
+          } >> "$GITHUB_STEP_SUMMARY"

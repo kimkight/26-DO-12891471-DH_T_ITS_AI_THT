@@ -46,7 +46,7 @@ graph TB
     end
 
     subgraph aws["AWS us-east-1"]
-        alb["Application Load Balancer<br/>TLS termination<br/>Health check: GET /api/health"]
+        alb["Application Load Balancer<br/>HTTP :80, no TLS (prototype)<br/>Idle timeout 3600s<br/>Health check: GET /api/health"]
 
         subgraph task["ECS task on Fargate (single container)"]
             api["FastAPI application<br/>Python 3.11"]
@@ -59,7 +59,7 @@ graph TB
         logs[("CloudWatch Logs<br/>no image or field content")]
     end
 
-    spa -->|HTTPS| alb
+    spa -->|HTTP| alb
     alb --> api
     api --> static
     api --> ocr
@@ -345,7 +345,19 @@ in memory before any of it is processed. The derived default is the largest
 batch the two stated limits already permit rather than a figure invented here,
 which makes it an upper bound and not a memory guarantee. Setting a real ceiling
 here, or lowering `TTB_MAX_BATCH_FILES`, is the lever for bounding batch memory.
-Recorded against OQ-13 item 6.
+
+That lever has now been pulled, which closed OQ-13 item 6. The deployed task is
+1 vCPU and 8 GiB, and the task definition sets `TTB_MAX_BATCH_BYTES` to
+3 145 728 000 bytes (3 000 MiB), `TTB_MAX_BATCH_FILES` to 300, and
+`TTB_BATCH_WORKERS` to 1 rather than leaving any of them to be derived. The
+memory budget that justifies those numbers is
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 4.
+
+`OMP_THREAD_LIMIT` is the one variable that must **not** appear in the task
+definition. `backend/app/ocr.py` pins it to 1 with `setdefault` before
+`pytesseract` is imported, and anything set in the environment wins; any other
+value reinstates the Tesseract OpenMP deadlock that hangs the batch path with
+no error.
 
 In deployed environments these are supplied by the ECS task definition. Secrets,
 if any are ever introduced, come from AWS Secrets Manager by reference and never
@@ -410,8 +422,12 @@ section 1]
 The architecture holds both paths open by construction:
 
 - **Partition independence.** AWS GovCloud (US) uses the `aws-us-gov` ARN
-  partition. No ARN, region, or account identifier is hardcoded; they are
-  derived from Terraform data sources (NFR-10).
+  partition. No ARN, region, or account identifier is hardcoded; the one ARN
+  built by hand in `infra/terraform/iam.tf` derives its partition from
+  `data.aws_partition.current`, and availability zones come from
+  `data.aws_availability_zones` rather than being named (NFR-10). This is a
+  property of how the Terraform is written. **It has never been applied in any
+  region**, so NFR-10 remains argued rather than demonstrated.
 - **Service selection.** The runtime uses ECR, ECS on Fargate, an Application
   Load Balancer, IAM, and CloudWatch Logs. App Runner was excluded partly for
   this reason; see [ADR 0002](adr/0002-compute-ecs-fargate-not-app-runner.md).
@@ -443,6 +459,15 @@ FedRAMP Marketplace and the provider's documentation at deployment time; see
 | `POST /api/verify` | Implemented. Extraction, comparison and the warning checks all run; see the module map in section 5.1. |
 | `POST /api/verify-batch` | Implemented, per [ADR 0006](adr/0006-batch-execution-model.md). One synchronous multipart request, a bounded worker pool, results streamed as newline-delimited JSON, no job store. FR-8, NFR-2, US-9 through US-11. |
 
-Nothing is deployed. Accuracy and latency are measured on synthetic labels by
-`scripts/measure.py` and on a session runner, not on the deployed target; see
-the Status section of the [README](../README.md).
+**Nothing is deployed.** The infrastructure that would deploy it now exists as
+code: `infra/terraform/` builds an ECR repository, an ECS cluster and Fargate
+service, an Application Load Balancer, a CloudWatch log group, and the IAM roles
+including a GitHub OIDC deploy role, and `.github/workflows/deploy.yml` is
+enabled and runs on `workflow_dispatch` or a published release. None of it has
+been applied to an AWS account. The runbook is
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md).
+
+Accuracy and latency are measured on synthetic labels by `scripts/measure.py`
+and on a session runner, not on the deployed target; see the Status section of
+the [README](../README.md) and the first-measurements checklist in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9.

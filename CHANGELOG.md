@@ -147,6 +147,49 @@ dependencies, and `npm run test` and `npm run test:a11y`. The npm lock file
 is regenerated in the same change, per the standing rule in
 `CONTRIBUTING.md`.
 
+- Terraform for the AWS deployment, in `infra/terraform/`, implementing NFR-9
+and the NFR-10 groundwork (US-17, US-19). ECR with scan-on-push and a
+lifecycle policy; an ECS cluster, task definition and Fargate service with the
+deployment circuit breaker and rollback on; an internet-facing Application
+Load Balancer with a target group health-checking `GET /api/health`; a
+CloudWatch log group with explicit retention; a VPC with public subnets in two
+availability zones; a task role with no policy attached, a task execution
+role, a GitHub OIDC identity provider, and a deploy role whose trust policy
+names this repository and whose permissions name the one ECR repository and
+the one ECS service. Only services on the AWS FedRAMP services-in-scope list,
+per ADR 0001 and ADR 0002. **Nothing has been applied to an AWS account**; no
+session in this project has ever held AWS credentials.
+- `infra/terraform/terraform.tfvars.example`, committed, alongside a
+`.gitignore` that keeps `terraform.tfvars`, `terraform.tfstate*` and `*.tfplan`
+out of the repository. No AWS account identifier, ARN containing one, or
+credential is committed anywhere; account-specific values reach GitHub Actions
+as repository variables.
+- An `infrastructure format and validate` job in `.github/workflows/ci.yml`,
+running `terraform fmt -check -recursive` and `terraform validate` over
+`infra/terraform/`. `terraform init -backend=false` is what lets validate run
+with no credentials: it resolves the provider plugins and skips the state
+backend, which is the only step that would authenticate. Added to the
+aggregating `ci` check.
+- `docs/09_DEPLOYMENT.md` rewritten as the author's runbook: the exact
+commands, where every variable value comes from, the task sizing arithmetic,
+an itemized cost estimate, the post-deploy verification steps, a first
+measurements checklist, and teardown.
+- A post-deploy verification step that cannot be skipped: run a real batch
+through the load balancer and read the timestamps on the arriving NDJSON
+lines. `X-Accel-Buffering: no` is a hint to intermediaries and not a
+guarantee, and whether the stream survives an ALB unbuffered has never been
+verified. If it does not, NFR-2 is unmet while every test still passes.
+- A "first measurements" checklist in `docs/09_DEPLOYMENT.md` section 9.
+No figure in this repository was measured on a deployed target, and the
+README's performance claims do not change until that checklist has been run.
+- Section 3.1 of `docs/06_SECURITY_AND_COMPLIANCE.md`, recording the
+internet-facing prototype with no authentication and plain HTTP as an explicit
+acceptance rather than a default: what bounds it (nothing is stored, NFR-6,
+and the task's IAM role has no policy), what the residual risks are (open use
+of compute, unencrypted transit, no attribution), and the production fix in
+order (ACM certificate and HTTPS listener, an auth layer at the edge, then WAF
+and rate limiting, then access logs and an audit trail).
+
 ### Changed
 
 - OQ-15 closed. The preflight it named as its own closing condition returned
@@ -275,6 +318,73 @@ semver major but `python:3.11` to `python:3.14` as a semver minor, so `python`
 is ignored for both major and minor and `node` for major only. Patch updates
 are still proposed for both, so security rebuilds inside the pinned line
 still arrive. Recorded in `docs/DEPENDENCY_TRIAGE_2026-08.md`.
+
+- `.github/workflows/deploy.yml` enabled. Every job's `if: false` is removed;
+the workflow runs on `workflow_dispatch` and on a published release, so no
+pull request and no push to `develop` can start it and CI still needs no AWS
+credentials. It builds the image, pushes it to ECR under a tag, and deploys
+the **digest** that push returned rather than the tag, because a tag can be
+moved by the next push and a service referencing one would silently change
+what it runs. A preflight job fails with a readable list of every unset
+repository variable rather than letting the run half-finish. The task
+definition is read from the running service instead of from a committed JSON
+file, which keeps the execution role ARN, and with it the AWS account number,
+out of the repository.
+- `aws-actions/configure-aws-credentials` adopted at v6, directly from v4,
+which is what Dependabot PR #27 was held for since the 2026-08-22 triage. #27
+is superseded and recommended for closing; it has not been closed from this
+session. Recorded in `docs/DEPENDENCY_TRIAGE_2026-08.md`. The bump has still
+never authenticated against anything, and the first run of the deploy workflow
+is what confirms it.
+- OQ-13 closed, item by item, with the author's decisions: her own AWS account;
+a minimize cost posture where `terraform destroy` is the resting state; an
+internet-facing load balancer with no authentication over plain HTTP; and
+`us-east-1` commercial per ADR 0001. Item 6, ECS task sizing, is answered as
+it asked to be, by sizing the task first and then setting the caps to what
+that memory holds: 1 vCPU and 8 GiB, `TTB_MAX_BATCH_BYTES` at 3 145 728 000
+bytes (3 000 MiB), `TTB_MAX_BATCH_FILES` at 300, and the memory budget shown
+in `docs/09_DEPLOYMENT.md` section 4.3.
+- `TTB_BATCH_WORKERS` pinned to 1 in the task definition rather than left to
+the application's derivation. `backend/app/config.py` sizes the worker pool
+from `os.sched_getaffinity`, which reports a cpuset; Fargate enforces task CPU
+as a CFS quota instead, so the affinity mask can report more cores than the
+task may use and a derived pool would oversubscribe a quota it cannot see.
+- The ALB idle timeout set to 3600 seconds against a worst case of about 1620:
+300 labels at NFR-1's roughly 5-second per-label budget is 1500 seconds, plus
+about 120 to receive and parse a full-size multipart envelope before the first
+NDJSON line is written. A batch is one response held open for the whole run,
+and a connection closed mid-batch loses the batch, because ADR 0006 has no job
+store and no resume.
+- `OMP_THREAD_LIMIT` documented as deliberately absent from the ECS task
+definition, in a comment beside the environment block, in `infra/README.md`,
+in `docs/05_ARCHITECTURE.md` section 7, and in the OQ-13 closure.
+`backend/app/ocr.py` pins it with `os.environ.setdefault`, so a value set in
+the task definition would win, and any value other than 1 reinstates the
+Tesseract OpenMP deadlock that hangs the batch path with no error at all.
+- Traceability matrix rows for NFR-9 and NFR-10 moved off "no infrastructure
+code exists" and onto the Terraform paths. NFR-10 stays honest: portability is
+argued from how the configuration is written, not demonstrated, because no
+apply has been run in any region.
+- `docs/05_ARCHITECTURE.md` section 2's container diagram no longer claims TLS
+termination at the load balancer, section 7 records the deployed batch caps,
+section 9 says partition independence is a property of the code and not a
+demonstrated one, and section 10 records that the infrastructure exists as
+code and has never been applied.
+- Four rows of `docs/06_SECURITY_AND_COMPLIANCE.md` corrected where deployment
+made them false. "Data in transit: TLS terminated at the Application Load
+Balancer" was wrong once the listener became plain HTTP. "No rate limiting or
+WAF: not exposed to the public workload" was wrong once the load balancer
+became internet-facing. The batch threat row said there was no total-bytes cap
+when `TTB_MAX_BATCH_BYTES` has been enforced from `Content-Length` since #53,
+and the input-validation control row still said the upload endpoints did not
+exist.
+- `infra/README.md` rewritten from a placeholder describing intended contents
+into a description of what is there, what is deliberately not, and the two
+load-bearing facts (`OMP_THREAD_LIMIT`, and that the memory figure is the
+batch path's).
+- The README status table replaced the single "Deployed URL: no AWS
+infrastructure exists" row with three: infrastructure as code, the deployment
+workflow, and the still-undeployed URL.
 
 ### Fixed
 

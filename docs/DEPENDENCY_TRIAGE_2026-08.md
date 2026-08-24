@@ -524,3 +524,46 @@ one version, and read the test run rather than the health probe.
   the `dependency audit` CI job on every pull request, and both are green on
   `develop` at `ef3086a`. This document is about update policy, not
   vulnerabilities.
+
+## #27 is superseded, 2026-08-24
+
+`deploy.yml` is enabled. Every job's `if: false` is gone, the workflow runs on
+`workflow_dispatch` and on a published release, and the infrastructure it
+targets exists as Terraform in `infra/terraform/` (OQ-13 is closed). The
+condition written down above, "it stays open until `deploy.yml` is enabled",
+has been met.
+
+**The v6 bump was taken directly in that change**, not by merging
+[#27](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/27).
+`deploy.yml` now pins `aws-actions/configure-aws-credentials@v6` at both places
+it authenticates. That is the same version #27 proposes, arrived at in the task
+that also wrote the trust policy the action assumes into, which is what the
+triage asked for: the bump reviewed alongside a workflow that can exercise it,
+rather than alongside a skipped job.
+
+**Recommendation: close #27 as superseded.** Not merged, because there is
+nothing left to merge; the file on `develop` will already be at v6 once this
+branch lands, and Dependabot closes its own pull request when the target
+version is reached. Closing it by hand is the tidier version of the same
+outcome.
+
+**What is still owed, and it is the part that matters.** The triage's last
+sentence asked for confirmation "by a run that actually assumes a role rather
+than by a green check on a skipped job." That has **not** happened. No AWS
+account has been touched from any session in this project, so v6 has still
+never authenticated against anything. The first run of the deploy workflow is
+the confirmation, and it is the author's to run.
+
+Concretely, what to watch on that first run: v5 and v6 of the action tightened
+defaults around how the role session is named and how credentials are exported
+to later steps. Nothing in `deploy.yml` depends on the loosened behaviour, and
+`role-session-name` is set explicitly rather than left to the default, but a
+first run is a first run. If it fails at the credential step, the failure is
+readable and the fix is in the action's own release notes; it does not
+implicate the Terraform.
+
+**One row of the triage table above is now stale**, and rather than editing
+history: the "Recommendation: Hold" against #27 was the right call at the time
+and its condition has now been discharged here. The table stays as written,
+because it is a record of what was decided on 2026-08-22 with what was known
+then.
