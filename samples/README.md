@@ -93,9 +93,11 @@ labels; AI image generation tools work well for this."
 ## Cases the set covers
 
 Derived from the interviews, these are the cases the accuracy and UAT tiers
-exercise. See `docs/07_TEST_STRATEGY.md` for the assertions. Every case below
-is present in `specs.py` except case 7, batch submission, which needs FR-8 and
-is not built.
+exercise. See `docs/07_TEST_STRATEGY.md` for the assertions. Every case below is
+present in `specs.py`. Case 7, batch submission, is exercised by
+`backend/tests/test_batch.py`, which submits the whole set through
+`POST /api/verify-batch` and asserts that every label returns a line; it needs
+no spec of its own because a batch is the existing twelve labels sent together.
 
 1. A clean, correct label matching its application data on every field.
 2. A brand name differing only in letter case, for example `STONE'S THROW` on

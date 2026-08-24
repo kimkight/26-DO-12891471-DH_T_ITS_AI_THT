@@ -249,10 +249,11 @@ return per-label, per-field results.
 - Given a batch exceeding the configured file-count limit, then the request is
   rejected with a message naming the limit, before any file is processed.
 - The result identifies which label each result belongs to.
-- Given a batch submission, then it is one multipart request carrying the image
-  files plus one CSV of application data keyed by image filename, and results
-  stream back as newline-delimited JSON so progress is visible while the batch
-  runs. See [ADR 0006](adr/0006-batch-execution-model.md).
+- Given a batch submission, then it is one multipart request to
+  `POST /api/verify-batch` carrying the image files plus one CSV of application
+  data keyed by image filename, and results stream back as newline-delimited
+  JSON so progress is visible while the batch runs. See
+  [ADR 0006](adr/0006-batch-execution-model.md).
 - Given a CSV row whose `filename` matches no submitted image, or an image with
   no matching CSV row, then that item reports an error on its own result line
   and the rest of the batch still returns results.

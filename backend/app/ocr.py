@@ -13,19 +13,41 @@ the environment Marcus Williams describes.
 
 Nothing is written to disk either (NFR-6). The image is decoded from the request
 bytes into a numpy array and released with the request.
+
+``OMP_THREAD_LIMIT`` is pinned below. See the comment there: it is what lets the
+batch path call this from a worker thread at all.
 """
 
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import dataclass, field
 
-import cv2
-import numpy as np
-import pytesseract
-from pytesseract import Output
+# Tesseract is built against OpenMP, and its OpenMP runtime deadlocks when the
+# binary is invoked from a thread other than the process's main thread. The
+# single-label path never hit this: `POST /api/verify` is an async handler, so
+# extract_text runs on the event loop thread. The batch path (FR-8, ADR 0006)
+# runs it in a worker pool, and without this the Tesseract child process never
+# exits and the batch hangs rather than failing.
+#
+# One thread per invocation is also the right shape for the work rather than
+# merely the safe one. ADR 0006 parallelizes across images, so letting each of
+# those also fan out across cores would oversubscribe the CPU the pool is
+# already sized to. Measured cost on a four-core runner: median 527 ms per
+# label for the twelve-label sample set, against NFR-1's roughly 5 seconds.
+#
+# setdefault, not assignment, so an operator can still override it from the
+# environment (NFR-11). It is set before pytesseract is imported because the
+# value is read by the Tesseract child process when it is spawned.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
-from app.config import settings
+import cv2  # noqa: E402
+import numpy as np  # noqa: E402
+import pytesseract  # noqa: E402
+from pytesseract import Output  # noqa: E402
+
+from app.config import settings  # noqa: E402
 
 
 class UndecodableImageError(Exception):

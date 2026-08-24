@@ -201,6 +201,68 @@ in FR-8 describes.
   reasonable default for CPU-bound work but has not been benchmarked, for the
   same reason as Alternative B: nothing is implemented and no sample set exists.
 
+## What implementation changed, 2026-08-23
+
+Recorded after FR-8 was built. The decision above stands; three things it stated
+turned out differently, and one thing it could not have known.
+
+**The path is `POST /api/verify-batch`, not `POST /api/verify/batch`.** A
+sibling path rather than a child of the single-label one. The
+`UploadSizeLimitMiddleware` matches paths to decide which envelope limit to
+enforce, and the two routes need different limits: a batch envelope carries many
+images plus a CSV, so measuring it against the per-image limit would reject every
+batch of more than one file. A nested path invites a prefix match, and a prefix
+match on `/api/verify` silently applies the single-file limit to the batch route.
+Making them siblings makes the match exact and the mistake unavailable. This
+supersedes the path written in the Decision section.
+
+**Tesseract cannot be called from a worker thread with its default OpenMP
+settings.** This is the fact the ADR could not have known, and it is the one
+worth carrying forward. Tesseract is built against OpenMP, and its OpenMP runtime
+deadlocks when the binary is invoked from any thread other than the process main
+thread: the child process never exits and the request hangs rather than failing.
+The single-label path never met it, because `POST /api/verify` is an async
+handler and so runs OCR on the event loop thread. The bounded pool this ADR
+specifies does not, and the first batch written against it hung.
+
+`backend/app/ocr.py` now sets `OMP_THREAD_LIMIT=1` if it is unset. One thread per
+invocation is also the right shape rather than merely the safe one: this design
+already parallelizes across images, so letting each Tesseract also fan out across
+cores would oversubscribe the CPU the pool is sized to. The measured cost to a
+single label is small. **Anyone changing the concurrency model here should
+re-read this paragraph first**, because the failure it describes presents as a
+hang with no error, not as a crash.
+
+**Pool sizing is still unmeasured as a tuning question, but it is no longer
+unmeasured as an arithmetic one.** The ADR recorded "wall-clock time for a batch
+is roughly the sequential time divided by the pool size" as an expectation.
+Measured over the twelve-label sample set and a synthetic hundred-label batch,
+throughput held roughly constant per label as the batch grew, which is what that
+expectation predicts. The numbers are in the pull request that added the feature
+rather than here or in the README, because they were measured on a session
+runner and NFR-1 requires the hardware to be stated with the figure. Nothing has
+been measured on the deployed target.
+
+**Two limits exist now that the ADR did not name**, both defaulting to a derived
+value rather than an invented one:
+
+- `TTB_BATCH_WORKERS`, the pool size, derived from the cores the process may
+  use.
+- `TTB_MAX_BATCH_BYTES`, the largest batch request body accepted, derived as
+  `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`. At the defaults that is about
+  3 GiB, and FastAPI has the whole envelope parsed before the route runs. That
+  is a deployment input, not a memory guarantee, and it is recorded against
+  OQ-13 item 6.
+
+**One negative consequence is sharper than written.** "Streaming responses are
+harder to test than a single JSON body" understated it. The harder part was not
+the assertion; it was that a failure inside the stream presents as a truncated
+response with no status code to carry it, because the status line is sent before
+the first row is computed. `app/batch.py` therefore catches every exception per
+row, including ones it does not anticipate, and turns it into that row's error.
+A broad except is normally a smell; here the alternative is a silently short
+stream.
+
 ## References
 
 - [03_REQUIREMENTS.md](../03_REQUIREMENTS.md), FR-8, FR-9, NFR-1, NFR-2, NFR-3

@@ -73,6 +73,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `TTB_ALLOWED_MIME_TYPES` and `TTB_OCR_LONG_EDGE_PX`, both mirrored in
   `.env.example` alongside `TTB_ABV_TOLERANCE`, which the settings class had not
   previously read.
+- Batch verification: `POST /api/verify-batch`, implementing FR-8 and NFR-2 and
+  following ADR 0006. One synchronous multipart request carries up to
+  `TTB_MAX_BATCH_FILES` images plus one CSV of application data keyed by image
+  filename in the A-14 column contract. Images are read by a bounded worker
+  pool sized from the cores the process may use, and per-label results stream
+  back as newline-delimited JSON, one object per line, each naming the image it
+  belongs to and carrying its position and the batch total so a client can
+  render progress. There is no job store; the stream is the only copy of the
+  results (D-9, NFR-6). A batch over the file limit is refused before anything
+  is processed, with the limit named. One unreadable image, one disallowed
+  type, one oversize file, a CSV row matching no image, an image matching no
+  CSV row, and a duplicated CSV filename are each that row's error on its own
+  line, leaving the rest of the batch to return (US-9, US-10, US-11).
+- `backend/app/verify.py`, holding the single-image pipeline both routes run, so
+  that a batch result cannot drift from what a single result means. `app/api.py`
+  keeps `build_result` as a re-export; `scripts/measure.py` imports it from the
+  new module.
+- `backend/app/batch.py`, holding the A-14 CSV parser, the reconciliation of
+  images against rows, the worker pool and the NDJSON writer.
+- `TTB_BATCH_WORKERS` and `TTB_MAX_BATCH_BYTES`, both defaulting to 0 meaning
+  "derive it" rather than "unlimited": the pool size from the cores the process
+  may use, and the batch envelope limit as
+  `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`. Documented in `.env.example`
+  and `docs/05_ARCHITECTURE.md`, with the memory consequence recorded against
+  OQ-13 item 6.
+- 22 batch tests in `backend/tests/test_batch.py`, including a batch of three
+  with one corrupt image, a batch over the cap, a CSV referencing a missing
+  file, and a full run of the twelve-label generated sample set asserting that
+  every row returns. The suite is 126 tests.
 
 ### Changed
 
@@ -202,6 +231,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is ignored for both major and minor and `node` for major only. Patch updates
   are still proposed for both, so security rebuilds inside the pinned line
   still arrive. Recorded in `docs/DEPENDENCY_TRIAGE_2026-08.md`.
+
+### Fixed
+
+- Tesseract could not be called from a worker thread. Its OpenMP runtime
+  deadlocks when the binary is invoked from any thread other than the process
+  main thread, so the child process never exits and the request hangs rather
+  than failing. `POST /api/verify` never met this, being an async handler that
+  runs OCR on the event loop thread; the batch worker pool does.
+  `backend/app/ocr.py` now sets `OMP_THREAD_LIMIT=1` if it is unset, which is
+  also the right shape for the work because the pool already parallelizes
+  across images. Recorded in ADR 0006.
+- Every rejection now leaves the service in one documented shape. A submission
+  missing a required part previously escaped as FastAPI's own
+  `{"detail": [...]}` while every other rejection used `ErrorResponse`; a
+  `RequestValidationError` handler in `backend/app/main.py` maps it, naming the
+  part at fault without echoing any submitted value (FR-9, NFR-6).
+- The upload size and accepted-type limits named in a rejection are now read
+  when the rejection is built rather than when the module is imported, so a
+  configured `TTB_MAX_UPLOAD_BYTES` is reflected in both the check and the
+  message that names it (NFR-7, NFR-11).
+- The upload-size middleware matched `/api/verify` by prefix, which would have
+  measured a batch envelope against the per-image limit and rejected every
+  batch of more than one file. Matching is now exact, with a limit per route.
 
 ## [0.1.0] - 2026-08-22
 

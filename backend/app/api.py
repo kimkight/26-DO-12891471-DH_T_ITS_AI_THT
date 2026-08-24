@@ -1,59 +1,81 @@
-"""The verification HTTP surface: POST /api/verify.
+"""The verification HTTP surface: POST /api/verify and POST /api/verify-batch.
 
 Governing requirements: FR-1 and FR-2 (accept a label image plus application
-data for the same five fields), FR-3 (one outcome per field), FR-9 (an
-undecodable file, an image with no text, a disallowed type and an oversize file
-each return a clear message, and no error path returns a match), NFR-6 (nothing
-is persisted and no image content or field value reaches the logs), NFR-7 (size
-is checked before the body is read and MIME before anything is decoded), NFR-3
-(the default path makes no outbound call and says so in the response).
+data for the same five fields), FR-3 (one outcome per field), FR-8 (many labels
+in one submission, results streaming back per label), FR-9 (an undecodable file,
+an image with no text, a disallowed type and an oversize file each return a
+clear message, and no error path returns a match), NFR-2 (a batch does not fail
+as a whole and its progress is observable), NFR-6 (nothing is persisted and no
+image content or field value reaches the logs), NFR-7 (size is checked before
+the body is read, MIME before anything is decoded, and the batch file count
+before anything is processed), NFR-3 (the default path makes no outbound call
+and says so in the response).
 
-US-1 through US-7 are implemented here at the API level. There is no user
-interface for them yet; US-2 and FR-10 are presentation requirements and are not
-part of this module.
+US-1 through US-7 and US-9 through US-11 are implemented here at the API level.
+The pipeline both routes run is in ``app.verify``; the batch reconciliation,
+worker pool and stream are in ``app.batch``. US-2 and FR-10 are presentation
+requirements and are not part of this module.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.formparsers import MultiPartParser
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
+from app import batch
 from app.config import settings
-from app.ocr import UndecodableImageError, extract_text
-from app.parse import ParsedFields, parse_fields
-from app.schemas import (
-    FIELD_LABELS,
-    ErrorDetail,
-    ErrorResponse,
-    FieldResult,
-    VerificationResult,
-    WarningResult,
-)
-from app.warning import WARNING_STATEMENT, WarningCheck
+from app.schemas import ErrorDetail, ErrorResponse, VerificationResult
+from app.verify import VerificationError, build_result, check_media_type, check_size, verify_image
+
+__all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
 
 logger = logging.getLogger(__name__)
 
 # Starlette spools any part over 1 MB to a temporary file on disk. NFR-6 says no
 # uploaded image is written to disk, so the spool threshold is raised to the
-# upload limit and nothing within the limit ever reaches the filesystem.
-# max_part_size is raised with it because it is the parser's own hard cap and
-# would otherwise reject at 1 MB, well below TTB_MAX_UPLOAD_BYTES.
+# upload limit and nothing within the limit ever reaches the filesystem. This is
+# a class attribute the parser reads through `self`, with no constructor
+# override, so setting it here does reach every request.
+#
+# max_part_size is raised alongside it, but note what it does and does not do.
+# The parser applies it to non-file parts only; a file part streams into the
+# spooled file with no cap of its own. So this bounds the batch CSV and the
+# single-label form fields, not the images. Images are bounded exactly, after
+# parsing, by verify.check_size. Note also that the parser takes max_part_size
+# as a constructor argument defaulted to 1 MB and assigns it to the instance, so
+# this class-level value is shadowed on every request; it is set for the case
+# where a future caller constructs a parser without passing one, not relied on.
 MultiPartParser.spool_max_size = settings.max_upload_bytes
 MultiPartParser.max_part_size = settings.max_upload_bytes
 
 router = APIRouter(prefix="/api", tags=["verification"])
 
-_SIZE_LIMIT_TEXT = f"{settings.max_upload_bytes} bytes"
-_TYPE_LIMIT_TEXT = ", ".join(settings.allowed_mime_types)
+
+# What each upload route accepts as a whole request body, checked from
+# Content-Length before the body is read. The two differ by construction: a
+# batch envelope carries many images plus a CSV, so measuring it against the
+# per-image limit would reject every batch of more than one file. Matching is
+# exact rather than by prefix for the same reason; a prefix match on
+# "/api/verify" would apply the single-file limit to "/api/verify-batch".
+def _envelope_limit(path: str) -> int | None:
+    """The whole-body limit for an upload route, or None if the path is not one.
+
+    Read per request rather than captured at import, so that an environment
+    that sets TTB_MAX_UPLOAD_BYTES or TTB_MAX_BATCH_FILES is reflected in both
+    the check and the message that names it (NFR-7, NFR-11).
+    """
+    if path == "/api/verify":
+        return settings.max_upload_bytes
+    if path == "/api/verify-batch":
+        return settings.effective_max_batch_bytes
+    return None
 
 
 def _error(status_code: int, code: str, message: str, limit: str | None = None) -> JSONResponse:
@@ -79,23 +101,30 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     returning here without calling ``call_next`` means the body is never
     consumed at all.
 
-    Content-Length covers the whole multipart envelope, so the effective limit
-    on the image itself is marginally below TTB_MAX_UPLOAD_BYTES. Erring strict
-    is the right direction for a guard whose job is to stop a large body from
-    being read, and the file's own size is checked exactly, after parsing, in
-    the route below.
+    Content-Length covers the whole multipart envelope, so on the single-label
+    route the effective limit on the image itself is marginally below
+    TTB_MAX_UPLOAD_BYTES. Erring strict is the right direction for a guard whose
+    job is to stop a large body from being read, and the file's own size is
+    checked exactly, after parsing, by verify.check_size.
+
+    The batch route is measured against its own envelope limit, which is
+    TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default. That bounds the
+    request, not any one image in it: each image is still checked exactly
+    against TTB_MAX_UPLOAD_BYTES after parsing, and an oversize one is that
+    row's error rather than the batch's.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
+        limit = _envelope_limit(request.url.path)
         declared = request.headers.get("content-length")
         if (
             request.method == "POST"
-            and request.url.path.startswith("/api/verify")
+            and limit is not None
             and declared is not None
             and declared.isdigit()
-            and int(declared) > settings.max_upload_bytes
+            and int(declared) > limit
         ):
-            return _oversize_response()
+            return _oversize_response(limit)
         return await call_next(request)
 
 
@@ -118,53 +147,22 @@ async def verify(
     beverage_type: Annotated[str, Form()] = "",
 ) -> JSONResponse:
     """Verify one label. Nothing is persisted and nothing is logged about it."""
-    started = time.perf_counter()
-    if image.content_type not in settings.allowed_mime_types:
-        # Checked before any byte is decoded (NFR-7, second criterion).
-        return _error(
-            415,
-            "unsupported_media_type",
-            (
-                f"{image.content_type or 'The submitted file'} is not an accepted "
-                "image type. Send one of the accepted types instead."
-            ),
-            limit=f"accepted types: {_TYPE_LIMIT_TEXT}",
-        )
-
-    content = await image.read()
-    if len(content) > settings.max_upload_bytes:
-        return _oversize_response()
-
     try:
-        ocr = extract_text(content)
-    except UndecodableImageError as exc:
-        # Distinct from "no text found" below, because the agent's next action
-        # differs: a corrupt file needs resending, a blank one needs a better
-        # photograph (FR-9, Jenny Park interview).
-        return _error(422, "unreadable_image", str(exc))
-
-    if not ocr.has_text:
-        return _error(
-            422,
-            "no_text_found",
-            (
-                "The image was read but no text could be extracted from it. This "
-                "is not the same as the fields failing to match: nothing was "
-                "compared."
-            ),
+        # Checked before any byte is decoded (NFR-7, second criterion).
+        check_media_type(image.content_type)
+        content = await image.read()
+        check_size(content)
+        result = verify_image(
+            content,
+            {
+                "brand_name": brand_name,
+                "class_type": class_type,
+                "alcohol_content": alcohol_content,
+                "net_contents": net_contents,
+            },
         )
-
-    parsed = parse_fields(ocr.lines)
-    application = {
-        "brand_name": brand_name,
-        "class_type": class_type,
-        "alcohol_content": alcohol_content,
-        "net_contents": net_contents,
-    }
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    result = build_result(
-        parsed, application, ocr.mean_confidence, ocr_ms=ocr.elapsed_ms, elapsed_ms=elapsed_ms
-    )
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
 
     # NFR-6: counts and timings only. No image content, no extracted value, no
     # application value, no filename.
@@ -172,93 +170,145 @@ async def verify(
         "verification completed",
         extra={
             "bytes_received": len(content),
-            "ocr_ms": ocr.elapsed_ms,
+            "ocr_ms": result.ocr_ms,
             "beverage_type_supplied": bool(beverage_type.strip()),
         },
     )
     return JSONResponse(status_code=200, content=result.model_dump())
 
 
-def _oversize_response() -> JSONResponse:
-    return _error(
-        413,
-        "file_too_large",
-        ("The uploaded file is larger than this service accepts. Send a smaller image."),
-        limit=f"maximum upload size: {_SIZE_LIMIT_TEXT}",
-    )
-
-
-def build_result(
-    parsed: ParsedFields,
-    application: dict[str, str],
-    ocr_confidence: float,
-    *,
-    ocr_ms: float,
-    elapsed_ms: float | None = None,
-) -> VerificationResult:
-    """Compare every field and assemble the response (FR-2, FR-3).
-
-    Split out from the route so the comparison layer can be exercised without an
-    HTTP client, and so scripts/measure.py runs exactly the code the API runs.
-    """
-    comparisons = {
-        "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
-        "class_type": compare_text(parsed.class_type, application.get("class_type")),
-        "alcohol_content": compare_abv(parsed.alcohol_content, application.get("alcohol_content")),
-        "net_contents": compare_net_contents(parsed.net_contents, application.get("net_contents")),
-    }
-    label_values = {
-        "brand_name": parsed.brand_name,
-        "class_type": parsed.class_type,
-        "alcohol_content": parsed.alcohol_content,
-        "net_contents": parsed.net_contents,
-    }
-
-    fields = [
-        FieldResult(
-            name=name,
-            display_name=FIELD_LABELS[name],
-            found_on_label=label_values[name] is not None,
-            label_value=label_values[name],
-            application_value=application.get(name) or None,
-            score=comparison.score,
-            outcome=comparison.outcome,
-            reason=comparison.reason,
+def _oversize_response(limit: int | None = None) -> JSONResponse:
+    """FR-9's fourth criterion: rejected before reading, with the limit named."""
+    enforced = settings.max_upload_bytes if limit is None else limit
+    if enforced == settings.max_upload_bytes:
+        message = "The uploaded file is larger than this service accepts. Send a smaller image."
+    else:
+        message = (
+            "This submission is larger than this service accepts in one request. "
+            "Split it into smaller batches and send them one after another."
         )
-        for name, comparison in comparisons.items()
-    ]
-    fields.append(_warning_field(parsed.warning, parsed.warning_text))
-
-    return VerificationResult(
-        fields=fields,
-        warning_detail=WarningResult(
-            statement_found=parsed.warning.found,
-            prefix_as_printed=parsed.warning.prefix_found,
-            prefix_is_capitalized=parsed.warning.prefix_is_upper_case,
-            body_matches_regulation=parsed.warning.body_matches,
-        ),
-        ocr_confidence=ocr_confidence,
-        elapsed_ms=round(ocr_ms if elapsed_ms is None else elapsed_ms, 1),
-        ocr_ms=round(ocr_ms, 1),
-        external_call_made=False,
-    )
+    return _error(413, "file_too_large", message, limit=f"maximum upload size: {enforced} bytes")
 
 
-def _warning_field(warning: WarningCheck, warning_text: str | None) -> FieldResult:
-    """The warning as one field row, with no review band (FR-5).
+@router.post(
+    "/verify-batch",
+    responses={
+        200: {
+            "content": {"application/x-ndjson": {}},
+            "description": (
+                "One JSON object per line, one line per item, emitted as each "
+                "item finishes. See the BatchLine schema."
+            ),
+        },
+        413: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Verify many labels against one CSV of application data",
+)
+async def verify_batch(
+    applications: Annotated[
+        UploadFile,
+        File(description="One CSV of application data keyed by image filename (A-14)."),
+    ],
+    images: Annotated[
+        list[UploadFile],
+        # Defaulted rather than required so that a submission with no images at
+        # all reaches the route and gets the message below, which says what to
+        # do about it, instead of the generic missing-part rejection. The
+        # default is never mutated; FastAPI reads it and builds a new list.
+        File(description="Label artwork, one part per image, repeated."),
+    ] = [],  # noqa: B006
+) -> Response:
+    """Verify a batch of labels and stream the results (FR-8, NFR-2, ADR 0006).
 
-    The comparison side is the regulation rather than the application form: the
-    required text is fixed by 27 CFR 16.21, so there is nothing for an applicant
-    to declare and nothing to type in.
+    The response is `application/x-ndjson`: one JSON object per line, each
+    naming the image it belongs to, emitted as each label finishes rather than
+    in submission order. Nothing is persisted; the stream is the only copy of
+    the results (D-9, NFR-6).
+
+    Three rejections happen before any image is read, and each names what was
+    exceeded (FR-9, NFR-7):
+
+    * more images than `TTB_MAX_BATCH_FILES`, which is FR-8's third criterion,
+      "the request is rejected with a message naming the limit, before any file
+      is processed";
+    * a request body over the batch envelope limit, caught in middleware from
+      Content-Length before the body is read at all;
+    * an application CSV that cannot serve as application data for any row.
+
+    Everything else is a per-row error on its own line, which is what keeps one
+    bad image from costing an agent the other 299 results (FR-8, US-10).
     """
-    outcome = Outcome.MATCH if warning.passes else Outcome.MISMATCH
-    return FieldResult(
-        name="government_warning",
-        display_name=FIELD_LABELS["government_warning"],
-        found_on_label=warning.found,
-        label_value=warning_text,
-        application_value=WARNING_STATEMENT,
-        score=None,
-        outcome=outcome,
-        reason=f"{warning.reason} {warning.bold_type_note}",
+    # FR-8, third criterion. Counted before anything is read, decoded or
+    # compared. The bodies are in memory by now, because FastAPI parses the
+    # multipart form while resolving these parameters; "before any file is
+    # processed" is the guarantee the requirement states and the one kept here.
+    if len(images) > settings.max_batch_files:
+        detail = batch.over_count_error(len(images))
+        return _error(413, detail.code, detail.message, limit=detail.limit)
+
+    if not images:
+        return _error(
+            422,
+            "empty_batch",
+            "No images were submitted. Attach at least one label image and the "
+            "application data CSV.",
+        )
+
+    try:
+        table = batch.parse_applications_csv(await applications.read())
+    except batch.ApplicationCsvError as exc:
+        # Batch level rather than per row: with no usable header there is no row
+        # to attach an error to, and repeating one message 300 times down the
+        # stream would tell an agent nothing the first line did not.
+        return _error(422, "invalid_application_csv", exc.message, limit=exc.limit)
+
+    submitted = [
+        batch.SubmittedImage(
+            filename=image.filename or f"image-{position + 1}",
+            content_type=image.content_type,
+            content=await image.read(),
+        )
+        for position, image in enumerate(images)
+    ]
+    submitted = _name_duplicates(submitted)
+
+    return StreamingResponse(
+        batch.stream(submitted, table),
+        media_type="application/x-ndjson",
+        headers={
+            # Without this a proxy may buffer the whole response and hand it
+            # over in one block at the end, which reinstates exactly the frozen
+            # page NFR-2 forbids. It is a hint to intermediaries, not a
+            # guarantee, and it is worth verifying against the load balancer at
+            # deployment time (OQ-13).
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
     )
+
+
+def _name_duplicates(images: list[batch.SubmittedImage]) -> list[batch.SubmittedImage]:
+    """Make every image part identifiable, which FR-8's fourth criterion needs.
+
+    Two parts submitted under one filename cannot both be reported against that
+    name without the results becoming ambiguous, and a part with no filename at
+    all cannot be reported against anything. Both are renamed to a positional
+    label here, so that every line in the stream identifies exactly one
+    submitted part. The renamed part then matches no CSV row and is reported as
+    `missing_application_row`, which names the real problem: the agent has to
+    fix the filenames before the batch can be checked.
+    """
+    seen: set[str] = set()
+    named: list[batch.SubmittedImage] = []
+    for position, image in enumerate(images):
+        name = image.filename
+        if name in seen:
+            name = f"{image.filename} (duplicate, part {position + 1})"
+        seen.add(name)
+        named.append(
+            batch.SubmittedImage(
+                filename=name, content_type=image.content_type, content=image.content
+            )
+        )
+    return named
