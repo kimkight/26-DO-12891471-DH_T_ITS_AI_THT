@@ -458,6 +458,55 @@ changes `frontend/package.json` or `backend/pyproject.toml` regenerates the
 affected lock file in the same pull request.** It applies to Dependabot's pull
 requests exactly as it applies to everyone else's.
 
+## Docker base images, 2026-08-23
+
+Dependabot's fourth run produced
+[#47](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/47), a
+grouped docker `minor-and-patch` pull request that carried
+`python:3.11-slim-bookworm` to `python:3.14-slim-bookworm`. It was closed. The
+bump itself is the one already refused as
+[#25](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/25), for
+the reason recorded in the triage table above: `ci.yml` pins
+`python-version: "3.11"`, so merging it would test on 3.11 and ship 3.14, and a
+green container job proves only that the image builds and answers
+`/api/health`.
+
+**What is new is how it arrived.** #25 was an ungrouped major, which the policy
+in point 1 of `dependabot.yml` deliberately keeps separate so that a runtime
+change gets its own pull request and its own recorded decision. #47 was a
+grouped pull request titled as a minor-and-patch update. The grouping rule did
+not fail; the version reading underneath it did.
+
+**Docker tags are not semver.** Dependabot parses a tag as though it were, and
+the two base images fall on opposite sides of that:
+
+| Image | Bump | How Dependabot reads it | Caught by `semver-major`? |
+| --- | --- | --- | --- |
+| `node` | `22-bookworm-slim` to `26-bookworm-slim` | major 22 to major 26 | Yes |
+| `python` | `3.11-slim-bookworm` to `3.14-slim-bookworm` | minor 11 to minor 14, major 3 unchanged | **No** |
+
+`python:3.14` is a new CPython release line, and CPython's own release process
+calls 3.14 a major release. Nothing in the tag says so in semver terms. An
+ignore entry written only as `version-update:semver-major` would therefore have
+left #47 free to be reopened on the next weekly run, which is the failure this
+section exists to prevent rather than to describe.
+
+**The policy change.** The docker ecosystem now carries an `ignore` block:
+`python` is ignored for both `version-update:semver-major` and
+`version-update:semver-minor`; `node` is ignored for `version-update:semver-major`
+only. The asymmetry is not an oversight, it is the table above.
+
+Patch updates are still proposed for both images, so a rebuilt base carrying
+security fixes inside the pinned line still arrives on its own schedule. That
+is the update the weekly cadence is for, and nothing here suppresses it.
+
+**What this does not do.** It does not pin the base images by digest; that TODO
+is still in the `Dockerfile` and still owed before the first tagged release.
+It also does not decide the runtime lines. Taking `python:3.14` or `node:26` is
+a task: narrow or remove the matching ignore entry, move the matching `ci.yml`
+pin in the same pull request so the tested runtime and the shipped runtime stay
+one version, and read the test run rather than the health probe.
+
 ## What this triage does not cover
 
 - **The eslint 10 result is a scaffold result.** `eslint .` over a Vite scaffold
