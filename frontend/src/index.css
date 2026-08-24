@@ -1,33 +1,630 @@
 /*
- * Deliberately minimal. Interface styling is deferred until the verification UI
- * is designed against the accessibility and simplicity requirements in
- * docs/03_REQUIREMENTS.md (NFR-4, NFR-5).
+ * One stylesheet, plain CSS, no framework.
+ *
+ * Governing requirements: NFR-4 (usable by an agent with low technology
+ * comfort: "clean, obvious, no hunting for buttons"), NFR-5 (WCAG 2.1 Level AA;
+ * visible focus, 4.5:1 body text contrast, outcomes not conveyed by colour
+ * alone).
+ *
+ * Two decisions worth stating because they are visible and deliberate:
+ *
+ * 1. **One light palette, no dark mode.** The previous scaffold declared
+ *    `color-scheme: light dark`, which hands the background colour to the
+ *    browser and makes the contrast ratio a property of the visitor's settings
+ *    rather than of this file. NFR-5 asks for 4.5:1, so every colour here is
+ *    explicit and every pair is checked by src/__tests__/contrast.test.ts. A
+ *    dark palette is a good addition later; it is a second palette to verify,
+ *    not a toggle.
+ *
+ * 2. **Every token is a colour that passed the check.** The ratios are in the
+ *    test, not in comments here, because a comment cannot fail.
  */
+
 :root {
+  /* Surfaces */
+  --page: #ffffff;
+  --surface: #f6f8fa;
+  --border: #d0d7de;
+  --border-strong: #8c959f;
+
+  /* Text. Both pass 4.5:1 on --page and on --surface. */
+  --text: #1f2328;
+  --text-muted: #4a5158;
+
+  /* Outcome tones. Each has a foreground, a tint, and an edge. */
+  --match: #0f6b30;
+  --match-tint: #e8f5ec;
+  --review: #7a4b00;
+  --review-tint: #fdf3e0;
+  --mismatch: #a5231b;
+  --mismatch-tint: #fdeceb;
+  --neutral: #4a5158;
+  --neutral-tint: #f0f2f4;
+
+  --accent: #0b4f9e;
+  --focus: #0b4f9e;
+
+  --radius: 8px;
+  --gap: 1rem;
+
   font-family:
     system-ui,
     -apple-system,
     'Segoe UI',
     Roboto,
     sans-serif;
+  /* 1.5 body line height and 16px base: WCAG 1.4.12 and plain readability. */
   line-height: 1.5;
-  color-scheme: light dark;
+  font-size: 100%;
+  color: var(--text);
+  background: var(--page);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  padding: 2rem;
+  padding: 0;
+  color: var(--text);
+  background: var(--page);
 }
 
-main {
-  max-width: 48rem;
+/*
+ * NFR-5, second criterion: visible focus on every interactive control. Set once
+ * on :focus-visible for everything rather than per component, so a control
+ * added later cannot be added without it. The 3:1 minimum for a focus indicator
+ * is met by --focus against both --page and --surface.
+ */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Content hidden visually but kept for assistive technology. Not display:none,
+   which would remove it from the accessibility tree along with the screen. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.75rem 1rem;
+  background: var(--page);
+  color: var(--accent);
+  font-weight: 600;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* ---------------------------------------------------------------- masthead */
+
+.masthead {
+  padding: 1.5rem 1.5rem 0.75rem;
+  max-width: 84rem;
   margin: 0 auto;
 }
 
-dt {
+.masthead h1 {
+  margin: 0;
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.masthead__subtitle {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+main {
+  max-width: 84rem;
+  margin: 0 auto;
+  padding: 0 1.5rem 2rem;
+}
+
+.site-footer {
+  max-width: 84rem;
+  margin: 0 auto;
+  padding: 0 1.5rem 2rem;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+/* -------------------------------------------------------------------- tabs */
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 2px solid var(--border);
+  margin: 1rem 0 1.5rem;
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-muted);
+  padding: 0.625rem 1rem;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+}
+
+.tab--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ layout */
+
+/*
+ * Left: the form. Right: the results. One screen, side by side on a desktop
+ * and stacked below it, with the form first in both the DOM and the reading
+ * order so the primary task never sits below results that do not exist yet.
+ */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 60rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.panel {
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  min-width: 0;
+}
+
+.panel > h2 {
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+}
+
+.placeholder {
+  color: var(--text-muted);
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin: 0;
+}
+
+.footnote {
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+  margin: 1rem 0 0;
+}
+
+/* ------------------------------------------------------------------- forms */
+
+.field {
+  margin-bottom: 1rem;
+}
+
+.field label,
+.dropzone__label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.field__hint {
+  margin: 0 0 0.25rem;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  font: inherit;
+  color: var(--text);
+  background: var(--page);
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.button {
+  font: inherit;
+  font-weight: 600;
+  padding: 0.625rem 1.25rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  background: var(--page);
+  color: var(--text);
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  /*
+   * Disabled controls are exempt from the contrast minimum, but an agent still
+   * has to read this one to know why the check has not started. The opacity is
+   * kept high enough that the label stays legible, and the reason is also given
+   * as text underneath rather than left to the greying-out alone.
+   */
+  opacity: 0.55;
+}
+
+/* --------------------------------------------------------------- drop zone */
+
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.dropzone--dragging {
+  border-color: var(--accent);
+  border-style: solid;
+}
+
+.dropzone:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.dropzone__hint {
+  margin: 0 0 0.625rem;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.dropzone__input {
+  font: inherit;
+  max-width: 100%;
+}
+
+.dropzone__chosen {
+  margin: 0.625rem 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------------- cards */
+
+.cards {
+  display: grid;
+  gap: var(--gap);
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--neutral);
+  border-radius: var(--radius);
+  padding: 1rem;
+  background: var(--page);
+}
+
+.card--match {
+  border-left-color: var(--match);
+}
+
+.card--mismatch {
+  border-left-color: var(--mismatch);
+}
+
+/*
+ * FR-10's third criterion: needs-review is visually distinct from BOTH match
+ * and mismatch. It is the only card with a tinted body and a thicker edge, so
+ * it differs from the other two by shape as well as by hue. It is also the only
+ * one an agent has to do something about, so it should read as unfinished.
+ */
+.card--review {
+  border-left-width: 8px;
+  border-left-color: var(--review);
+  background: var(--review-tint);
+}
+
+.card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.card__values {
+  margin: 0 0 0.75rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+@media (min-width: 40rem) {
+  .card__values {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.card__value dt {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.card__value dd {
+  margin: 0.125rem 0 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.card__value--empty {
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.card__reason {
+  margin: 0;
+  color: var(--text);
+}
+
+.card__detail {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+
+.card__subtitle {
+  margin: 0.5rem 0 0.125rem;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+}
+
+.card__detail--note {
+  margin: 0;
+  color: var(--text);
+}
+
+.card__detail--fail {
+  margin: 0;
+  color: var(--mismatch);
   font-weight: 600;
 }
 
-dd {
-  margin: 0 0 0.5rem 0;
+/* ------------------------------------------------------------------ badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.badge--match {
+  color: var(--match);
+  background: var(--match-tint);
+}
+
+.badge--review {
+  color: var(--review);
+  background: var(--review-tint);
+}
+
+.badge--mismatch {
+  color: var(--mismatch);
+  background: var(--mismatch-tint);
+}
+
+.badge--neutral {
+  color: var(--neutral);
+  background: var(--neutral-tint);
+}
+
+.badge__icon {
+  flex: none;
+}
+
+.badge__icon--text {
+  font-weight: 900;
+  width: 16px;
+  text-align: center;
+}
+
+/* ---------------------------------------------------------------- progress */
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.progress progress {
+  flex: 1 1 12rem;
+  height: 1rem;
+}
+
+.progress label {
+  font-weight: 600;
+}
+
+.summary {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+
+.summary strong {
+  font-size: 1.125rem;
+}
+
+.timing {
+  margin: 0 0 1rem;
+  font-weight: 600;
+}
+
+.timing__detail {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+/* ------------------------------------------------------------------ tables */
+
+/* Wide content scrolls inside its own box so the page never scrolls sideways. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+.results-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375rem;
+}
+
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 0.5rem 0.625rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.results-table thead th {
+  background: var(--surface);
+  border-bottom: 2px solid var(--border-strong);
+  padding: 0;
+}
+
+.results-table .numeric {
+  text-align: right;
+}
+
+.results-table .filename {
+  font-weight: 600;
+  /* break-word, not anywhere: a filename should break at its hyphens before it
+     breaks mid-extension. `anywhere` puts "png" on a line of its own. */
+  overflow-wrap: break-word;
+  min-width: 12rem;
+  max-width: 20rem;
+}
+
+.results-table .detail {
+  color: var(--text-muted);
+  min-width: 16rem;
+}
+
+.sort {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0.5rem 0.625rem;
+  width: 100%;
+  text-align: inherit;
+  display: flex;
+  gap: 0.375rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sort__arrow {
+  color: var(--text-muted);
+}
+
+/* ----------------------------------------------------------------- notices */
+
+.notice {
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid;
+}
+
+.notice--error {
+  color: var(--mismatch);
+  background: var(--mismatch-tint);
+  border-color: var(--mismatch);
+}
+
+.notice__headline {
+  margin: 0;
+  font-weight: 700;
+  font-size: 1.0625rem;
+}
+
+.notice__detail {
+  margin: 0.375rem 0 0;
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.details {
+  margin-top: 1rem;
+  font-size: 0.9375rem;
+}
+
+.details summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.details p {
+  color: var(--text-muted);
+}
+
+.details code {
+  background: var(--surface);
+  padding: 0.0625rem 0.25rem;
+  border-radius: 4px;
 }

@@ -14,6 +14,13 @@ WORKDIR /build
 # source changes. `npm ci` installs exactly the tree in package-lock.json and
 # fails if the lock file and package.json disagree, so the image is built from
 # the same versions CI resolved.
+# @playwright/test is a dev dependency of the accessibility test, and its
+# postinstall script downloads browser binaries. This stage compiles the
+# frontend and never opens a browser, so the download is skipped: it would add
+# hundreds of megabytes to a layer that is discarded, and it would need network
+# access to a host the build has no other reason to reach.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 

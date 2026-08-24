@@ -77,11 +77,18 @@ jobs:
         run: pytest --cov=app --cov-report=term-missing
 
   frontend:
-    name: frontend lint and build
+    name: frontend lint, test and build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
+    env:
+      # @playwright/test downloads browsers from its own postinstall script.
+      # That would fetch every browser on `npm ci`, and then the explicit
+      # install step below would fetch Chromium again. Skipping the postinstall
+      # makes that step the single place a browser is downloaded, and makes it
+      # visible in the log which one.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
       - uses: actions/checkout@v7
 
@@ -109,6 +116,35 @@ jobs:
 
       - name: Build (tsc and vite)
         run: npm run build
+
+      - name: Test (vitest)
+        run: npm run test
+
+      # The accessibility run needs a real browser. axe-core's colour-contrast
+      # rule cannot be evaluated without a layout engine: under jsdom it
+      # reports "incomplete" rather than "pass", so a jsdom run would go green
+      # while never having checked the one NFR-5 criterion that is a number.
+      # Chromium only, and --with-deps because the runner does not carry the
+      # shared libraries it needs.
+      - name: Install Chromium for the accessibility run
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: ""
+        run: npx playwright install --with-deps chromium
+
+      # Runs against `vite preview` serving dist/, started by
+      # playwright.config.ts, so what is checked is the built page an agent
+      # loads rather than a component rendered in isolation. Requires the
+      # build step above.
+      - name: Accessibility (axe-core against the built page)
+        run: npm run test:a11y
+
+      - name: Upload the accessibility report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ github.sha }}
+          path: frontend/playwright-report/
+          retention-days: 7
 
   audit:
     name: dependency audit
@@ -146,8 +182,12 @@ jobs:
       - name: Audit Python development dependencies (pip-audit)
         run: pip-audit -r backend/requirements-dev.lock --no-deps --progress-spinner off
 
+      # Skips the Playwright postinstall browser download: this job audits the
+      # dependency tree and never opens a browser.
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: |
           npm ci --no-audit --no-fund
           npm audit --audit-level=high
