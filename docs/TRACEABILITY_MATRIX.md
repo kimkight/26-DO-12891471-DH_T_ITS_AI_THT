@@ -24,10 +24,10 @@ gap register, not decoration.
 | 9b | Net contents in different units are not converted; standards of fill are not validated. | FR-7; A-13 | FR-7; A-13 | US-6 | [#6](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/6) | `backend/tests/test_compare.py::TestNetContents`; UAT row 22 | |
 | 10 | "if an agent can't read the label they just reject it and ask for a better image." | Jenny Park | FR-9 | US-7 | [#7](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/7) | `backend/tests/test_api_validation.py`; UAT row 6 | |
 | 11 | "If we can't get results back in about 5 seconds, nobody's going to use it. We learned that the hard way." | Sarah Chen | NFR-1 | US-8 | [#8](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/8) | `backend/tests/test_verify_integration.py`, `scripts/measure.py`; UAT row 11 | [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
-| 12 | "big importers who dump 200, 300 label applications on us at once... we literally have to process them one at a time." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written; UAT row 9 | [0006](adr/0006-batch-execution-model.md) |
-| 13 | "Janet from our Seattle office has been asking about this for years." | Sarah Chen | FR-8; A-14 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | Not written | [0006](adr/0006-batch-execution-model.md) |
-| 14 | Batch resilience implied by the 300-label scenario | Sarah Chen | FR-8, FR-9 | US-10 | [#10](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/10) | Not written; UAT row 10 | [0006](adr/0006-batch-execution-model.md) |
-| 15 | Batch scale implies visible progress | Sarah Chen | NFR-2 | US-11 | [#11](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/11) | Not written | [0006](adr/0006-batch-execution-model.md) |
+| 12 | "big importers who dump 200, 300 label applications on us at once... we literally have to process them one at a time." | Sarah Chen | FR-8 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | `backend/tests/test_batch.py::TestOverCount`, `TestEveryLineIdentifiesItsLabel`, `TestTheGeneratedSampleSet`; UAT row 9 | [0006](adr/0006-batch-execution-model.md) |
+| 13 | "Janet from our Seattle office has been asking about this for years." | Sarah Chen | FR-8; A-14 | US-9 | [#9](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/9) | `backend/tests/test_batch.py::TestCsvReconciliation`, `TestUnusableCsv` | [0006](adr/0006-batch-execution-model.md) |
+| 14 | Batch resilience implied by the 300-label scenario | Sarah Chen | FR-8, FR-9 | US-10 | [#10](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/10) | `backend/tests/test_batch.py::TestOneBadImageDoesNotFailTheBatch`; UAT row 10 | [0006](adr/0006-batch-execution-model.md) |
+| 15 | Batch scale implies visible progress | Sarah Chen | NFR-2 | US-11 | [#11](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/11) | `backend/tests/test_batch.py::TestEveryLineIdentifiesItsLabel` (the NDJSON framing and the index and total each line carries) | [0006](adr/0006-batch-execution-model.md) |
 | 16 | "We need something my mother could figure out; she's 73..." and "Clean, obvious, no hunting for buttons." | Sarah Chen | NFR-4 | US-12 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12) | `frontend/tests/a11y.spec.ts` (the primary task is on the landing page), `frontend/src/__tests__/liveRegion.test.tsx`; UAT row 14 | |
 | 17 | "The agents really vary in their tech comfort level... half our team is over 50." | Sarah Chen | NFR-4, NFR-5 | US-12, US-13 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#13](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/13) | `frontend/tests/a11y.spec.ts` (axe-core and the keyboard walk), `frontend/src/__tests__/contrast.test.ts`; UAT rows 12, 13 | |
 | 18 | "our network blocks outbound traffic to a lot of domains... half their features didn't work because our firewall blocked connections to their ML endpoints." | Marcus Williams | NFR-3 | US-14 | [#14](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/14) | Not written; UAT row 16 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
@@ -56,11 +56,11 @@ Every requirement maps to at least one story. No orphans.
 | FR-5 Warning exact text | US-4 | #4 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningBody` |
 | FR-6 Warning capitalization | US-5 | #5 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningCapitalization`, `TestBoldTypeIsNeverClaimed` |
 | FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | **Yes**: `app/compare.py` `compare_abv`, `compare_net_contents` | **Yes**: `test_compare.py::TestAlcoholContentComparison`, `TestNetContents` |
-| FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | No: designed in ADR 0006, not built | No |
-| FR-9 Error handling | US-7, US-10 | #7, #10 | Partial: single label done in `app/api.py`; batch is FR-8 and unbuilt | **Yes**: `test_api_validation.py` |
+| FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | **Yes**: `app/batch.py`, `app/api.py` `verify_batch` | **Yes**: `test_batch.py`, 22 tests |
+| FR-9 Error handling | US-7, US-10 | #7, #10 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py` |
 | FR-10 Result presentation | US-2 | #2 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx` |
 | NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
-| NFR-2 Batch throughput | US-11 | #11 | No: designed in ADR 0006, not built | No |
+| NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store | Partial: `test_batch.py` covers per-row isolation and the progress fields. A 300-label run has not been executed; 12 and 100 were measured on a session runner. |
 | NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
 | NFR-4 Simplicity | US-12 | #12 | **Yes**: one screen, primary task on the landing page, plain-language errors | **Yes**: `a11y.spec.ts`, `liveRegion.test.tsx` |
 | NFR-5 Accessibility | US-13 | #13 | **Yes**: labelled inputs, keyboard reachable, visible focus, verified contrast, live region | **Yes**: axe-core against the built page in CI, plus `contrast.test.ts` and a keyboard walk |
@@ -78,18 +78,26 @@ Every requirement maps to at least one story. No orphans.
 | Requirements defined | 21 (10 functional, 11 non-functional) |
 | Requirements traced to a story | 21 of 21 |
 | Requirements traced to a GitHub issue | 21 of 21 |
-| Requirements fully implemented | 12 of 21 |
-| Requirements with an automated test | 12 of 21 |
+| Requirements fully implemented | 17 of 21 |
+| Requirements with an automated test | 17 of 21 |
 | User stories | 21 |
 | Stories with acceptance criteria | 21 of 21 |
 | ADRs | 6 |
 
 The gap between "traced" and "tested" is the honest state of this repository.
-The single-label verification path (FR-1 through FR-7, FR-9 for one label, and
-NFR-1, NFR-3, NFR-6, NFR-7) is built and covered by 101 tests. What is not built
-is everything the agent would actually touch: there is no user interface, so
-FR-10, NFR-4 and NFR-5 have nothing to test, and batch verification, FR-8 and
-NFR-2, is designed in ADR 0006 and unbuilt. Nothing is deployed.
+The verification engine, single label and batch (FR-1 through FR-9, NFR-1,
+NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 126 backend tests. The
+agent-facing interface (FR-10, NFR-4, NFR-5) is built and covered by 61
+component tests, a computed-contrast test, and an axe-core run with a keyboard
+walk against the built page in CI. Nothing is deployed.
+
+Two limits on the NFR-2 claim, stated rather than left to be discovered. No
+300-label batch has been run; 12 and 100 were, on a session runner rather than
+on the deployed target, and the scaling to 300 is arithmetic. And the second
+NFR-2 criterion, that progress is observable rather than presenting as a frozen
+page, is now met end to end: the stream carries the position and the total on
+every line, and the batch tab renders them as a progress indicator driven by
+the stream rather than by an animation.
 
 Accuracy and latency have been measured over a twelve-label synthetic sample set
 by `scripts/measure.py`, not over real label artwork. Per-field accuracy against
