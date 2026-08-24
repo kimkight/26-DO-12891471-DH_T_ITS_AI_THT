@@ -10,333 +10,391 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `frontend/package-lock.json`, and two Python lock files:
-  `backend/requirements.lock` (the ocr and matching extras, 27 packages) and
-  `backend/requirements-dev.lock` (the same plus the dev extra, 61 packages).
-  Both Python files are generated with
-  `pip-compile --allow-unsafe --strip-extras --generate-hashes` on Python 3.11
-  and both audit clean. The split keeps `pytest`, `ruff`, `pip-audit` and
-  `httpx` out of the container image, which installs the runtime file only.
-  All three were generated outside a session, because the session egress policy
-  still denies PyPI and npm (OQ-15).
+`backend/requirements.lock` (the ocr and matching extras, 27 packages) and
+`backend/requirements-dev.lock` (the same plus the dev extra, 61 packages).
+Both Python files are generated with
+`pip-compile --allow-unsafe --strip-extras --generate-hashes` on Python 3.11
+and both audit clean. The split keeps `pytest`, `ruff`, `pip-audit` and
+`httpx` out of the container image, which installs the runtime file only.
+All three were generated outside a session, because the session egress policy
+still denies PyPI and npm (OQ-15).
 - A "Regenerating lock files" section in `CONTRIBUTING.md` with the exact
-  regeneration commands and the rule that `backend/pyproject.toml` keeps
-  minimum-version floors while the lock file is regenerated and never
-  hand-edited.
+regeneration commands and the rule that `backend/pyproject.toml` keeps
+minimum-version floors while the lock file is regenerated and never
+hand-edited.
 - OQ-18, recording that the session git proxy rejects pushes to `refs/tags/*`
-  with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
-  releases are therefore created through the GitHub Releases web interface.
-  v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
+with HTTP 403 while accepting pushes to `refs/heads/*`, and that tags and
+releases are therefore created through the GitHub Releases web interface.
+v0.1.0 was created that way, tagged at `79d5ac7` on `main`.
 - A header on `docs/cloud_choice_and_abv_assumption.md` marking it as the source
-  record for ADR 0001, A-12, and A-13, and as not maintained going forward.
+record for ADR 0001, A-12, and A-13, and as not maintained going forward.
 - ADR 0006, recording the batch execution model: one synchronous multipart
-  request carrying up to `TTB_MAX_BATCH_FILES` images plus one CSV of
-  application data keyed by image filename, processed concurrently by a bounded
-  worker pool, with per-label results streamed as newline-delimited JSON and no
-  job store, consistent with D-9. Implements FR-8 and NFR-2. (#39)
+request carrying up to `TTB_MAX_BATCH_FILES` images plus one CSV of
+application data keyed by image filename, processed concurrently by a bounded
+worker pool, with per-label results streamed as newline-delimited JSON and no
+job store, consistent with D-9. Implements FR-8 and NFR-2. (#39)
 - Assumption A-14, stating the batch CSV contract: one CSV keyed by image
-  filename with the columns `filename`, `brand_name`, `class_type`,
-  `alcohol_content`, `net_contents` and `beverage_type`. FR-8 requires batch
-  submission "with their application data" and no source states the format.
-  (#39)
+filename with the columns `filename`, `brand_name`, `class_type`,
+`alcohol_content`, `net_contents` and `beverage_type`. FR-8 requires batch
+submission "with their application data" and no source states the format.
+(#39)
 - `docs/DEPENDENCY_TRIAGE_2026-08.md`, triaging the twelve Dependabot pull
-  requests from the first run against `develop`: six recommended merge, one
-  merge with a caveat, four close, one hold, with the reason for each and a
-  full diagnosis of why the TypeScript 7 bump could not resolve a dependency
-  tree. (#40)
+requests from the first run against `develop`: six recommended merge, one
+merge with a caveat, four close, one hold, with the reason for each and a
+full diagnosis of why the TypeScript 7 bump could not resolve a dependency
+tree. (#40)
 - `.github/dependabot.yml`, setting the update policy that follows from that
-  triage: minor and patch updates grouped into one pull request per ecosystem
-  per week, major bumps left ungrouped so each keeps its own pull request and
-  recorded decision, and major bumps of `typescript` and `react` ignored. (#40)
+triage: minor and patch updates grouped into one pull request per ecosystem
+per week, major bumps left ungrouped so each keeps its own pull request and
+recorded decision, and major bumps of `typescript` and `react` ignored. (#40)
 - The single-label verification engine: `POST /api/verify`, implementing FR-1
-  through FR-7 and FR-9 for one label, and US-1 through US-7 at the API level.
-  Six new modules under `backend/app/`, each naming the requirement it exists
-  to satisfy in its own docstring, mapped in `docs/05_ARCHITECTURE.md` section
-  5.1. There is no user interface for it; FR-10, NFR-4 and NFR-5 remain unbuilt.
+through FR-7 and FR-9 for one label, and US-1 through US-7 at the API level.
+Six new modules under `backend/app/`, each naming the requirement it exists
+to satisfy in its own docstring, mapped in `docs/05_ARCHITECTURE.md` section
+5.1. There is no user interface for it; FR-10, NFR-4 and NFR-5 remain unbuilt.
 - The 27 CFR 16.21 statement as a constant in `backend/app/warning.py`, compared
-  exactly after whitespace normalization, with the `GOVERNMENT WARNING:` prefix
-  carrying a separate capitalization check. Every warning result states that
-  bold type was not checked (FR-5, FR-6, OOS-4).
+exactly after whitespace normalization, with the `GOVERNMENT WARNING:` prefix
+carrying a separate capitalization check. Every warning result states that
+bold type was not checked (FR-5, FR-6, OOS-4).
 - 101 backend tests across the unit and integration tiers, covering every UAT
-  row in `docs/07_TEST_STRATEGY.md` section 6 that does not need a user
-  interface or batch processing.
+row in `docs/07_TEST_STRATEGY.md` section 6 that does not need a user
+interface or batch processing.
 - The sample set: `samples/specs.py` describes twelve synthetic labels across
-  spirits, wine and malt beverage, carrying a title-case warning, altered
-  warning wording, an absent warning, a wrong ABV, missing net contents, an
-  inconsistent proof statement, cross-unit net contents, one rotated image and
-  one low-contrast image. `samples/generate_samples.py` renders them and writes
-  `samples/expected.csv` and `samples/applications/applications.csv`. Images
-  stay git-ignored; the script and both CSVs are committed.
+spirits, wine and malt beverage, carrying a title-case warning, altered
+warning wording, an absent warning, a wrong ABV, missing net contents, an
+inconsistent proof statement, cross-unit net contents, one rotated image and
+one low-contrast image. `samples/generate_samples.py` renders them and writes
+`samples/expected.csv` and `samples/applications/applications.csv`. Images
+stay git-ignored; the script and both CSVs are committed.
 - `scripts/measure.py`, which runs the engine over the sample set and prints
-  per-field precision, recall, review rate, false match rate and latency as
-  Markdown. It writes nothing into `docs/`: a number belongs in a document once
-  it has been measured on hardware the document describes.
+per-field precision, recall, review rate, false match rate and latency as
+Markdown. It writes nothing into `docs/`: a number belongs in a document once
+it has been measured on hardware the document describes.
 - `TTB_ALLOWED_MIME_TYPES` and `TTB_OCR_LONG_EDGE_PX`, both mirrored in
-  `.env.example` alongside `TTB_ABV_TOLERANCE`, which the settings class had not
-  previously read.
+`.env.example` alongside `TTB_ABV_TOLERANCE`, which the settings class had not
+previously read.
+- Batch verification: `POST /api/verify-batch`, implementing FR-8 and NFR-2 and
+following ADR 0006. One synchronous multipart request carries up to
+`TTB_MAX_BATCH_FILES` images plus one CSV of application data keyed by image
+filename in the A-14 column contract. Images are read by a bounded worker
+pool sized from the cores the process may use, and per-label results stream
+back as newline-delimited JSON, one object per line, each naming the image it
+belongs to and carrying its position and the batch total so a client can
+render progress. There is no job store; the stream is the only copy of the
+results (D-9, NFR-6). A batch over the file limit is refused before anything
+is processed, with the limit named. One unreadable image, one disallowed
+type, one oversize file, a CSV row matching no image, an image matching no
+CSV row, and a duplicated CSV filename are each that row's error on its own
+line, leaving the rest of the batch to return (US-9, US-10, US-11).
+- `backend/app/verify.py`, holding the single-image pipeline both routes run, so
+that a batch result cannot drift from what a single result means. `app/api.py`
+keeps `build_result` as a re-export; `scripts/measure.py` imports it from the
+new module.
+- `backend/app/batch.py`, holding the A-14 CSV parser, the reconciliation of
+images against rows, the worker pool and the NDJSON writer.
+- `TTB_BATCH_WORKERS` and `TTB_MAX_BATCH_BYTES`, both defaulting to 0 meaning
+"derive it" rather than "unlimited": the pool size from the cores the process
+may use, and the batch envelope limit as
+`TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`. Documented in `.env.example`
+and `docs/05_ARCHITECTURE.md`, with the memory consequence recorded against
+OQ-13 item 6.
+- 22 batch tests in `backend/tests/test_batch.py`, including a batch of three
+with one corrupt image, a batch over the cap, a CSV referencing a missing
+file, and a full run of the twelve-label generated sample set asserting that
+every row returns. The suite is 126 tests.
 - The agent-facing interface, implementing FR-10, NFR-4 and NFR-5. One screen,
-  two tabs, plain React with no new runtime dependency beyond `react` and
-  `react-dom`.
+two tabs, plain React with no new runtime dependency beyond `react` and
+`react-dom`.
 
-  The first tab is the primary task and is open on load, so verifying one label
-  needs no navigation (NFR-4). Left: a large drop zone and the five labelled
-  inputs, with one "Check this label" button. Right: five result cards, each
-  showing the field name, the value found on the label, the value from the
-  application, the outcome as text and shape and colour, and the API's reason
-  string. Needs-review cards are visually distinct from both match and
-  mismatch by tint and edge weight as well as hue. The government warning card
-  reports the prefix capitalization in its own labelled section and repeats the
-  bold-type note verbatim (FR-6, OOS-4). Total time is shown as the round trip
-  the agent waited for, with the server's own elapsed figure as the detail.
+The first tab is the primary task and is open on load, so verifying one label
+needs no navigation (NFR-4). Left: a large drop zone and the five labelled
+inputs, with one "Check this label" button. Right: five result cards, each
+showing the field name, the value found on the label, the value from the
+application, the outcome as text and shape and colour, and the API's reason
+string. Needs-review cards are visually distinct from both match and
+mismatch by tint and edge weight as well as hue. The government warning card
+reports the prefix capitalization in its own labelled section and repeats the
+bold-type note verbatim (FR-6, OOS-4). Total time is shown as the round trip
+the agent waited for, with the server's own elapsed figure as the detail.
 
-  The second tab is batch: a multi-file picker, a CSV picker, a progress
-  indicator driven by the NDJSON stream rather than by an animation, a sortable
-  results table with a status chip per row, summary counts, and a "Download
-  results CSV" button that builds the file in the browser because D-9 leaves no
-  server-side copy to download.
+The second tab is batch: a multi-file picker, a CSV picker, a progress
+indicator driven by the NDJSON stream rather than by an animation, a sortable
+results table with a status chip per row, summary counts, and a "Download
+results CSV" button that builds the file in the browser because D-9 leaves no
+server-side copy to download.
 
-  FR-9 errors render as plain language ("We couldn't read this label. Try a
-  clearer photo.") with the API's own message kept underneath as the detail.
+FR-9 errors render as plain language ("We couldn't read this label. Try a
+clearer photo.") with the API's own message kept underneath as the detail.
 - Accessibility work against NFR-5: every input has a programmatically
-  associated label, every control is keyboard reachable with a visible focus
-  ring, results are announced through a polite live region that is in the DOM
-  before the results exist, the tab strip follows the ARIA tabs pattern with
-  arrow-key navigation, and a skip link is the first thing in the tab order.
+associated label, every control is keyboard reachable with a visible focus
+ring, results are announced through a polite live region that is in the DOM
+before the results exist, the tab strip follows the ARIA tabs pattern with
+arrow-key navigation, and a skip link is the first thing in the tab order.
 - `axe-core` as a dev dependency and an automated accessibility test that runs
-  it in Chromium against the built page, in CI. It covers the landing page, the
-  batch tab, and a rendered result set including a needs-review card. A
-  keyboard walk and a focus-visibility assertion run alongside it, because axe
-  cannot check whether a control can actually be operated.
+it in Chromium against the built page, in CI. It covers the landing page, the
+batch tab, and a rendered result set including a needs-review card. A
+keyboard walk and a focus-visibility assertion run alongside it, because axe
+cannot check whether a control can actually be operated.
 - `frontend/src/__tests__/contrast.test.ts`, computing WCAG 2.1 contrast ratios
-  from the tokens in `index.css` and asserting 4.5:1 for every foreground on
-  every surface it can appear on, including pairs no component happens to
-  combine today.
+from the tokens in `index.css` and asserting 4.5:1 for every foreground on
+every surface it can appear on, including pairs no component happens to
+combine today.
 - 61 frontend component tests covering outcome rendering as text and shape and
-  colour, the live region, the timing line, the plain-language error path, the
-  batch table's sorting and status chips, and the results CSV.
+colour, the live region, the timing line, the plain-language error path, the
+batch table's sorting and status chips, and the results CSV.
 - `vitest`, `@testing-library/react`, `jsdom` and `@playwright/test` as dev
-  dependencies, and `npm run test` and `npm run test:a11y`. The npm lock file
-  is regenerated in the same change, per the standing rule in
-  `CONTRIBUTING.md`.
+dependencies, and `npm run test` and `npm run test:a11y`. The npm lock file
+is regenerated in the same change, per the standing rule in
+`CONTRIBUTING.md`.
 
 ### Changed
 
 - OQ-15 closed. The preflight it named as its own closing condition returned
-  `200` from PyPI and from the npm registry in a new session, with Tesseract
-  5.3.4 present, so the lock files generated outside a session under OQ-3 are now
-  verified to install and the OCR tier runs locally. Two caveats are recorded
-  rather than dropped: the session Tesseract is 5.3.4 while the container ships
-  the 5.3.0 Debian bookworm builds, and sessions still have no Docker daemon.
+`200` from PyPI and from the npm registry in a new session, with Tesseract
+5.3.4 present, so the lock files generated outside a session under OQ-3 are now
+verified to install and the OCR tier runs locally. Two caveats are recorded
+rather than dropped: the session Tesseract is 5.3.4 while the container ships
+the 5.3.0 Debian bookworm builds, and sessions still have no Docker daemon.
 - The README's "could not reach PyPI, npm, or the Ubuntu package archive"
-  limitation removed, along with the question counts it stated, which were stale.
+limitation removed, along with the question counts it stated, which were stale.
 
 - CI installs Tesseract, its English language data and a TrueType font in the
-  backend job. Without them the integration tier skipped itself rather than
-  failing, which would have left the OCR path untested while CI stayed green.
+backend job. Without them the integration tier skipped itself rather than
+failing, which would have left the OCR path untested while CI stayed green.
 - CI lints and format-checks `samples/` and `scripts/` with the same ruff
-  configuration as `backend/`, so no corner of the repository holds Python that
-  CI never reads.
+configuration as `backend/`, so no corner of the repository holds Python that
+CI never reads.
 - The multipart spool threshold is raised to `TTB_MAX_UPLOAD_BYTES`. Starlette's
-  default rolls any part over 1 MB onto a temporary file on disk, which NFR-6
-  forbids outright.
+default rolls any part over 1 MB onto a temporary file on disk, which NFR-6
+forbids outright.
 - The upload size check moved from a route dependency into middleware. NFR-7
-  requires it "before the body is read into memory", and FastAPI parses the
-  multipart body while resolving the endpoint's parameters, so a dependency
-  cannot satisfy that wording.
+requires it "before the body is read into memory", and FastAPI parses the
+multipart body while resolving the endpoint's parameters, so a dependency
+cannot satisfy that wording.
 - `eslint` and `@eslint/js` raised to 10 together, with `frontend/package-lock.json`
-  regenerated in the same commit. This is the evidence
-  `docs/DEPENDENCY_TRIAGE_2026-08.md` said did not exist: `npm ci` resolves with
-  no ERESOLVE, `eslint .` is clean, prettier is clean, `tsc -b && vite build`
-  succeeds and `npm audit` finds nothing. `frontend/eslint.config.js` needed no
-  change. The recommendation is to close #42 and #44, each of which is half of
-  this upgrade, in its favour. The lock entry being replaced carried an upstream
-  deprecation notice, so `develop` was pinned to an unsupported eslint.
+regenerated in the same commit. This is the evidence
+`docs/DEPENDENCY_TRIAGE_2026-08.md` said did not exist: `npm ci` resolves with
+no ERESOLVE, `eslint .` is clean, prettier is clean, `tsc -b && vite build`
+succeeds and `npm audit` finds nothing. `frontend/eslint.config.js` needed no
+change. The recommendation is to close #42 and #44, each of which is half of
+this upgrade, in its favour. The lock entry being replaced carried an upstream
+deprecation notice, so `develop` was pinned to an unsupported eslint.
 - OQ-19 recorded: the session's GitHub tooling rewrites bot mentions before
-  posting, inserting `U+00B7` middle dots into the mention and the command word,
-  so `@dependabot rebase` cannot be issued from a session. #43 is therefore still
-  un-rebased and still `package.json` only. The three ways around it were
-  considered and rejected in the triage document; the command stays a manual step
-  for the repository owner.
+posting, inserting `U+00B7` middle dots into the mention and the command word,
+so `@dependabot rebase` cannot be issued from a session. #43 is therefore still
+un-rebased and still `package.json` only. The three ways around it were
+considered and rejected in the triage document; the command stays a manual step
+for the repository owner.
 - `*.tsbuildinfo` added to `.gitignore`. `tsc -b` writes it next to each tsconfig
-  it builds, and it showed up untracked after every frontend build.
+it builds, and it showed up untracked after every frontend build.
 
 - OQ-3 closed. Builds now install from the committed lock files rather than
-  resolving afresh. The `backend lint and test` job installs
-  `pip install --require-hashes -r requirements-dev.lock` followed by
-  `pip install --no-deps -e .`, and the frontend with `npm ci`. The
-  `dependency audit` job audits both Python lock files in two independently
-  gating steps rather than scanning an installed environment. The Dockerfile
-  uses `npm ci` and `pip install --require-hashes -r requirements.lock`, the
-  runtime file only, so every artifact in the image is verified against the
-  digest recorded at resolution time and no test tooling ships in it. The
-  comments marking the switch as pending are removed, and the "No frontend
-  lockfile" limitation is removed from the README.
+resolving afresh. The `backend lint and test` job installs
+`pip install --require-hashes -r requirements-dev.lock` followed by
+`pip install --no-deps -e .`, and the frontend with `npm ci`. The
+`dependency audit` job audits both Python lock files in two independently
+gating steps rather than scanning an installed environment. The Dockerfile
+uses `npm ci` and `pip install --require-hashes -r requirements.lock`, the
+runtime file only, so every artifact in the image is verified against the
+digest recorded at resolution time and no test tooling ships in it. The
+comments marking the switch as pending are removed, and the "No frontend
+lockfile" limitation is removed from the README.
 - `CONTRIBUTING.md` states the rule that any pull request changing
-  `frontend/package.json` or `backend/pyproject.toml` regenerates the affected
-  lock file in the same pull request, because `npm ci` and `--require-hashes`
-  reject a stale lock rather than working around it.
+`frontend/package.json` or `backend/pyproject.toml` regenerates the affected
+lock file in the same pull request, because `npm ci` and `--require-hashes`
+reject a stale lock rather than working around it.
 - OQ-15 re-checked from a new session on 2026-08-22 and left open. PyPI and npm
-  still return `403 host_not_allowed`, and Tesseract and a Docker daemon are
-  still absent, so the recorded environment fix has not taken effect for
-  sessions.
+still return `403 host_not_allowed`, and Tesseract and a Docker daemon are
+still absent, so the recorded environment fix has not taken effect for
+sessions.
 - OQ-12 closed. Branch protection rules were declared on `main` and `develop` on
-  2026-08-21: pull request required, the `ci` status check required, approvals
-  not required, force pushes and deletions blocked. GitHub shows them as "Not
-  enforced" because the repository is private on a Free plan.
+2026-08-21: pull request required, the `ci` status check required, approvals
+not required, force pushes and deletions blocked. GitHub shows them as "Not
+enforced" because the repository is private on a Free plan.
 - OQ-14 closed. The Project board "TTB Label Verifier" exists at
-  <https://github.com/users/kimkight/projects/1>, a user-owned project linked to
-  this repository, with issues #1 to #21 in Backlog.
+<https://github.com/users/kimkight/projects/1>, a user-owned project linked to
+this repository, with issues #1 to #21 in Backlog.
 - OQ-17 closed. `develop` is now the repository's default branch.
 - OQ-15 updated with the root cause of the package-manager denials: the cloud
-  environment was at the Custom network level without the default package
-  manager list included, so PyPI, npm, and the apt archives were denied with
-  `host_not_allowed` even though they appear in `no_proxy`. Being in `no_proxy`
-  is not an allowlist entry. The environment fix is recorded; the question stays
-  open until a preflight from a new session confirms it.
+environment was at the Custom network level without the default package
+manager list included, so PyPI, npm, and the apt archives were denied with
+`host_not_allowed` even though they appear in `no_proxy`. Being in `no_proxy`
+is not an allowlist entry. The environment fix is recorded; the question stays
+open until a preflight from a new session confirms it.
 - `docs/08_SDLC_PROCESS.md` section 7 now states that tags are created through
-  GitHub Releases from `main` rather than pushed from a session, and why.
+GitHub Releases from `main` rather than pushed from a session, and why.
 - OQ-2 closed. Tesseract 5.3.0 is the version shipped in the container image,
-  read from `tesseract --version` against the built image in CI run 32574942848
-  at commit `ef3086a` and recorded in the version table in
-  `docs/05_ARCHITECTURE.md` section 8. It was not assumed: the initializing
-  session could not install Tesseract, so CI is the authoritative source. 5.3.0
-  is the LSTM-era line, which is what the extraction path is written against.
-  (#38)
+read from `tesseract --version` against the built image in CI run 32574942848
+at commit `ef3086a` and recorded in the version table in
+`docs/05_ARCHITECTURE.md` section 8. It was not assumed: the initializing
+session could not install Tesseract, so CI is the authoritative source. 5.3.0
+is the LSTM-era line, which is what the extraction path is written against.
+(#38)
 - OQ-6 and OQ-16 closed by ADR 0006 and assumption A-14. (#39)
 - `react-dom` added to the npm major-version ignore list alongside `react`. The
-  triage named `typescript` and `react` only, but `react` and `react-dom` ship
-  as a matched pair and `react-dom` declares a peer dependency on the exact
-  `react` version, so a `react-dom` major proposed on its own could never be
-  merged alone. This closes the gap `docs/DEPENDENCY_TRIAGE_2026-08.md` recorded
-  as left open.
+triage named `typescript` and `react` only, but `react` and `react-dom` ship
+as a matched pair and `react-dom` declares a peer dependency on the exact
+`react` version, so a `react-dom` major proposed on its own could never be
+merged alone. This closes the gap `docs/DEPENDENCY_TRIAGE_2026-08.md` recorded
+as left open.
 - `vite` and `@vitejs/plugin-react` added to the npm major-version ignore list
-  as a coupled pair. The repository has now hit the same deadlock from both
-  sides: #28 (`vite` 6 to 8) failed CI at `npm install` with ERESOLVE because
-  `@vitejs/plugin-react@4.7.0` declares `peer vite "^4.2.0 || ^5.0.0 || ^6.0.0
-  || ^7.0.0"`, and #41 (`@vitejs/plugin-react` 4 to 6) was closed because plugin
-  6 requires a Vite major. Neither half is mergeable alone, so either half
-  proposed on its own can only produce a pull request that gets closed. Removing
-  both entries together is what reopens the upgrade.
+as a coupled pair. The repository has now hit the same deadlock from both
+sides: #28 (`vite` 6 to 8) failed CI at `npm install` with ERESOLVE because
+`@vitejs/plugin-react@4.7.0` declares `peer vite "^4.2.0 || ^5.0.0 || ^6.0.0
+|| ^7.0.0"`, and #41 (`@vitejs/plugin-react` 4 to 6) was closed because plugin
+6 requires a Vite major. Neither half is mergeable alone, so either half
+proposed on its own can only produce a pull request that gets closed. Removing
+both entries together is what reopens the upgrade.
 - `docs/DEPENDENCY_TRIAGE_2026-08.md` triages the second Dependabot run: #43
-  (`typescript` 5.9.3) recommended merge, green and within
-  `typescript-eslint`'s `>=4.8.4 <6.1.0` peer window; #42 (`eslint` 10.8.1) and
-  #44 (`@eslint/js` 10.0.1) recommended for merge only as a single combined
-  change, since `@eslint/js` 10 alone fails `npm install` with ERESOLVE against
-  `eslint` 9 while every plugin in the tree already declares an `eslint` 10 peer
-  range. No ignore entries were added for that pair, because the failure is
-  explained by the split rather than by incompatibility.
+(`typescript` 5.9.3) recommended merge, green and within
+`typescript-eslint`'s `>=4.8.4 <6.1.0` peer window; #42 (`eslint` 10.8.1) and
+#44 (`@eslint/js` 10.0.1) recommended for merge only as a single combined
+change, since `@eslint/js` 10 alone fails `npm install` with ERESOLVE against
+`eslint` 9 while every plugin in the tree already declares an `eslint` 10 peer
+range. No ignore entries were added for that pair, because the failure is
+explained by the split rather than by incompatibility.
 - `docs/DEPENDENCY_TRIAGE_2026-08.md` adds a "lock file interaction" section:
-  from now on a merged bump that changes only a manifest leaves `develop` red,
-  because `npm ci` and `--require-hashes` both reject a stale lock. Dependabot
-  carries the npm lock change on branches cut after the lock file exists; #42,
-  #43 and #44 predate it and need a rebase or a follow-up regeneration, and pip
-  bumps always need a manual regeneration.
+from now on a merged bump that changes only a manifest leaves `develop` red,
+because `npm ci` and `--require-hashes` both reject a stale lock. Dependabot
+carries the npm lock change on branches cut after the lock file exists; #42,
+#43 and #44 predate it and need a rebase or a follow-up regeneration, and pip
+bumps always need a manual regeneration.
 - `docs/DEPENDENCY_TRIAGE_2026-08.md` records what happened after the first
-  triage was acted on, and states the condition for closing #27
-  (`aws-actions/configure-aws-credentials` 4 to 6): it stays open until
-  `deploy.yml` is enabled. Nothing is wrong with the bump, so closing it would
-  discard a valid update and invite Dependabot to reopen it weekly, and ignoring
-  it would hide a credential-handling action from updates entirely. It is held
-  open until a workflow exists that can actually exercise it.
+triage was acted on, and states the condition for closing #27
+(`aws-actions/configure-aws-credentials` 4 to 6): it stays open until
+`deploy.yml` is enabled. Nothing is wrong with the bump, so closing it would
+discard a valid update and invite Dependabot to reopen it weekly, and ignoring
+it would hide a credential-handling action from updates entirely. It is held
+open until a workflow exists that can actually exercise it.
+- `.github/dependabot.yml` now ignores runtime-line bumps of the `python` and
+`node` Docker base images. #25 and #26 had already been closed for splitting
+the tested runtime from the shipped one, and #47 reintroduced the same
+`python` 3.11 to 3.14 bump inside a grouped "minor-and-patch" pull request.
+Docker tags are not semver: Dependabot reads `node:22` to `node:26` as a
+semver major but `python:3.11` to `python:3.14` as a semver minor, so `python`
+is ignored for both major and minor and `node` for major only. Patch updates
+are still proposed for both, so security rebuilds inside the pinned line
+still arrive. Recorded in `docs/DEPENDENCY_TRIAGE_2026-08.md`.
 
 ### Fixed
 
+- Tesseract could not be called from a worker thread. Its OpenMP runtime
+deadlocks when the binary is invoked from any thread other than the process
+main thread, so the child process never exits and the request hangs rather
+than failing. `POST /api/verify` never met this, being an async handler that
+runs OCR on the event loop thread; the batch worker pool does.
+`backend/app/ocr.py` now sets `OMP_THREAD_LIMIT=1` if it is unset, which is
+also the right shape for the work because the pool already parallelizes
+across images. Recorded in ADR 0006.
+- Every rejection now leaves the service in one documented shape. A submission
+missing a required part previously escaped as FastAPI's own
+`{"detail": [...]}` while every other rejection used `ErrorResponse`; a
+`RequestValidationError` handler in `backend/app/main.py` maps it, naming the
+part at fault without echoing any submitted value (FR-9, NFR-6).
+- The upload size and accepted-type limits named in a rejection are now read
+when the rejection is built rather than when the module is imported, so a
+configured `TTB_MAX_UPLOAD_BYTES` is reflected in both the check and the
+message that names it (NFR-7, NFR-11).
+- The upload-size middleware matched `/api/verify` by prefix, which would have
+measured a batch envelope against the per-image limit and rejected every
+batch of more than one file. Matching is now exact, with a limit per route.
 - `frontend/*.tsbuildinfo` is git-ignored, and the two files that had been
-  committed before that rule existed are removed. They are machine-specific
-  TypeScript incremental build state, regenerated on every build.
+committed before that rule existed are removed. They are machine-specific
+TypeScript incremental build state, regenerated on every build.
 - `Dockerfile` and the CI frontend and audit jobs set
-  `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`. `@playwright/test` downloads browser
-  binaries from its own postinstall script; the image build never opens a
-  browser, and in CI the explicit `playwright install chromium` step is now the
-  single place a browser is fetched.
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD`. `@playwright/test` downloads browser
+binaries from its own postinstall script; the image build never opens a
+browser, and in CI the explicit `playwright install chromium` step is now the
+single place a browser is fetched.
 - The `react` and `vite` ignore entries in `.github/dependabot.yml` carried a
-  reason that has stopped being true: that CI passing on a frontend major would
-  be evidence of nothing because the frontend was a scaffold. There is now a
-  real interface with component tests and an accessibility run. The entries
-  stay, because each upgrade is still a decision wanting its own pull request,
-  but the recorded reason now says so rather than claiming there is nothing to
-  test.
+reason that has stopped being true: that CI passing on a frontend major would
+be evidence of nothing because the frontend was a scaffold. There is now a
+real interface with component tests and an accessibility run. The entries
+stay, because each upgrade is still a decision wanting its own pull request,
+but the recorded reason now says so rather than claiming there is nothing to
+test.
 
 ## [0.1.0] - 2026-08-22
 
 ### Added
 
 - Repository initialization with Git Flow branching: `main` for releases,
-  `develop` for integration.
+`develop` for integration.
 - SDLC documentation set under `docs/`: project charter, scope, requirements,
-  user stories, architecture, security and compliance, test strategy, SDLC
-  process, and a deployment outline.
+user stories, architecture, security and compliance, test strategy, SDLC
+process, and a deployment outline.
 - Five architecture decision records covering cloud platform, compute, the text
-  extraction path, the matching strategy, and branching, plus an ADR template.
+extraction path, the matching strategy, and branching, plus an ADR template.
 - `docs/OPEN_QUESTIONS.md` and `docs/ASSUMPTIONS.md`, recording what is
-  unanswered and what was inferred rather than stated.
+unanswered and what was inferred rather than stated.
 - `docs/TRACEABILITY_MATRIX.md`, mapping stakeholder statements through
-  requirements and stories to tests and ADRs.
+requirements and stories to tests and ADRs.
 - FastAPI backend scaffold exposing `GET /api/health` only, with configuration
-  read from environment variables.
+read from environment variables.
 - React and TypeScript frontend scaffold built with Vite, served as static files
-  by the backend container.
+by the backend container.
 - Multi-stage `Dockerfile` running as a non-root user, and `docker-compose.yml`
-  for local use.
+for local use.
 - GitHub Actions CI covering backend lint and tests, frontend lint and build,
-  dependency audit for both ecosystems, container build with a health probe and
-  a non-root assertion, and SBOM generation.
+dependency audit for both ecosystems, container build with a health probe and
+a non-root assertion, and SBOM generation.
 - Deployment workflow scaffolded and disabled with an `if: false` guard, because
-  no AWS infrastructure exists yet.
+no AWS infrastructure exists yet.
 - Issue templates for user stories, bugs, and tasks; a pull request template
-  carrying the traceability checklist; `CODEOWNERS`; and Dependabot for pip,
-  npm, GitHub Actions, and Docker.
+carrying the traceability checklist; `CODEOWNERS`; and Dependabot for pip,
+npm, GitHub Actions, and Docker.
 - Pre-commit configuration for both ecosystems.
 - GitHub Issues for all twenty-one user stories, with epic, priority, and type
-  labels.
+labels.
 - `docs/cloud_choice_and_abv_assumption.md`, the source document for the cloud
-  platform rationale and the alcohol content and net contents assumptions.
+platform rationale and the alcohol content and net contents assumptions.
 - Assumption A-12: alcohol content on the label and in the application must be
-  numerically identical, with normalization, a proof equals 2 x ABV cross-check
-  per 27 CFR 5.65, and no tolerance band. The tolerances in 27 CFR 5.65, 4.36,
-  and 7.65 govern actual against labeled content, so none of them applies to two
-  values the applicant declared.
+numerically identical, with normalization, a proof equals 2 x ABV cross-check
+per 27 CFR 5.65, and no tolerance band. The tolerances in 27 CFR 5.65, 4.36,
+and 7.65 govern actual against labeled content, so none of them applies to two
+values the applicant declared.
 - Assumption A-13: net contents are compared numerically only when units match
-  after normalization; different units are reported as needs human review with
-  no conversion, and standards of fill are not validated.
+after normalization; different units are reported as needs human review with
+no conversion, and standards of fill are not validated.
 - `TTB_ABV_TOLERANCE`, defaulting to `0.0`, so the A-12 position can change
-  without a code change.
+without a code change.
 - Section "Why not Azure, given the agency runs Azure" in ADR 0001, recording
-  why the prototype is built on AWS when the agency states it is on Azure, the
-  public Treasury evidence bearing on it, and the negative consequence that the
-  Terraform would need an Azure provider module before a pilot.
+why the prototype is built on AWS when the agency states it is on Azure, the
+public Treasury evidence bearing on it, and the negative consequence that the
+Terraform would need an Azure provider module before a pilot.
 - Manual UAT rows 18 to 22 covering the A-12 and A-13 rules.
 
 ### Changed
 
 - Decision D-11 replaced everywhere it appeared. The previous text asserted that
-  the agency's intended production environment is AWS GovCloud (US); no source
-  supports that, and the Marcus Williams interview says Azure. D-11 now records
-  the agency's stated Azure position, the author's choice of AWS commercial
-  `us-east-1` for delivery speed, the container-first portable design, and
-  FedRAMP status confirmed against the FedRAMP Marketplace at deployment time
-  rather than asserted.
+the agency's intended production environment is AWS GovCloud (US); no source
+supports that, and the Marcus Williams interview says Azure. D-11 now records
+the agency's stated Azure position, the author's choice of AWS commercial
+`us-east-1` for delivery speed, the container-first portable design, and
+FedRAMP status confirmed against the FedRAMP Marketplace at deployment time
+rather than asserted.
 - NFR-10 retitled to "Portability to a FedRAMP-authorized government region
-  (AWS GovCloud or Azure Government)"; its acceptance criteria are unchanged.
+(AWS GovCloud or Azure Government)"; its acceptance criteria are unchanged.
 - FR-7 acceptance criteria extended with the A-12 and A-13 rules.
 - OQ-1 marked as answered by ADR 0001, as the author's decision rather than a
-  stakeholder answer. OQ-4 closed by A-12 and OQ-5 closed by A-13.
+stakeholder answer. OQ-4 closed by A-12 and OQ-5 closed by A-13.
 
 ### Known limitations
 
 - No application logic. Label extraction, comparison, and verification are
-  designed but not implemented; only the health endpoint exists.
+designed but not implemented; only the health endpoint exists.
 - The build session could not reach PyPI, npm, or the Ubuntu package archive
-  and had no Docker daemon, so tests, the frontend build, and the container
-  build were not run locally. All of them run and pass in CI, which is where
-  the scaffold was actually verified. See `docs/OPEN_QUESTIONS.md`, OQ-15.
+and had no Docker daemon, so tests, the frontend build, and the container
+build were not run locally. All of them run and pass in CI, which is where
+the scaffold was actually verified. See `docs/OPEN_QUESTIONS.md`, OQ-15.
 - Branch protection is not applied and the default branch is still `main`
-  rather than `develop`; neither endpoint was reachable from the initializing
-  session. See OQ-12 and OQ-17.
+rather than `develop`; neither endpoint was reachable from the initializing
+session. See OQ-12 and OQ-17.
 - No lockfile in either ecosystem, so builds are not yet reproducible.
-  Backend dependencies use minimum-version floors rather than exact pins,
-  because hand-written exact pins went stale and `pip-audit` found seven
-  advisories against the transitive `starlette` version they resolved to.
-  See OQ-3.
+Backend dependencies use minimum-version floors rather than exact pins,
+because hand-written exact pins went stale and `pip-audit` found seven
+advisories against the transitive `starlette` version they resolved to.
+See OQ-3.
 - Container base images are pinned by tag rather than by digest.
 
 [Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v0.1.0...develop
