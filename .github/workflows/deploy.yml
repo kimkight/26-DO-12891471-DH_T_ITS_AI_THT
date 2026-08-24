@@ -221,19 +221,23 @@ jobs:
           CLUSTER: ${{ vars.ECS_CLUSTER }}
           SERVICE: ${{ vars.ECS_SERVICE }}
         run: |
-          family=$(aws ecs describe-services \
+          # The service names a task definition revision by ARN, and
+          # describe-task-definition accepts that ARN directly. A service that
+          # does not exist comes back as a failure entry rather than an error,
+          # so the query prints "None" and the guard below catches it.
+          current=$(aws ecs describe-services \
             --cluster "${CLUSTER}" --services "${SERVICE}" \
             --query 'services[0].taskDefinition' --output text)
 
-          if [ -z "${family}" ] || [ "${family}" = "None" ]; then
+          if [ -z "${current}" ] || [ "${current}" = "None" ]; then
             echo "::error::Service ${SERVICE} was not found in cluster ${CLUSTER}. Has the Terraform in infra/terraform been applied?"
             exit 1
           fi
 
-          echo "Current task definition: ${family}"
+          echo "Current task definition: ${current}"
 
           aws ecs describe-task-definition \
-            --task-definition "${family}" \
+            --task-definition "${current}" \
             --query 'taskDefinition | {
               family: family,
               taskRoleArn: taskRoleArn,
