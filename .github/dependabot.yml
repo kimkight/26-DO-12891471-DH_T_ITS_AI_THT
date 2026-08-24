@@ -30,6 +30,11 @@ version: 2
 #    does not mean the upgrade is forbidden. To take one deliberately, remove
 #    or narrow the matching ignore entry in a pull request of its own, which
 #    puts the decision in the history where it belongs.
+#
+# 3. Runtime-line bumps of the python and node base images are ignored for the
+#    same reason, added 2026-08-23 after #47. Docker tags are not semver, so
+#    the grouping rule in point 1 cannot be trusted to keep a runtime change
+#    out of a "minor-and-patch" pull request. See the docker ignore block.
 
 updates:
   - package-ecosystem: "pip"
@@ -161,3 +166,39 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      # Base image runtime lines are pinned to what CI tests, and a bump that
+      # moves them is a decision, not a routine update. Three pull requests say
+      # so already: #25 (python 3.11-slim-bookworm to 3.14-slim-bookworm) and
+      # #26 (node 22-bookworm-slim to 26-bookworm-slim) were both closed because
+      # they split the tested runtime from the shipped one, ci.yml pinning
+      # python-version "3.11" and node-version "22"; #47 was closed because the
+      # "minor-and-patch" group had swept the same python 3.11 to 3.14 bump into
+      # a routine-looking grouped pull request.
+      #
+      # The two entries are not symmetric, and the asymmetry is the whole point
+      # of #47. Dependabot reads a Docker tag as if it were semver, but Docker
+      # tags are not semver:
+      #
+      #   node:22-bookworm-slim to node:26-bookworm-slim reads as major 22 to
+      #   major 26, so version-update:semver-major catches it.
+      #
+      #   python:3.11-slim-bookworm to python:3.14-slim-bookworm reads as minor
+      #   11 to minor 14 under major 3, so version-update:semver-major does NOT
+      #   catch it. That misreading is exactly what let #47 be filed as a minor.
+      #   Python's own release line is what changed, and CPython calls 3.14 a
+      #   major release, so semver-minor is ignored for python as well. Ignoring
+      #   semver-major alone here would have left #47 free to recur next week.
+      #
+      # Patch updates are still proposed for both, so a rebuilt base image
+      # carrying security fixes within the pinned line still arrives on its own.
+      # Ignored does not mean forbidden: taking a runtime line deliberately
+      # means narrowing or removing the matching entry in a pull request of its
+      # own, alongside the matching ci.yml pin, so the two move together.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      - dependency-name: "node"
+        update-types:
+          - "version-update:semver-major"

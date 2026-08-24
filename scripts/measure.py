@@ -45,10 +45,10 @@ from samples.generate_samples import (  # noqa: E402
 )
 from samples.generate_samples import main as generate  # noqa: E402
 
-from app.api import build_result  # noqa: E402
 from app.compare import Outcome  # noqa: E402
 from app.ocr import extract_text  # noqa: E402
 from app.parse import lines_from_text, parse_fields  # noqa: E402
+from app.verify import build_result  # noqa: E402
 from app.warning import check_warning  # noqa: E402
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")

@@ -482,6 +482,23 @@ is stated in any source:
 5. CloudWatch log retention period.
 6. ECS task CPU and memory sizing. Cannot be chosen before the performance tier
    produces a latency measurement, since OCR is CPU bound.
+
+   Two figures from the batch implementation (FR-8, ADR 0006) feed this, and
+   both are now measurable rather than open:
+
+   - **CPU.** The batch worker pool is sized from the cores the task may use,
+     so task vCPU directly sets batch throughput. Below one vCPU the pool
+     collapses to a single worker and a batch runs sequentially.
+   - **Memory, and this is the trap.** FastAPI parses the whole multipart
+     envelope before the route runs, so a batch is resident in memory before
+     any of it is processed. `TTB_MAX_BATCH_BYTES` defaults to
+     `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, which at the defaults is
+     about 3 GiB. That is an upper bound derived from limits already stated,
+     not a sizing recommendation. Sizing a task for it would be wasteful;
+     sizing a task below it without lowering the limit means a large batch
+     kills the task. Whoever writes the task definition sets
+     `TTB_MAX_BATCH_BYTES` and `TTB_MAX_BATCH_FILES` to values the chosen
+     memory can hold, and says so in the same change.
 7. Desired task count and whether autoscaling is configured.
 8. Who pays for the AWS resources, and what the cost ceiling is.
 
