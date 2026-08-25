@@ -33,9 +33,9 @@ gap register, not decoration.
 | 18 | "our network blocks outbound traffic to a lot of domains... half their features didn't work because our firewall blocked connections to their ML endpoints." | Marcus Williams | NFR-3 | US-14 | [#14](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/14) | Not written; UAT row 16 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
 | 19 | "We're not storing anything sensitive for this exercise." | Marcus Williams | NFR-6 | US-15 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15) | Not written; UAT row 17 | |
 | 20 | "there's PII considerations, document retention policies, the usual federal compliance stuff." | Marcus Williams | NFR-6, NFR-7 | US-15, US-16 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15), [#16](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/16) | Not written | |
-| 21 | "Deployed Application URL: Working prototype we can access and test." | Deliverables | NFR-9 | US-17 | [#17](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/17) | CI: container health probe | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
+| 21 | "Deployed Application URL: Working prototype we can access and test." | Deliverables | NFR-9 | US-17 | [#17](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/17) | CI: container health probe; `terraform fmt -check` and `terraform validate` over `infra/terraform/`. No deployed URL exists yet | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
 | 22 | "Code quality and organization" | Evaluation Criteria | NFR-8 | US-18 | [#18](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/18) | CI: `backend`, `frontend`, `audit`, `container` jobs | [0005](adr/0005-git-flow-branching.md) |
-| 23 | "don't get me started on the FedRAMP certification process. Took 18 months just for the paperwork." | Marcus Williams | NFR-10 | US-19 | [#19](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/19) | Not written | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
+| 23 | "don't get me started on the FedRAMP certification process. Took 18 months just for the paperwork." | Marcus Williams | NFR-10 | US-19 | [#19](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/19) | Not written: no test can demonstrate portability without applying in a second region | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
 | 24 | "We're on Azure now after the migration in 2019." | Marcus Williams | Recorded as OQ-1, not a requirement | | | | [0001](adr/0001-cloud-platform-aws.md) |
 | 25 | "we're not looking to integrate with COLA directly." | Marcus Williams | OOS-1 | | | | |
 | 26 | "README with setup and run instructions... Brief documentation of approach, tools used, assumptions made." | Deliverables | SC-5, SC-6 | US-20 | [#20](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/20) | Not written | |
@@ -67,8 +67,8 @@ Every requirement maps to at least one story. No orphans.
 | NFR-6 No persistence | US-15 | #15 | **Yes**: in-memory only, multipart spool threshold raised so no upload reaches disk | **Yes**: `test_verify_integration.py::TestNothingIsPersisted` |
 | NFR-7 Input validation | US-16 | #16 | **Yes**: size in middleware before the body is read, MIME before decoding | **Yes**: `test_api_validation.py` |
 | NFR-8 Code quality gates | US-18 | #18 | **Yes** | CI |
-| NFR-9 Deployability | US-17 | #17 | Partial: image builds, nothing deployed | CI container job |
-| NFR-10 Government-region portability | US-19 | #19 | No: no infrastructure code exists | No |
+| NFR-9 Deployability | US-17 | #17 | Partial: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, ALB, log group and IAM roles; `.github/workflows/deploy.yml` is enabled and deploys by image digest. **Never applied to an AWS account, so no URL exists.** | CI container job; `infrastructure format and validate` job (`terraform fmt -check`, `terraform validate`) |
+| NFR-10 Government-region portability | US-19 | #19 | Partial, and honestly partial: the Terraform follows the portability rules (partition from `data.aws_partition`, availability zones from a data source, no hardcoded account or region) in `infra/terraform/providers.tf` and `iam.tf`, and only FedRAMP in-scope services are used. **Portability is argued, not demonstrated: no apply has been run in any region, government or commercial.** An Azure target would need a provider module this repository does not contain. | No. `terraform validate` checks the configuration is well formed, not that it applies anywhere |
 | NFR-11 Environment configuration | US-15, US-17 | #15, #17 | **Yes** | No |
 
 ## 3. Coverage summary
@@ -111,7 +111,6 @@ prototype (ADR 0003).
 | OQ-7 Section 508 applicability | NFR-5 acceptance, US-13 |
 | OQ-8 accuracy target | US-21 acceptance |
 | OQ-9 threshold defaults | FR-3 tuning |
-| OQ-13 deployment details | NFR-9, US-17 |
 
 OQ-6 and OQ-16 no longer appear in this table. Both are closed by
 [ADR 0006](adr/0006-batch-execution-model.md): OQ-6 by the decision that batch
@@ -119,8 +118,16 @@ verification is a single synchronous streaming request with a bounded worker
 pool and no job store, and OQ-16 by the CSV contract recorded as assumption
 A-14. Note what OQ-6 could not be given: no source states a batch latency
 target, so the ADR optimizes for the properties NFR-2 does state, which are not
-losing completed work and showing visible progress. OQ-13 item 6, ECS task
-sizing, is still open and interacts with the streaming design.
+losing completed work and showing visible progress.
+
+OQ-13 no longer appears in this table either. It was closed on 2026-08-24 by
+the author's deployment decisions, and item 6, ECS task sizing, was the item
+that interacted with the streaming design: the task is 1 vCPU and 8 GiB, the
+batch caps are set to what that memory holds, and the load balancer's idle
+timeout is set above a full batch's duration. The arithmetic is
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 4. What it does not close is
+NFR-9's acceptance: the infrastructure is written and has never been applied,
+so there is still no deployed URL.
 
 OQ-4 and OQ-5 no longer appear in this table. They are closed by assumptions
 A-12 and A-13 in [ASSUMPTIONS.md](ASSUMPTIONS.md), and the rules they settle are

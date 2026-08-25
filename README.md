@@ -192,7 +192,9 @@ figure in this repository was measured on a deployed target.**
 | One bad image failing only its own row in a batch | Works; covered by tests |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Deployed URL | **Not deployed.** No AWS infrastructure exists (OQ-13). |
+| Infrastructure as code | Works as code: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI. **Never applied to an AWS account.** |
+| Deployment workflow | Enabled. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. Never run. |
+| Deployed URL | **Not deployed.** The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies from her own machine. |
 | Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware; see below. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
@@ -215,6 +217,12 @@ one per user story.
   accuracy against real label artwork is unmeasured and is the largest open
   technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
+- **Nothing has been measured on a deployed target, and the infrastructure to
+  create one now exists.** That is a change in what is possible, not in what is
+  known. The checklist that would produce the first real numbers, including
+  whether the batch stream survives a load balancer unbuffered, is
+  [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9. Nothing in this
+  README moves until it has been run.
 - **Latency figures come from a session container, not production hardware.**
   The 5-second target (NFR-1) is asserted in the integration test, which is the
   gate; the published numbers are measurements on whatever machine ran them and

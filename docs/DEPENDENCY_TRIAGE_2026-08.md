@@ -524,3 +524,124 @@ one version, and read the test run rather than the health probe.
   the `dependency audit` CI job on every pull request, and both are green on
   `develop` at `ef3086a`. This document is about update policy, not
   vulnerabilities.
+
+## #27 is superseded, 2026-08-24
+
+`deploy.yml` is enabled. Every job's `if: false` is gone, the workflow runs on
+`workflow_dispatch` and on a published release, and the infrastructure it
+targets exists as Terraform in `infra/terraform/` (OQ-13 is closed). The
+condition written down above, "it stays open until `deploy.yml` is enabled",
+has been met.
+
+**The v6 bump was taken directly in that change**, not by merging
+[#27](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/27).
+`deploy.yml` now pins `aws-actions/configure-aws-credentials@v6` at both places
+it authenticates. That is the same version #27 proposes, arrived at in the task
+that also wrote the trust policy the action assumes into, which is what the
+triage asked for: the bump reviewed alongside a workflow that can exercise it,
+rather than alongside a skipped job.
+
+**Recommendation: close #27 as superseded.** Not merged, because there is
+nothing left to merge; the file on `develop` will already be at v6 once this
+branch lands, and Dependabot closes its own pull request when the target
+version is reached. Closing it by hand is the tidier version of the same
+outcome.
+
+**What is still owed, and it is the part that matters.** The triage's last
+sentence asked for confirmation "by a run that actually assumes a role rather
+than by a green check on a skipped job." That has **not** happened. No AWS
+account has been touched from any session in this project, so v6 has still
+never authenticated against anything. The first run of the deploy workflow is
+the confirmation, and it is the author's to run.
+
+Concretely, what to watch on that first run: v5 and v6 of the action tightened
+defaults around how the role session is named and how credentials are exported
+to later steps. Nothing in `deploy.yml` depends on the loosened behaviour, and
+`role-session-name` is set explicitly rather than left to the default, but a
+first run is a first run. If it fails at the credential step, the failure is
+readable and the fix is in the action's own release notes; it does not
+implicate the Terraform.
+
+**One row of the triage table above is now stale**, and rather than editing
+history: the "Recommendation: Hold" against #27 was the right call at the time
+and its condition has now been discharged here. The table stays as written,
+because it is a record of what was decided on 2026-08-22 with what was known
+then.
+
+## Fifth Dependabot run: #56, `vitest` 3.2.7 to 4.1.11, 2026-08-24
+
+One pull request, the second run after the interface landed in #54.
+[#56](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/56) is a
+dev-dependency major: `vitest` 3.2.7 to 4.1.11 in `frontend/package.json`.
+
+**Recommendation: merge.** This is the first frontend major in this repository
+that can be evaluated against something real, and it was evaluated rather than
+waved through.
+
+### The three questions the standing policy asks
+
+**1. Does CI pass on the rebased tree?** Yes, and it was checked on the rebased
+tree rather than on Dependabot's base. #56 was opened against `9a9bdad`;
+`develop` is now `878a7f9`, one merge ahead. The only file that differs between
+them is `README.md`, so the rebase is a formality, but the run below was done
+on the current tree anyway rather than reasoning from that.
+
+The pull request's own CI run is green on all five jobs
+([run 32737017068](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/32737017068)).
+Independently, with `frontend/package.json` and `frontend/package-lock.json`
+from #56 applied to `878a7f9` and `npm ci` run from that lock:
+
+| Check | Result |
+| --- | --- |
+| Resolved version | `vitest@4.1.11` |
+| `npm run lint` | Clean |
+| `npm run format:check` | "All matched files use Prettier code style" |
+| `npm run build` (`tsc -b && vite build`) | 41 modules transformed, built |
+| `npm run test` | **4 files, 61 tests, 61 passed** |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+
+Measured on a four-core Linux session container, Node 22.22.2, npm 10.9.7.
+
+**2. Does the lock regenerate?** Yes, in the same pull request: 128 insertions
+and 289 deletions across `package.json` and `package-lock.json`. `npm ci`
+succeeds from it, which is the test that matters. The net shrink is the shape
+of the change rather than noise: vitest 4 drops `vite-node`, `tinypool`,
+`cac`, `loupe`, `deep-eql`, `check-error`, `pathval`, `tinyspy`, `sirv` and
+its `@polka/url`, `mrmime` and `totalist`, `strip-literal`, `fflate`, and
+`@vitest/ui`, and adds `obug` and `@standard-schema/spec`.
+
+**3. Any breaking config change?** None that applies here, and this is where a
+major deserves reading rather than a green check. `frontend/vitest.config.ts`
+uses five options: `environment: 'jsdom'`, `globals: true`, `setupFiles`,
+`include`, and `exclude`. All five survive v4 unchanged. What v4 removed or
+reshaped, this repository does not use: no `workspace` (replaced by
+`projects`), no `environmentMatchGlobs`, no `poolMatchGlobs`, no coverage
+configuration, and no browser mode. Peer ranges hold: the repository is on
+`vite ^6.0.0` and `@vitejs/plugin-react ^4.3.4`, and `npm ci` resolved without
+an `ERESOLVE`, which is the failure mode #28 and #36 both hit.
+
+### What this evidence is worth, and what it is not
+
+**It is worth more than any previous frontend toolchain result in this
+document.** Every earlier caveat here said the same thing: CI green on a Vite
+scaffold with one component proves the toolchain installs, not that the
+application works. That caveat has expired. There are 61 component tests over
+the real interface now, covering outcome rendering as text and as shape and
+colour, the live region, the timing line, the plain-language error path, the
+batch table's sorting and status chips, and the results CSV. All 61 pass under
+the new runner. That is a test-runner major evaluated by running the tests.
+
+**Two things it is not.** First, `npm run test:a11y` was not run here: the
+accessibility tier is Playwright against the built page and is a different
+runner, untouched by this bump, and the pull request's own CI run covers it.
+Second, `@vitest/ui` leaves the tree, so `vitest --ui` would need the package
+added back. Nothing in this repository uses it: `test` is `vitest run` and
+`test:watch` is plain `vitest`.
+
+### One note on where this was written
+
+This section is committed on `feature/us-17-terraform` rather than on a branch
+of its own, against the usual one-branch-per-task rule. The reason is
+mechanical: that branch already appends to this file for the #27 closure, and a
+second branch appending to the same file would conflict for no benefit. #56
+itself is untouched, and nothing here merges or closes it.

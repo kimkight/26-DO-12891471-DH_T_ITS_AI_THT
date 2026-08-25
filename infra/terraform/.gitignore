@@ -1,0 +1,27 @@
+# Terraform working files. None of these belongs in version control, and two of
+# them would be an outright disclosure: terraform.tfvars is where
+# account-specific values go, and terraform.tfstate records every attribute of
+# every resource, including account numbers and full ARNs.
+.terraform/
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+crash.*.log
+
+# Everything except the committed example.
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+
+# Saved plans. A plan file contains the same values the state does.
+*.tfplan
+
+# .terraform.lock.hcl is NOT ignored. It pins provider versions by checksum and
+# belongs in version control. It is absent at the time this configuration was
+# written because the session that wrote it had no route to
+# registry.terraform.io, so no provider could be resolved to lock. The runbook
+# asks the operator to generate it for every platform the project is applied
+# from and commit it:
+#
+#   terraform providers lock \
+#     -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64
