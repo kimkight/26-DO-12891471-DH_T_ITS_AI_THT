@@ -73,9 +73,9 @@ session runner, against NFR-1's roughly 5 seconds. The three-photograph figure
 is printed by `test_multi_photo.py` and deliberately not gated: about a second
 of margin is too thin to gate on, and section 7 of the test strategy already
 applies that rule to the performance tier.
-- 22 backend tests in `backend/tests/test_multi_photo.py` and 20 frontend tests
+- 23 backend tests in `backend/tests/test_multi_photo.py` and 20 frontend tests
 in `frontend/src/__tests__/multiPhoto.test.tsx`, plus two accessibility tests.
-The suites are 187 backend and 81 frontend.
+The suites are 188 backend and 81 frontend.
 
 - Orientation correction on the extraction path, after the first photograph of a
 real bottle returned none of its five fields. `app/ocr.py` decodes through
