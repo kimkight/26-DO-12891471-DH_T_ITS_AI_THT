@@ -186,6 +186,7 @@ class TestNothingSensitiveReachesTheLogs:
         assert completions, "the verification should log that it completed"
         record = completions[0]
         assert isinstance(record.bytes_received, int)
+        assert record.photos_received == 1
         assert isinstance(record.ocr_ms, float)
         assert record.beverage_type_supplied is True
 
@@ -194,7 +195,12 @@ class TestNothingSensitiveReachesTheLogs:
         # it. A new field added here has to be added to this list deliberately.
         standard = set(logging.LogRecord("", 0, "", 0, "", None, None).__dict__)
         added = set(record.__dict__) - standard - {"taskName", "asctime", "message"}
-        assert added == {"bytes_received", "ocr_ms", "beverage_type_supplied"}
+        assert added == {
+            "bytes_received",
+            "photos_received",
+            "ocr_ms",
+            "beverage_type_supplied",
+        }
 
 
 class TestEgressBlocked:
@@ -254,8 +260,8 @@ class TestASidewaysPhotograph:
         turned = turned_png(sample_label_png, turns)
         body = verify(turned, SAMPLE_LABEL.application).json()
 
-        assert body["orientation"]["rotation_degrees"] == turns * 90
-        assert body["orientation"]["method"] == "osd"
+        assert body["photos"][0]["orientation"]["rotation_degrees"] == turns * 90
+        assert body["photos"][0]["orientation"]["method"] == "osd"
         outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
         assert outcomes["brand_name"] == "match"
         assert outcomes["alcohol_content"] == "match"
@@ -268,20 +274,22 @@ class TestASidewaysPhotograph:
         tagged = exif_tagged_jpeg(sample_label_png, orientation=6)
         body = verify(tagged, SAMPLE_LABEL.application, content_type="image/jpeg").json()
 
-        assert body["orientation"]["exif_transposed"] is True
-        assert body["orientation"]["rotation_degrees"] == 0
+        assert body["photos"][0]["orientation"]["exif_transposed"] is True
+        assert body["photos"][0]["orientation"]["rotation_degrees"] == 0
         outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
         assert outcomes["brand_name"] == "match"
         assert outcomes["government_warning"] == "match"
 
     def test_an_upright_photograph_reports_that_nothing_was_turned(self, sample_label_png):
         body = verify(sample_label_png, SAMPLE_LABEL.application).json()
-        assert body["orientation"] == {
-            "exif_transposed": False,
-            "rotation_degrees": 0,
-            "method": "osd",
-            "confidence": pytest.approx(body["orientation"]["confidence"]),
-        }
+        assert len(body["photos"]) == 1
+        photo = body["photos"][0]
+        assert photo["index"] == 1
+        assert photo["text_found"] is True
+        assert photo["error"] is None
+        assert photo["orientation"]["exif_transposed"] is False
+        assert photo["orientation"]["rotation_degrees"] == 0
+        assert photo["orientation"]["method"] == "osd"
 
     def test_the_turn_is_still_within_the_five_second_target(self, sample_label_png, capsys):
         """NFR-1. Orientation detection is a second pass over the image, so the

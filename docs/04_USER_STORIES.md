@@ -776,3 +776,74 @@ Then  the weakness is reported rather than omitted
 
 No accuracy target is stated in any source, so none is invented here; see OQ-8
 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+
+## Epic F: Real label artwork
+
+### US-22 Check a label that one photograph cannot show
+
+| | |
+| --- | --- |
+| Epic | Real label artwork |
+| Priority | Should |
+| Requirements | FR-1, FR-9 |
+| Points | |
+| Issue | [#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61) |
+| Source | The author's first real-artwork test against the deployed prototype, 2026-08-26; Jenny Park interview (SG-1); 27 CFR 16.21 |
+
+Numbered #61 rather than #22 because GitHub draws issue and pull request numbers
+from one sequence, and this repository had reached 60 by the time this story was
+written. US-1 to US-21 map to issues #1 to #21; this one does not follow that
+pattern and the break is recorded here rather than left to look like an error.
+
+**As a** compliance agent checking a label on a round bottle,
+**I want** to attach more than one photograph of the same label,
+**so that** the fields that curve out of one frame can still be checked.
+
+**Acceptance criteria**
+
+```
+Given a label whose fields are split between two photographs of it
+When  I attach both and check the label
+Then  every field found on either photograph is reported as found
+And   the result names which photograph each value was read from
+```
+
+```
+Given one unreadable photograph among readable ones
+When  I check the label
+Then  the readable photographs still produce a result
+And   the unreadable one is reported rather than hidden
+```
+
+```
+Given a submission in which no photograph could be read
+When  I check the label
+Then  no field reports a match
+And   the message says that none of the photographs could be read
+```
+
+```
+Given I have attached the maximum number of photographs
+When  I look for the control that adds another
+Then  it is no longer offered, and the interface says why
+```
+
+```
+Given I attach only one photograph
+When  I check the label
+Then  the check behaves exactly as it did before this capability existed
+```
+
+The case this exists for, in the words of the test that found it: a photograph
+of a real wine bottle was submitted to the deployed prototype and none of the
+five fields came back. Two of the three causes were preprocessing and are fixed
+under A-15. The third is that the label wraps the bottle, so no single
+photograph shows it flat. Jenny Park raised exactly this and qualified it:
+"labels that are photographed at weird angles... this is maybe out of scope for
+a prototype." [Source: Jenny Park interview] 27 CFR 16.21 compounds it by
+allowing the government warning to be "on a back or side label", so the required
+elements need not all be on one face.
+
+The decision, the alternatives rejected, and what is deliberately left out is
+[ADR 0007](adr/0007-multi-photo-single-label.md). The number of photographs is
+assumption A-16. Cylinder dewarping is not attempted; see OQ-21.

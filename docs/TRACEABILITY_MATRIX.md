@@ -42,6 +42,7 @@ gap register, not decoration.
 | 27 | "Correctness and completeness of core requirements" | Evaluation Criteria | NFR-1, NFR-8 | US-21 | [#21](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/21) | Not written; accuracy tier | |
 | 28 | "labels that are photographed at weird angles, or the lighting is bad, or there's glare... maybe out of scope for a prototype." | Jenny Park | SG-1, stretch | | | `backend/tests/test_ocr.py::TestExifOrientation`, `TestCardinalOrientation`, `TestWhyOrientationUsesOsd`; UAT rows 23, 24 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
 | 28a | First real-artwork test, 2026-08-26: a photograph of a real bottle returned none of the five fields. Sideways, EXIF-tagged, and a warning hyphenated across a narrow column. | Author's own test against the deployed URL | FR-1, FR-5; A-15 | US-1, US-4 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1), [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | `backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`, `backend/tests/test_verify_integration.py::TestASidewaysPhotograph`, `TestAHyphenatedWarningColumn`, `backend/tests/test_samples.py::TestTheHyphenatedColumnIsTheRegulationsText`; UAT rows 23, 24, 25 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
+| 28b | "labels that are photographed at weird angles" plus 27 CFR 16.21 allowing the warning on "a back or side label": a label wraps a round bottle, so no one photograph shows it flat. | Jenny Park; eCFR; the author's first real-artwork test | FR-1, FR-9; A-16 | US-22 | [#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61) | `backend/tests/test_multi_photo.py` (all seven classes), `frontend/src/__tests__/multiPhoto.test.tsx`, `frontend/tests/a11y.spec.ts` (the photo controls by keyboard, and axe over a two-photo result); UAT rows 26, 27, 28, 29 | [0007](adr/0007-multi-photo-single-label.md) |
 | 29 | "I've seen a lot of these 'modernization' projects come and go." | Dave Morrison | Adoption risk; drives NFR-4 and FR-3 | US-12, US-2 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | UAT row 14 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
 
 ## 2. Requirement coverage
@@ -50,16 +51,16 @@ Every requirement maps to at least one story. No orphans.
 
 | Requirement | Stories | Issues | Implemented | Tested |
 | --- | --- | --- | --- | --- |
-| FR-1 Field extraction, including the A-15 orientation rule | US-1 | #1 | **Yes**: `app/ocr.py`, `app/parse.py` | **Yes**: `test_parse.py`, `test_ocr.py`, `test_verify_integration.py` |
+| FR-1 Field extraction, including the A-15 orientation rule and the A-16 multi-photograph rule | US-1, US-22 | #1, #61 | **Yes**: `app/ocr.py`, `app/parse.py`, `app/verify.py` `verify_photos` | **Yes**: `test_parse.py`, `test_ocr.py`, `test_verify_integration.py`, `test_multi_photo.py` |
 | FR-2 Comparison against application data | US-1 | #1 | **Yes**: `app/api.py` `build_result` | **Yes**: `test_compare.py`, `test_verify_integration.py` |
 | FR-3 Three-outcome result | US-1, US-2 | #1, #2 | **Yes**: `app/compare.py`, `app/schemas.py` | **Yes**: `test_compare.py::TestOutcomeClassification` |
 | FR-4 Case and punctuation tolerance | US-3 | #3 | **Yes**: `app/compare.py` `normalize_text` | **Yes**: `test_compare.py::TestNormalization`, `TestBrandName` |
 | FR-5 Warning exact text, including the A-15 hyphenation rule | US-4 | #4 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningBody`, `TestHyphenationAcrossLineBreaks` |
 | FR-6 Warning capitalization | US-5 | #5 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningCapitalization`, `TestBoldTypeIsNeverClaimed` |
 | FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | **Yes**: `app/compare.py` `compare_abv`, `compare_net_contents` | **Yes**: `test_compare.py::TestAlcoholContentComparison`, `TestNetContents` |
-| FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | **Yes**: `app/batch.py`, `app/api.py` `verify_batch` | **Yes**: `test_batch.py`, 22 tests |
-| FR-9 Error handling | US-7, US-10 | #7, #10 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py` |
-| FR-10 Result presentation | US-2 | #2 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx` |
+| FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | **Yes**: `app/batch.py`, `app/api.py` `verify_batch`. One photograph per row: ADR 0007 does not extend to the batch path this session, and the FR-8 notes say why | **Yes**: `test_batch.py`, 22 tests, plus `test_multi_photo.py::TestTheBatchPathIsUnaffected` |
+| FR-9 Error handling | US-7, US-10, US-22 | #7, #10, #61 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, per photograph in `app/verify.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py`, `test_multi_photo.py` |
+| FR-10 Result presentation | US-2, US-22 | #2, #61 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason, plus a per-photograph note and the photograph each value was read from | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx`, `multiPhoto.test.tsx` |
 | NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
 | NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store | Partial: `test_batch.py` covers per-row isolation and the progress fields. A 300-label run has not been executed; 12 and 100 were measured on a session runner. |
 | NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
@@ -81,9 +82,9 @@ Every requirement maps to at least one story. No orphans.
 | Requirements traced to a GitHub issue | 21 of 21 |
 | Requirements fully implemented | 20 of 21 |
 | Requirements with an automated test | 18 of 21 |
-| User stories | 21 |
-| Stories with acceptance criteria | 21 of 21 |
-| ADRs | 6 |
+| User stories | 22 |
+| Stories with acceptance criteria | 22 of 22 |
+| ADRs | 7 |
 
 The two counts are read off the section 2 table by one rule each, so they can be
 checked rather than taken. "Fully implemented" counts rows whose Implemented
@@ -95,7 +96,7 @@ is covered only in part, and NFR-10 and NFR-11, which have none.
 The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9, NFR-1,
 NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 165 backend tests. The
-agent-facing interface (FR-10, NFR-4, NFR-5) is built and covered by 61
+agent-facing interface (FR-10, NFR-4, NFR-5) is built and covered by 81
 component tests, a computed-contrast test, and an axe-core run with a keyboard
 walk against the built page in CI. It is deployed: ECS Fargate behind an
 Application Load Balancer in `us-east-1`, deployed by image digest.
@@ -104,7 +105,10 @@ What deployment did not settle is accuracy on real artwork. The first
 photograph of a real bottle submitted to the deployed prototype returned none
 of its five fields. Two of the three causes are fixed and recorded as
 assumption A-15; the third, that a label wrapping a round bottle is never flat
-in one photograph, is not, and is recorded as OQ-21.
+in one photograph, is not corrected, and is recorded as OQ-21.
+[ADR 0007](adr/0007-multi-photo-single-label.md) works around it by accepting up
+to three photographs of one label rather than modelling the geometry of one, and
+that distinction is stated there rather than blurred.
 
 Two limits on the NFR-2 claim, stated rather than left to be discovered. No
 300-label batch has been run; 12 and 100 were, on a session runner rather than

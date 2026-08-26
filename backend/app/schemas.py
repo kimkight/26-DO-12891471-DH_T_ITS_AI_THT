@@ -56,6 +56,14 @@ class FieldResult(BaseModel):
     )
     outcome: Outcome = Field(description="match, needs_review, mismatch, or not_compared.")
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
+    source_photo: int | None = Field(
+        default=None,
+        description=(
+            "Which submitted photograph this value was read from, numbered from "
+            "1 in submission order (ADR 0007). Null where the field was not "
+            "found on any photograph."
+        ),
+    )
 
 
 class WarningResult(BaseModel):
@@ -78,6 +86,21 @@ class WarningResult(BaseModel):
         description="Always false. This prototype does not check bold type (OOS-4).",
     )
     bold_type_note: str = BOLD_TYPE_NOTE
+
+
+class ErrorDetail(BaseModel):
+    """An error response. It carries no field outcomes at all (FR-9)."""
+
+    code: str = Field(description="Stable machine code, for example unreadable_image.")
+    message: str = Field(description="What went wrong, in the agent's terms.")
+    limit: str | None = Field(
+        default=None,
+        description="The limit or accepted set that was exceeded, named explicitly (NFR-7).",
+    )
+
+
+class ErrorResponse(BaseModel):
+    error: ErrorDetail
 
 
 class OrientationDetail(BaseModel):
@@ -120,14 +143,50 @@ class OrientationDetail(BaseModel):
     )
 
 
+class PhotoResult(BaseModel):
+    """One submitted photograph of the label, and how it read (ADR 0007).
+
+    One label may be photographed up to three times, because a label wraps a
+    round bottle and no single photograph shows all of it flat. Every photograph
+    is reported, including the ones that failed: a submission where two of three
+    photographs were unreadable produced a result from one photograph, and an
+    agent deciding whether to trust it needs to know that.
+
+    ``error`` is set only for a photograph that could not be read at all. It
+    does not fail the verification while another photograph did read, which is
+    the same rule FR-8 applies to a batch, applied within one label.
+    """
+
+    index: int = Field(description="Position in submission order, numbered from 1.")
+    orientation: OrientationDetail = Field(
+        description="How this photograph was turned before it was read."
+    )
+    ocr_confidence: float = Field(
+        description="Mean Tesseract word confidence from 0 to 100 for this photograph."
+    )
+    text_found: bool = Field(description="Whether any text was read from this photograph.")
+    error: ErrorDetail | None = Field(
+        default=None,
+        description="Why this photograph could not be read, or null if it was read.",
+    )
+
+
 class VerificationResult(BaseModel):
-    """The full single-label response (US-1, FR-1 through FR-7)."""
+    """The full single-label response (US-1, FR-1 through FR-7, ADR 0007)."""
 
     fields: list[FieldResult]
     warning_detail: WarningResult
-    orientation: OrientationDetail
+    photos: list[PhotoResult] = Field(
+        description=(
+            "One entry per submitted photograph, in submission order. A "
+            "single-photograph submission has one entry."
+        )
+    )
     ocr_confidence: float = Field(
-        description="Mean Tesseract word confidence from 0 to 100 for this image."
+        description=(
+            "Mean Tesseract word confidence from 0 to 100, over the photographs "
+            "that read. Per-photograph figures are in `photos`."
+        )
     )
     elapsed_ms: float = Field(description="End-to-end time inside the request handler (NFR-1).")
     ocr_ms: float = Field(description="Of which, decode, preprocessing and OCR.")
@@ -138,21 +197,6 @@ class VerificationResult(BaseModel):
             "(NFR-3). True only when the optional Bedrock fallback ran."
         ),
     )
-
-
-class ErrorDetail(BaseModel):
-    """An error response. It carries no field outcomes at all (FR-9)."""
-
-    code: str = Field(description="Stable machine code, for example unreadable_image.")
-    message: str = Field(description="What went wrong, in the agent's terms.")
-    limit: str | None = Field(
-        default=None,
-        description="The limit or accepted set that was exceeded, named explicitly (NFR-7).",
-    )
-
-
-class ErrorResponse(BaseModel):
-    error: ErrorDetail
 
 
 class BatchLine(BaseModel):

@@ -1,5 +1,6 @@
 /**
- * The primary task: check one label (US-1, US-2, US-12, FR-10, NFR-4, NFR-5).
+ * The primary task: check one label (US-1, US-2, US-12, US-22, FR-10, NFR-4,
+ * NFR-5, ADR 0007).
  *
  * NFR-4's first criterion is that "the primary task, verify one label, is
  * reachable from the landing page with no navigation". This is the first tab
@@ -14,10 +15,18 @@
  * not supply reads as not compared rather than as a mismatch, so an empty field
  * is a legitimate submission and blocking it in the browser would contradict
  * the requirement the API implements.
+ *
+ * **More than one photograph of the same label (ADR 0007).** A label wraps a
+ * round bottle, so no single photograph shows all of it flat. The form starts
+ * with one photo slot, which is the case almost every check will be, and an
+ * agent who needs a second or a third adds them one at a time. It is one label
+ * throughout: one set of application values, one result, one set of five field
+ * cards. The batch tab is still the place for many different labels.
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
+import { PhotoNotes } from './PhotoNotes'
 import { ResultCard } from './ResultCard'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
@@ -40,23 +49,80 @@ const TEXT_FIELDS: { name: keyof ApplicationData; label: string; hint?: string }
   { name: 'net_contents', label: 'Net contents', hint: 'For example 750 mL' },
 ]
 
+/**
+ * Mirrors TTB_MAX_LABEL_PHOTOS. The API refuses more than this and names the
+ * limit; this stops an agent reaching that refusal by hiding the control that
+ * would cause it, which is the shape NFR-4 asks for.
+ */
+const MAX_PHOTOS = 3
+
+const ACCEPTED = 'image/jpeg,image/png,image/webp,image/tiff'
+
 export function SingleLabelTab() {
-  const [image, setImage] = useState<File[]>([])
+  // One slot per photograph, in submission order. `null` is an empty slot: an
+  // added slot exists before a file is chosen for it, so the drop zone has
+  // somewhere to be.
+  const [slots, setSlots] = useState<(File | null)[]>([null])
+  const [slotNews, setSlotNews] = useState('')
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION)
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
-  const resultsRef = useRef<HTMLDivElement>(null)
+  const addRef = useRef<HTMLButtonElement>(null)
+  /*
+   * Put focus back on "Add another photo of this label" after a slot is
+   * removed. It has to happen after the render rather than in the click
+   * handler: removing the third slot is what brings that button back into the
+   * DOM, so at the moment of the click the ref is still null and focus would
+   * fall to the document body, which is where a keyboard user loses their
+   * place.
+   *
+   * A ref rather than state for the flag, and cleared before the focus call.
+   * State would mean a second render whose only purpose is to unset a boolean
+   * nothing renders, which is the cascading-render shape React warns about.
+   */
+  const returnFocusToAdd = useRef(false)
+  useEffect(() => {
+    if (!returnFocusToAdd.current) return
+    returnFocusToAdd.current = false
+    addRef.current?.focus()
+  }, [slots.length])
+
+  const photos = slots.filter((file): file is File => file !== null)
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
   }
 
+  function setSlot(position: number, file: File | null) {
+    setSlots((previous) => previous.map((slot, index) => (index === position ? file : slot)))
+  }
+
+  function addSlot() {
+    if (slots.length >= MAX_PHOTOS) return
+    const next = slots.length + 1
+    setSlots((previous) => [...previous, null])
+    setSlotNews(
+      next === MAX_PHOTOS
+        ? `Photo ${next} added. That is the most photos you can add for one label.`
+        : `Photo ${next} added. You can add ${MAX_PHOTOS - next} more.`,
+    )
+  }
+
+  function removeSlot(position: number) {
+    setSlots((previous) => previous.filter((_, index) => index !== position))
+    const remaining = slots.length - 1
+    setSlotNews(
+      `Photo ${position + 1} removed. ${remaining} photo${remaining === 1 ? '' : 's'} left.`,
+    )
+    returnFocusToAdd.current = true
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!image.length || checking) return
+    if (!photos.length || checking) return
     setChecking(true)
     setOutcome(null)
-    setOutcome(await verifyLabel(image[0], application))
+    setOutcome(await verifyLabel(photos, application))
     setChecking(false)
   }
 
@@ -76,13 +142,72 @@ export function SingleLabelTab() {
         <h2 id="submit-heading">The label and the application</h2>
 
         <form onSubmit={submit} noValidate>
-          <DropZone
-            label="Label image"
-            hint="Drag a file here, or choose one. JPEG, PNG, WebP or TIFF."
-            accept="image/jpeg,image/png,image/webp,image/tiff"
-            files={image}
-            onFiles={setImage}
-          />
+          <fieldset className="photos">
+            <legend className="photos__legend">
+              Photos of this label
+              <span className="photos__count">
+                {' '}
+                ({photos.length} of {MAX_PHOTOS} chosen)
+              </span>
+            </legend>
+            <p className="field__hint" id="photos-hint">
+              One photo is usually enough. A label wraps around the bottle, so add a second or a
+              third if one photo cannot show all of it.
+            </p>
+
+            {slots.map((file, position) => (
+              <div className="photos__slot" key={position}>
+                <DropZone
+                  label={position === 0 ? 'Label image' : `Label image, photo ${position + 1}`}
+                  hint="Drag a file here, or choose one. JPEG, PNG, WebP or TIFF."
+                  accept={ACCEPTED}
+                  files={file ? [file] : []}
+                  onFiles={(chosen) => setSlot(position, chosen[0] ?? null)}
+                />
+                {position > 0 ? (
+                  <button
+                    className="button button--quiet"
+                    type="button"
+                    onClick={() => removeSlot(position)}
+                  >
+                    Remove photo {position + 1}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+
+            {slots.length < MAX_PHOTOS ? (
+              <button
+                ref={addRef}
+                className="button button--quiet"
+                type="button"
+                onClick={addSlot}
+                aria-describedby="photos-hint"
+              >
+                Add another photo of this label
+              </button>
+            ) : (
+              <p className="field__hint">
+                That is the most photos you can add for one label. Remove one to add a different
+                one.
+              </p>
+            )}
+
+            {/*
+              Adding and removing a slot changes the form without moving focus
+              anywhere that announces it, so the change is spoken here. Its own
+              region rather than the results one, which would be clobbered by
+              whichever text was written last.
+            */}
+            <div
+              className="visually-hidden"
+              role="status"
+              aria-live="polite"
+              aria-label="Photo list"
+            >
+              {slotNews}
+            </div>
+          </fieldset>
 
           <div className="field">
             <label htmlFor="beverage_type">Beverage type</label>
@@ -120,16 +245,16 @@ export function SingleLabelTab() {
             </div>
           ))}
 
-          <button className="button button--primary" type="submit" disabled={!image.length}>
+          <button className="button button--primary" type="submit" disabled={!photos.length}>
             {checking ? 'Checking...' : 'Check this label'}
           </button>
-          {!image.length ? (
+          {!photos.length ? (
             <p className="field__hint">Choose a label image to turn on the check.</p>
           ) : null}
         </form>
       </section>
 
-      <section className="panel" aria-labelledby="results-heading" ref={resultsRef}>
+      <section className="panel" aria-labelledby="results-heading">
         <h2 id="results-heading">What we found</h2>
 
         {/*
@@ -139,7 +264,7 @@ export function SingleLabelTab() {
           in the DOM, never conditionally mounted, because a live region added
           at the same moment as its text is not reliably announced.
         */}
-        <div className="visually-hidden" role="status" aria-live="polite">
+        <div className="visually-hidden" role="status" aria-live="polite" aria-label="Check result">
           {checking ? 'Checking this label.' : spoken}
         </div>
 
@@ -154,9 +279,15 @@ export function SingleLabelTab() {
                 sending the image and receiving the answer.
               </span>
             </p>
+            <PhotoNotes photos={result.photos} />
             <div className="cards">
               {result.fields.map((field) => (
-                <ResultCard key={field.name} field={field} warning={result.warning_detail} />
+                <ResultCard
+                  key={field.name}
+                  field={field}
+                  warning={result.warning_detail}
+                  photoCount={result.photos.length}
+                />
               ))}
             </div>
             <p className="footnote">

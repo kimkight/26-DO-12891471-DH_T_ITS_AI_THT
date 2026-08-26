@@ -9,6 +9,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- More than one photograph of one label on the single-label path, following
+[ADR 0007](docs/adr/0007-multi-photo-single-label.md) and implementing US-22
+(#61). `POST /api/verify` accepts one to three `image` parts. A label wraps a
+round bottle, so no single photograph shows all of it flat, and 27 CFR 16.21
+allows the government warning on "a back or side label", so the required
+elements need not be on one face at all.
+
+Each photograph is decoded, turned upright and read independently, and the
+fields found across all of them are merged. A field counts as found if any
+photograph shows it, and where two photographs both show one, each field is
+decided by the signal that located it: alcohol content and net contents by
+per-field OCR confidence, the brand name and the class or type designation by
+type size, so the small print on a back label cannot outscore the brand name on
+a front one. The warning is decided by the length of the located statement,
+because a statement running off the edge of the frame is read confidently and
+is simply incomplete. Ties go to the earlier photograph.
+
+One photograph behaves exactly as it did, on the wire and in the result. Image
+stitching was rejected: it needs feature matching on frames that may not
+overlap at all, and its failure mode is silent distortion that reads as altered
+label wording, which is indistinguishable from a genuine compliance defect.
+- `photos` on the verification response, one entry per submitted photograph with
+its orientation, its confidence, and its error if it had one, and `source_photo`
+on every field result. A photograph that cannot be read no longer fails the
+submission while another one did read, which is FR-8's rule applied inside one
+label; it is reported as a failed entry instead. Only when no photograph could
+be read does the request fail, with its own code `all_photos_unreadable`
+(FR-9). The top-level `orientation` field added earlier in this cycle is
+replaced by the per-photograph one rather than duplicated.
+- `TTB_MAX_LABEL_PHOTOS`, defaulting to 3. More than the cap is refused before
+any photograph is processed, with the limit named (NFR-7). The single-label
+request envelope is now that many times `TTB_MAX_UPLOAD_BYTES`, which loosens
+the Content-Length guard from 10 MB to 30 MB on the defaults; each photograph is
+still checked exactly against `TTB_MAX_UPLOAD_BYTES` after parsing, and the
+loosening is recorded in the middleware's own docstring.
+- Per-field OCR confidence and type size on `ParsedFields`, which is what makes
+"the reading from the photograph that read it best" a measurement rather than a
+guess.
+- An "Add another photo of this label" control on the single-label tab, up to
+three, each added slot removable, every control keyboard reachable, and each
+change announced through its own live region. The cap is enforced by
+withdrawing the control rather than by letting an agent reach the API's refusal
+(NFR-4). Removing a slot returns focus to the add control, because the button
+that removed it goes with it and focus would otherwise fall to the document
+body.
+- A per-photograph note in the results: what was turned and by how much, and
+which photographs could not be read. Nothing is rendered for the ordinary case
+of one upright photograph that read without trouble. Each field card says which
+photograph its value was read from, and only when more than one was sent.
+- Assumption A-16, recording the cap of three and the fact that the API cannot
+tell whether the photographs are of the same label. What is done about the
+second is disclosure rather than a check: deciding two photographs are "the
+same label" from their text is the judgement the tool defers to an agent
+everywhere else.
+- US-22 and issue
+[#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61).
+The number breaks the US-n to #n pattern because GitHub draws issue and pull
+request numbers from one sequence; the break is noted in the story.
+- UAT rows 26 to 29, and the measured cost of reading more than one photograph:
+1.24 s, 2.49 s and 3.83 s end to end for one, two and three photographs on a
+session runner, against NFR-1's roughly 5 seconds. The three-photograph figure
+is printed by `test_multi_photo.py` and deliberately not gated: about a second
+of margin is too thin to gate on, and section 7 of the test strategy already
+applies that rule to the performance tier.
+- 22 backend tests in `backend/tests/test_multi_photo.py` and 20 frontend tests
+in `frontend/src/__tests__/multiPhoto.test.tsx`, plus two accessibility tests.
+The suites are 187 backend and 81 frontend.
+
+### Changed
+
+- **The batch path stays at one photograph per row.** ADR 0007 does not extend
+to it this session: the A-14 CSV keys application data on one image filename, so
+a row covering several photographs would need a different column shape, a
+reconciliation rule for a partly matched group, and an answer for what a per-row
+error means when one photograph of three failed. None of that is difficult and
+none is asked for by any source. It is stated in the FR-8 notes and in ADR 0007,
+and asserted in `test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
+change unnoticed.
+
 - Orientation correction on the extraction path, after the first photograph of a
 real bottle returned none of its five fields. `app/ocr.py` decodes through
 Pillow so the EXIF orientation tag a phone writes is applied before OpenCV sees

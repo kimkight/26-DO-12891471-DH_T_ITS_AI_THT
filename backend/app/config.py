@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # Upload guards. Enforced before any image is decoded.
     max_upload_bytes: int = 10 * 1024 * 1024
     max_batch_files: int = 300
+
+    # How many photographs of one label the single-label path accepts
+    # (ADR 0007). Three because a label wraps a round bottle and no single
+    # photograph shows all of it flat: front, back and the seam between them is
+    # the most a submission needs, and no source asks for more. The batch path
+    # stays one photograph per row.
+    max_label_photos: int = 3
     allowed_mime_types: tuple[str, ...] = ("image/jpeg", "image/png", "image/webp", "image/tiff")
 
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
@@ -100,6 +107,18 @@ class Settings(BaseSettings):
         else:
             available = os.cpu_count() or 1
         return max(1, available)
+
+    @property
+    def effective_max_verify_bytes(self) -> int:
+        """The largest single-label request body accepted, in bytes.
+
+        ``max_label_photos * max_upload_bytes``, for the same reason the batch
+        envelope is derived rather than set: that product is the largest
+        submission the two stated limits already permit, and a smaller figure
+        here would be a third limit no source asks for. Each photograph is still
+        checked exactly against ``max_upload_bytes`` after parsing.
+        """
+        return self.max_label_photos * self.max_upload_bytes
 
     @property
     def effective_max_batch_bytes(self) -> int:

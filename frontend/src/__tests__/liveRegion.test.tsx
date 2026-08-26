@@ -44,7 +44,9 @@ describe('the live region', () => {
 
   it('is in the DOM before any result exists, so its update is announced', () => {
     render(<SingleLabelTab />)
-    const region = screen.getByRole('status')
+    // Named, because the photo list has its own status region since ADR 0007
+    // and writing both messages into one would have each clobber the other.
+    const region = screen.getByRole('status', { name: 'Check result' })
     expect(region).toBeInTheDocument()
     expect(region).toHaveAttribute('aria-live', 'polite')
     expect(region).toHaveTextContent('')
@@ -56,9 +58,13 @@ describe('the live region', () => {
     await submitOneLabel(user)
 
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(/Checked in .* seconds/)
+      expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(
+        /Checked in .* seconds/,
+      )
     })
-    expect(screen.getByRole('status')).toHaveTextContent('5 of 5 fields match')
+    expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(
+      '5 of 5 fields match',
+    )
   })
 
   it('names what needs attention and stays silent about counts that are zero', () => {

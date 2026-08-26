@@ -17,6 +17,9 @@ const MESSAGES: Record<string, string> = {
   no_text_found: "We couldn't find any text on this image. Try a clearer photo.",
   unsupported_media_type: 'That file is not an image we can read. Send a JPEG, PNG, WebP or TIFF.',
   file_too_large: 'That image is too large. Send a smaller one.',
+  all_photos_unreadable:
+    "We couldn't read any of the photos of this label. Try clearer photos, in better light.",
+  too_many_photos: 'That is more photos than we can read for one label. Remove one and try again.',
   batch_too_large: 'That is too many labels for one batch. Split it and send them in groups.',
   empty_batch: 'No label images were attached. Choose the images, then the application data file.',
   invalid_application_csv:

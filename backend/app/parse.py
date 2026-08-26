@@ -20,7 +20,7 @@ The rate at which it fails is measured, not asserted: see scripts/measure.py.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.ocr import OcrLine
 from app.warning import (
@@ -45,7 +45,26 @@ _WARNING_PREFIX_LINE = re.compile(r"government\s+warning", re.IGNORECASE)
 
 @dataclass(frozen=True)
 class ParsedFields:
-    """What was found on the label. ``None`` means not found, explicitly."""
+    """What was found on the label. ``None`` means not found, explicitly.
+
+    ``confidence`` carries Tesseract's mean word confidence for the text each
+    field was read from, keyed by field name, and 0.0 for a field that was not
+    found. It exists for ADR 0007: when the same label is photographed more
+    than once, two photographs can both show a field and disagree about it, and
+    something has to decide which reading is reported. A per-field figure is the
+    honest basis for that; the photograph's overall confidence is not, because a
+    photograph can read the back of the label well and the front badly.
+
+    ``prominence`` carries the glyph height in preprocessed pixels of the text
+    the brand name and the class or type designation were read from, which is
+    the signal those two are located by in the first place. It is comparable
+    between photographs because every image is scaled to the same long edge
+    before it is read, so a 96 point brand name and a 22 point producer line
+    stay far apart whichever photograph each came from. It is what stops the
+    small print on a back label outscoring the brand name on a front one when
+    both are read confidently. The comparison does assume the two photographs
+    frame the label at a similar distance; ADR 0007 records that.
+    """
 
     brand_name: str | None
     class_type: str | None
@@ -53,6 +72,8 @@ class ParsedFields:
     net_contents: str | None
     warning: WarningCheck
     warning_text: str | None
+    confidence: dict[str, float] = field(default_factory=dict)
+    prominence: dict[str, float] = field(default_factory=dict)
 
 
 def lines_from_text(text: str) -> list[OcrLine]:
@@ -91,6 +112,17 @@ def parse_fields(lines: list[OcrLine]) -> ParsedFields:
         net_contents=_text_at(lines, net_index),
         warning=warning,
         warning_text=warning_text,
+        confidence={
+            "brand_name": brand.confidence if brand else 0.0,
+            "class_type": class_type.confidence if class_type else 0.0,
+            "alcohol_content": _confidence_at(lines, abv_index),
+            "net_contents": _confidence_at(lines, net_index),
+            "government_warning": _mean_confidence(lines, warning_indices),
+        },
+        prominence={
+            "brand_name": brand.height if brand else 0.0,
+            "class_type": class_type.height if class_type else 0.0,
+        },
     )
 
 
@@ -152,6 +184,7 @@ class TextBlock:
     text: str
     height: float
     top: int
+    confidence: float = 0.0
 
 
 def group_blocks(lines: list[OcrLine], claimed: set[int]) -> list[TextBlock]:
@@ -212,6 +245,7 @@ def _as_block(lines: list[OcrLine]) -> TextBlock:
         text=" ".join(line.text for line in lines).strip(),
         height=max(line.height for line in lines),
         top=min(line.top for line in lines),
+        confidence=round(sum(line.confidence for line in lines) / len(lines), 1),
     )
 
 
@@ -226,3 +260,19 @@ def _text_at(lines: list[OcrLine], index: int | None) -> str | None:
     if index is None:
         return None
     return lines[index].text.strip() or None
+
+
+def _confidence_at(lines: list[OcrLine], index: int | None) -> float:
+    return 0.0 if index is None else lines[index].confidence
+
+
+def _mean_confidence(lines: list[OcrLine], indices: list[int]) -> float:
+    """Mean confidence over a run of lines, or 0.0 if the run is empty.
+
+    Zero rather than None so that "not found" and "found but unreadable" order
+    the same way when two photographs are compared: neither should beat a
+    reading that actually exists.
+    """
+    if not indices:
+        return 0.0
+    return round(sum(lines[index].confidence for index in indices) / len(indices), 1)

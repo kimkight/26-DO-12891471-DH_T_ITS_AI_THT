@@ -172,6 +172,7 @@ find out why it exists.
 | Module | Responsibility | Governing requirements | Tests |
 | --- | --- | --- | --- |
 | `config.py` | Every tunable value, read once from the environment at startup | NFR-11, NFR-3, NFR-7 | `tests/test_compare.py` reads the thresholds it asserts against |
+| `verify.py` | The pipeline both routes run: read every submitted photograph of one label, merge the fields across them per ADR 0007, and assemble the response | FR-1, FR-2, FR-3, FR-9 | `tests/test_verify_integration.py`, `tests/test_multi_photo.py` |
 | `ocr.py` | Decode honouring the EXIF orientation tag, preprocess (long edge to 1600 px, grayscale, adaptive threshold, cardinal turn from Tesseract OSD, then bounded deskew), run Tesseract, return text with word confidence, line geometry, the orientation applied and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
 | `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
