@@ -12,12 +12,19 @@ seconds, or agents go back to doing it manually.
 
 **Author:** Kimberly D. Kight
 
-> **Status: the prototype works, and nothing is deployed.** Single-label and
-> batch verification and the agent-facing interface are built and tested.
-> Accuracy and latency are measured on synthetic labels and on developer
-> hardware, not on a deployed target, and there is no deployed URL. See
-> [Status](#status) below for exactly what works and
-> [Known limitations](#known-limitations) for what those measurements do not
+> **Status: the prototype works and is deployed. Accuracy on real label
+> artwork is the open question.** Single-label and batch verification and the
+> agent-facing interface are built, tested, and running on ECS Fargate behind
+> an Application Load Balancer in `us-east-1`, deployed by image digest.
+>
+> Accuracy and latency are still measured on synthetic labels and on developer
+> hardware, not on the deployed target. The first photograph of a real bottle
+> submitted to the deployed prototype returned none of its five fields; two of
+> the three causes are fixed and recorded as assumption A-15, and the third,
+> that a label wrapping a round bottle is never flat in one photograph, is
+> worked around by [ADR 0007](docs/adr/0007-multi-photo-single-label.md) rather
+> than solved. See [Status](#status) below for exactly what works and
+> [Known limitations](#known-limitations) for what the measurements do not
 > cover.
 
 ## Repository map
@@ -209,17 +216,19 @@ figure in this repository was measured on a deployed target.**
 | One bad image failing only its own row in a batch | Works; covered by tests |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Infrastructure as code | Works as code: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI. **Never applied to an AWS account.** |
-| Deployment workflow | Enabled. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. Never run. |
-| Deployed URL | **Not deployed.** The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies from her own machine. |
-| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware; see below. |
+| Infrastructure as code | Works: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI, and applied to an AWS account in `us-east-1`. |
+| Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
+| Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
+| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware, not on the deployed target; see below and `docs/09_DEPLOYMENT.md` section 9. |
+| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
 Numbers are deliberately absent from this table. Accuracy and latency figures
 belong here once they have been measured on the target they describe, and the
-target does not exist yet. `scripts/measure.py` prints the current figures for
-whatever machine runs it, and each pull request that measured something records
-its numbers with the hardware they came from.
+target now exists but has not been measured. The checklist that turns that
+around is `docs/09_DEPLOYMENT.md` section 9. `scripts/measure.py` prints the
+current figures for whatever machine runs it, and each pull request that
+measured something records its numbers with the hardware they came from.
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
