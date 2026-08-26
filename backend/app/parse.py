@@ -23,7 +23,13 @@ import re
 from dataclasses import dataclass
 
 from app.ocr import OcrLine
-from app.warning import WARNING_STATEMENT, WarningCheck, check_warning, normalize_whitespace
+from app.warning import (
+    WARNING_STATEMENT,
+    WarningCheck,
+    check_warning,
+    join_line_break_hyphens,
+    normalize_whitespace,
+)
 
 _NUMBER = r"\d+(?:\.\d+)?"
 _ABV_LINE = re.compile(
@@ -96,6 +102,13 @@ def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
     of being wrong are safe: an omitted word makes the block over-run into the
     next line, an added word makes it stop short, and FR-5 requires a mismatch
     in either case.
+
+    The length is measured after line-break hyphens are rejoined (A-15). A
+    narrow hyphenated column carries two extra characters per split word, so
+    measuring the printed text against the regulation's length stops collecting
+    early and truncates the statement, which would report a compliant label as
+    a mismatch for a reason that has nothing to do with its wording. What is
+    returned is still the text as printed; only the stopping rule is joined.
     """
     start = next(
         (index for index, line in enumerate(lines) if _WARNING_PREFIX_LINE.search(line.text)),
@@ -110,7 +123,7 @@ def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
     for index in range(start, len(lines)):
         indices.append(index)
         collected.append(lines[index].text)
-        if len(normalize_whitespace(" ".join(collected))) >= target_length:
+        if len(join_line_break_hyphens(normalize_whitespace(" ".join(collected)))) >= target_length:
             break
     return indices, normalize_whitespace(" ".join(collected))
 

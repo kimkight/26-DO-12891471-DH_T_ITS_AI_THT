@@ -26,9 +26,15 @@ from dataclasses import dataclass
 
 from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
-from app.ocr import UndecodableImageError, extract_text
+from app.ocr import Orientation, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
-from app.schemas import FIELD_LABELS, FieldResult, VerificationResult, WarningResult
+from app.schemas import (
+    FIELD_LABELS,
+    FieldResult,
+    OrientationDetail,
+    VerificationResult,
+    WarningResult,
+)
 from app.warning import WARNING_STATEMENT, WarningCheck
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
@@ -137,6 +143,7 @@ def verify_image(content: bytes, application: dict[str, str]) -> VerificationRes
         ocr.mean_confidence,
         ocr_ms=ocr.elapsed_ms,
         elapsed_ms=elapsed_ms,
+        orientation=ocr.orientation,
     )
 
 
@@ -147,6 +154,7 @@ def build_result(
     *,
     ocr_ms: float,
     elapsed_ms: float | None = None,
+    orientation: Orientation | None = None,
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
@@ -181,8 +189,15 @@ def build_result(
     ]
     fields.append(_warning_field(parsed.warning, parsed.warning_text))
 
+    turned = orientation or Orientation()
     return VerificationResult(
         fields=fields,
+        orientation=OrientationDetail(
+            exif_transposed=turned.exif_transposed,
+            rotation_degrees=turned.rotation_degrees,
+            method=turned.method,
+            confidence=turned.confidence,
+        ),
         warning_detail=WarningResult(
             statement_found=parsed.warning.found,
             prefix_as_printed=parsed.warning.prefix_found,

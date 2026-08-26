@@ -96,6 +96,23 @@ features." [Source: Technical Requirements]
 | SG-2 | Optional vision-model fallback on Amazon Bedrock for images local OCR cannot read, off by default and enabled only by environment variable. | Decision D-4 |
 | SG-3 | Extraction of the remaining common label elements listed in the assignment: bottler name and address, country of origin. | Technical Requirements, Additional Context |
 
+**What SG-1 now covers, and what it still does not.** Part of SG-1 was taken on
+after the first real-artwork test: a photograph taken sideways is turned upright
+before it is read, the EXIF orientation tag a phone writes is honoured, and the
+existing small-angle deskew still runs after the turn. See assumption A-15.
+
+The rest of SG-1 is still out. A label wraps a round bottle, so no single
+photograph shows it flat: the far edges compress and the text distorts.
+Correcting that needs perspective or cylinder dewarping with an estimated
+radius, and **it is not attempted**. It is the ADR 0003 risk, that local OCR
+reads real photographed artwork worse than a cloud service would, and it is
+unmeasured. What was done instead is to accept up to three photographs of the
+same label, so an agent can photograph the parts of it that a single frame
+cannot show flat; see [ADR 0007](adr/0007-multi-photo-single-label.md). That
+lets an agent work around the distortion rather than correcting it, and the
+difference is stated here so the two are not confused. Glare and poor lighting
+are still handled only by the adaptive threshold that was already there.
+
 ## 4. Definition of Done for the prototype
 
 The prototype is done when every item below is true. Each is verifiable; none

@@ -30,17 +30,18 @@ gap register, not decoration.
 | 15 | Batch scale implies visible progress | Sarah Chen | NFR-2 | US-11 | [#11](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/11) | `backend/tests/test_batch.py::TestEveryLineIdentifiesItsLabel` (the NDJSON framing and the index and total each line carries) | [0006](adr/0006-batch-execution-model.md) |
 | 16 | "We need something my mother could figure out; she's 73..." and "Clean, obvious, no hunting for buttons." | Sarah Chen | NFR-4 | US-12 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12) | `frontend/tests/a11y.spec.ts` (the primary task is on the landing page), `frontend/src/__tests__/liveRegion.test.tsx`; UAT row 14 | |
 | 17 | "The agents really vary in their tech comfort level... half our team is over 50." | Sarah Chen | NFR-4, NFR-5 | US-12, US-13 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#13](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/13) | `frontend/tests/a11y.spec.ts` (axe-core and the keyboard walk), `frontend/src/__tests__/contrast.test.ts`; UAT rows 12, 13 | |
-| 18 | "our network blocks outbound traffic to a lot of domains... half their features didn't work because our firewall blocked connections to their ML endpoints." | Marcus Williams | NFR-3 | US-14 | [#14](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/14) | Not written; UAT row 16 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
-| 19 | "We're not storing anything sensitive for this exercise." | Marcus Williams | NFR-6 | US-15 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15) | Not written; UAT row 17 | |
-| 20 | "there's PII considerations, document retention policies, the usual federal compliance stuff." | Marcus Williams | NFR-6, NFR-7 | US-15, US-16 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15), [#16](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/16) | Not written | |
-| 21 | "Deployed Application URL: Working prototype we can access and test." | Deliverables | NFR-9 | US-17 | [#17](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/17) | CI: container health probe; `terraform fmt -check` and `terraform validate` over `infra/terraform/`. No deployed URL exists yet | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
+| 18 | "our network blocks outbound traffic to a lot of domains... half their features didn't work because our firewall blocked connections to their ML endpoints." | Marcus Williams | NFR-3 | US-14 | [#14](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/14) | `backend/tests/test_verify_integration.py::TestEgressBlocked`; UAT row 16 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
+| 19 | "We're not storing anything sensitive for this exercise." | Marcus Williams | NFR-6 | US-15 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15) | `backend/tests/test_verify_integration.py::TestNothingIsPersisted`, `TestNothingSensitiveReachesTheLogs`; UAT row 17 | |
+| 20 | "there's PII considerations, document retention policies, the usual federal compliance stuff." | Marcus Williams | NFR-6, NFR-7 | US-15, US-16 | [#15](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/15), [#16](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/16) | `backend/tests/test_verify_integration.py::TestNothingSensitiveReachesTheLogs`, `backend/tests/test_api_validation.py` | |
+| 21 | "Deployed Application URL: Working prototype we can access and test." | Deliverables | NFR-9 | US-17 | [#17](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/17) | CI: container health probe; `terraform fmt -check` and `terraform validate` over `infra/terraform/`. Applied to an AWS account and deployed: ECS Fargate behind an ALB in `us-east-1`, deployed by image digest by `.github/workflows/deploy.yml`, run 3 green | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
 | 22 | "Code quality and organization" | Evaluation Criteria | NFR-8 | US-18 | [#18](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/18) | CI: `backend`, `frontend`, `audit`, `container` jobs | [0005](adr/0005-git-flow-branching.md) |
 | 23 | "don't get me started on the FedRAMP certification process. Took 18 months just for the paperwork." | Marcus Williams | NFR-10 | US-19 | [#19](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/19) | Not written: no test can demonstrate portability without applying in a second region | [0001](adr/0001-cloud-platform-aws.md), [0002](adr/0002-compute-ecs-fargate-not-app-runner.md) |
 | 24 | "We're on Azure now after the migration in 2019." | Marcus Williams | Recorded as OQ-1, not a requirement | | | | [0001](adr/0001-cloud-platform-aws.md) |
 | 25 | "we're not looking to integrate with COLA directly." | Marcus Williams | OOS-1 | | | | |
 | 26 | "README with setup and run instructions... Brief documentation of approach, tools used, assumptions made." | Deliverables | SC-5, SC-6 | US-20 | [#20](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/20) | Not written | |
 | 27 | "Correctness and completeness of core requirements" | Evaluation Criteria | NFR-1, NFR-8 | US-21 | [#21](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/21) | Not written; accuracy tier | |
-| 28 | "labels that are photographed at weird angles, or the lighting is bad, or there's glare... maybe out of scope for a prototype." | Jenny Park | SG-1, stretch | | | | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
+| 28 | "labels that are photographed at weird angles, or the lighting is bad, or there's glare... maybe out of scope for a prototype." | Jenny Park | SG-1, stretch | | | `backend/tests/test_ocr.py::TestExifOrientation`, `TestCardinalOrientation`, `TestWhyOrientationUsesOsd`; UAT rows 23, 24 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
+| 28a | First real-artwork test, 2026-08-26: a photograph of a real bottle returned none of the five fields. Sideways, EXIF-tagged, and a warning hyphenated across a narrow column. | Author's own test against the deployed URL | FR-1, FR-5; A-15 | US-1, US-4 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1), [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | `backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`, `backend/tests/test_verify_integration.py::TestASidewaysPhotograph`, `TestAHyphenatedWarningColumn`, `backend/tests/test_samples.py::TestTheHyphenatedColumnIsTheRegulationsText`; UAT rows 23, 24, 25 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
 | 29 | "I've seen a lot of these 'modernization' projects come and go." | Dave Morrison | Adoption risk; drives NFR-4 and FR-3 | US-12, US-2 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | UAT row 14 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
 
 ## 2. Requirement coverage
@@ -49,11 +50,11 @@ Every requirement maps to at least one story. No orphans.
 
 | Requirement | Stories | Issues | Implemented | Tested |
 | --- | --- | --- | --- | --- |
-| FR-1 Field extraction | US-1 | #1 | **Yes**: `app/ocr.py`, `app/parse.py` | **Yes**: `test_parse.py`, `test_ocr.py`, `test_verify_integration.py` |
+| FR-1 Field extraction, including the A-15 orientation rule | US-1 | #1 | **Yes**: `app/ocr.py`, `app/parse.py` | **Yes**: `test_parse.py`, `test_ocr.py`, `test_verify_integration.py` |
 | FR-2 Comparison against application data | US-1 | #1 | **Yes**: `app/api.py` `build_result` | **Yes**: `test_compare.py`, `test_verify_integration.py` |
 | FR-3 Three-outcome result | US-1, US-2 | #1, #2 | **Yes**: `app/compare.py`, `app/schemas.py` | **Yes**: `test_compare.py::TestOutcomeClassification` |
 | FR-4 Case and punctuation tolerance | US-3 | #3 | **Yes**: `app/compare.py` `normalize_text` | **Yes**: `test_compare.py::TestNormalization`, `TestBrandName` |
-| FR-5 Warning exact text | US-4 | #4 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningBody` |
+| FR-5 Warning exact text, including the A-15 hyphenation rule | US-4 | #4 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningBody`, `TestHyphenationAcrossLineBreaks` |
 | FR-6 Warning capitalization | US-5 | #5 | **Yes**: `app/warning.py` | **Yes**: `test_warning.py::TestWarningCapitalization`, `TestBoldTypeIsNeverClaimed` |
 | FR-7 Numeric comparison, including the A-12 ABV rule and the A-13 net contents rule | US-6 | #6 | **Yes**: `app/compare.py` `compare_abv`, `compare_net_contents` | **Yes**: `test_compare.py::TestAlcoholContentComparison`, `TestNetContents` |
 | FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | **Yes**: `app/batch.py`, `app/api.py` `verify_batch` | **Yes**: `test_batch.py`, 22 tests |
@@ -67,8 +68,8 @@ Every requirement maps to at least one story. No orphans.
 | NFR-6 No persistence | US-15 | #15 | **Yes**: in-memory only, multipart spool threshold raised so no upload reaches disk | **Yes**: `test_verify_integration.py::TestNothingIsPersisted` |
 | NFR-7 Input validation | US-16 | #16 | **Yes**: size in middleware before the body is read, MIME before decoding | **Yes**: `test_api_validation.py` |
 | NFR-8 Code quality gates | US-18 | #18 | **Yes** | CI |
-| NFR-9 Deployability | US-17 | #17 | Partial: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, ALB, log group and IAM roles; `.github/workflows/deploy.yml` is enabled and deploys by image digest. **Never applied to an AWS account, so no URL exists.** | CI container job; `infrastructure format and validate` job (`terraform fmt -check`, `terraform validate`) |
-| NFR-10 Government-region portability | US-19 | #19 | Partial, and honestly partial: the Terraform follows the portability rules (partition from `data.aws_partition`, availability zones from a data source, no hardcoded account or region) in `infra/terraform/providers.tf` and `iam.tf`, and only FedRAMP in-scope services are used. **Portability is argued, not demonstrated: no apply has been run in any region, government or commercial.** An Azure target would need a provider module this repository does not contain. | No. `terraform validate` checks the configuration is well formed, not that it applies anywhere |
+| NFR-9 Deployability | US-17 | #17 | **Yes**: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, ALB, log group and IAM roles; it has been applied to an AWS account and `.github/workflows/deploy.yml` deploys by image digest, run 3 green. The prototype is reachable at the load balancer's address. | CI container job; `infrastructure format and validate` job (`terraform fmt -check`, `terraform validate`); the deploy workflow's own health check |
+| NFR-10 Government-region portability | US-19 | #19 | Partial, and honestly partial: the Terraform follows the portability rules (partition from `data.aws_partition`, availability zones from a data source, no hardcoded account or region) in `infra/terraform/providers.tf` and `iam.tf`, and only FedRAMP in-scope services are used. It now applies cleanly in one commercial region, `us-east-1`. **Portability is still argued rather than demonstrated: no apply has been run in a government region.** An Azure target would need a provider module this repository does not contain. | No. One commercial apply is evidence the configuration is applyable, not that it is portable |
 | NFR-11 Environment configuration | US-15, US-17 | #15, #17 | **Yes** | No |
 
 ## 3. Coverage summary
@@ -78,18 +79,32 @@ Every requirement maps to at least one story. No orphans.
 | Requirements defined | 21 (10 functional, 11 non-functional) |
 | Requirements traced to a story | 21 of 21 |
 | Requirements traced to a GitHub issue | 21 of 21 |
-| Requirements fully implemented | 17 of 21 |
-| Requirements with an automated test | 17 of 21 |
+| Requirements fully implemented | 20 of 21 |
+| Requirements with an automated test | 18 of 21 |
 | User stories | 21 |
 | Stories with acceptance criteria | 21 of 21 |
 | ADRs | 6 |
 
+The two counts are read off the section 2 table by one rule each, so they can be
+checked rather than taken. "Fully implemented" counts rows whose Implemented
+column says **Yes**; the one that does not is NFR-10, which is portability
+argued rather than demonstrated. "With an automated test" counts rows whose
+Tested column names a test or a CI job; the three that do not are NFR-2, which
+is covered only in part, and NFR-10 and NFR-11, which have none.
+
 The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9, NFR-1,
-NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 126 backend tests. The
+NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 165 backend tests. The
 agent-facing interface (FR-10, NFR-4, NFR-5) is built and covered by 61
 component tests, a computed-contrast test, and an axe-core run with a keyboard
-walk against the built page in CI. Nothing is deployed.
+walk against the built page in CI. It is deployed: ECS Fargate behind an
+Application Load Balancer in `us-east-1`, deployed by image digest.
+
+What deployment did not settle is accuracy on real artwork. The first
+photograph of a real bottle submitted to the deployed prototype returned none
+of its five fields. Two of the three causes are fixed and recorded as
+assumption A-15; the third, that a label wrapping a round bottle is never flat
+in one photograph, is not, and is recorded as OQ-21.
 
 Two limits on the NFR-2 claim, stated rather than left to be discovered. No
 300-label batch has been run; 12 and 100 were, on a session runner rather than
@@ -125,9 +140,8 @@ the author's deployment decisions, and item 6, ECS task sizing, was the item
 that interacted with the streaming design: the task is 1 vCPU and 8 GiB, the
 batch caps are set to what that memory holds, and the load balancer's idle
 timeout is set above a full batch's duration. The arithmetic is
-[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 4. What it does not close is
-NFR-9's acceptance: the infrastructure is written and has never been applied,
-so there is still no deployed URL.
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 4. NFR-9's acceptance is now met:
+the infrastructure has been applied and the prototype is reachable.
 
 OQ-4 and OQ-5 no longer appear in this table. They are closed by assumptions
 A-12 and A-13 in [ASSUMPTIONS.md](ASSUMPTIONS.md), and the rules they settle are

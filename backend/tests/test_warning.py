@@ -8,11 +8,15 @@ Requirements: FR-5, FR-6, OOS-4.
 import re
 from pathlib import Path
 
+import pytest
+from samples.warning_text import hyphenated_column
+
 from app.warning import (
     WARNING_BODY,
     WARNING_PREFIX,
     WARNING_STATEMENT,
     check_warning,
+    join_line_break_hyphens,
     normalize_whitespace,
 )
 
@@ -106,3 +110,56 @@ class TestBoldTypeIsNeverClaimed:
 
     def test_the_prefix_constant_is_the_one_the_regulation_names(self):
         assert WARNING_PREFIX == "GOVERNMENT WARNING:"
+
+
+class TestHyphenationAcrossLineBreaks:
+    """Assumption A-15: a printer's hyphen is presentation, not altered wording.
+
+    A real bottle sets the warning in a column a few words wide. The label
+    photographed in the first real-artwork test broke ``According``,
+    ``General,`` and ``Consumption`` across lines with a hyphen. 27 CFR 16.21
+    fixes the wording, not the line breaks, so those splits have to rejoin
+    before the body is compared or a compliant label is reported as a mismatch
+    on a typesetting decision (FR-5).
+    """
+
+    def test_a_narrow_hyphenated_column_still_matches_the_regulation(self):
+        result = check_warning(hyphenated_column())
+        assert result.body_matches is True
+        assert result.prefix_is_upper_case is True
+        assert result.passes is True
+
+    def test_the_same_column_run_together_on_one_line_also_matches(self):
+        """OCR collapses the line breaks to spaces, so this is the shape the
+        engine actually hands over."""
+        one_line = " ".join(hyphenated_column().split("\n"))
+        assert "Ac- cording" in one_line
+        assert check_warning(one_line).body_matches is True
+
+    @pytest.mark.parametrize("hyphen", ["-", "‐", "‑"])
+    def test_the_hyphen_tesseract_reports_may_be_any_of_three(self, hyphen):
+        column = hyphenated_column().replace("-\n", f"{hyphen}\n")
+        assert check_warning(column).body_matches is True
+
+    def test_a_dash_used_as_punctuation_is_not_treated_as_a_line_break_hyphen(self):
+        """A dash carries a space on both sides. Joining across one would delete
+        a word boundary that was in the text."""
+        assert join_line_break_hyphens("drive a car - or operate") == "drive a car - or operate"
+
+    def test_joining_does_not_rescue_a_genuinely_altered_warning(self):
+        """FR-5 is unchanged: this widens what counts as the same wording, it
+        does not widen what counts as a match."""
+        altered = hyphenated_column(
+            WARNING_STATEMENT.replace("should not drink", "should avoid drinking")
+        )
+        assert check_warning(altered).body_matches is False
+
+    def test_the_capitalization_check_is_unaffected(self):
+        """FR-6: the join is applied after the prefix has been taken off, so a
+        title-case prefix still fails and is still reported as printed."""
+        column = hyphenated_column(TITLE_CASE)
+        result = check_warning(column)
+        assert result.prefix_is_upper_case is False
+        assert result.prefix_found == "Government Warning:"
+        assert result.body_matches is True
+        assert not result.passes

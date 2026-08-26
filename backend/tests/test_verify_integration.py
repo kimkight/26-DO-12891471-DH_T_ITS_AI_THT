@@ -9,15 +9,21 @@ latency figure this test prints is one measurement on one machine and is not a
 published number; scripts/measure.py produces the reported set.
 """
 
+import io
 import logging
 import socket
 import time
 
+import cv2
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 from samples.specs import SAMPLE_LABEL, TITLE_CASE_WARNING
+from samples.warning_text import WARNING_STATEMENT, hyphenated_column
 
 from app.main import app
+from app.ocr import decode
 from tests.conftest import requires_fonts, requires_tesseract
 
 client = TestClient(app)
@@ -27,12 +33,41 @@ FIVE_SECOND_TARGET = 5.0
 pytestmark = [requires_tesseract, requires_fonts]
 
 
-def verify(png: bytes, application: dict[str, str]):
+def verify(png: bytes, application: dict[str, str], content_type: str = "image/png"):
+    suffix = "jpg" if content_type == "image/jpeg" else "png"
     return client.post(
         "/api/verify",
-        files={"image": ("label.png", png, "image/png")},
+        files={"image": (f"label.{suffix}", png, content_type)},
         data=application,
     )
+
+
+def turned_png(png: bytes, turns: int) -> bytes:
+    """The same artwork photographed sideways: the pixels really are turned.
+
+    ``np.rot90`` turns counter-clockwise, so ``turns`` quarter-turns need a
+    clockwise correction of ``turns * 90`` degrees, which is the figure the
+    response reports.
+    """
+    turned = np.ascontiguousarray(np.rot90(decode(png).pixels, turns))
+    buffer = io.BytesIO()
+    Image.fromarray(cv2.cvtColor(turned, cv2.COLOR_BGR2RGB)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def exif_tagged_jpeg(png: bytes, orientation: int) -> bytes:
+    """The same artwork as a phone would store it: sideways pixels plus a tag.
+
+    Orientation 6 means "turn this 90 degrees clockwise to display it", so the
+    pixels are turned counter-clockwise here and the tag records the way back.
+    """
+    sideways = np.ascontiguousarray(np.rot90(decode(png).pixels, 1))
+    image = Image.fromarray(cv2.cvtColor(sideways, cv2.COLOR_BGR2RGB))
+    exif = image.getexif()
+    exif[0x0112] = orientation
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", exif=exif, quality=95)
+    return buffer.getvalue()
 
 
 class TestCleanLabel:
@@ -201,3 +236,99 @@ class TestEgressBlocked:
         response = verify(sample_label_png, SAMPLE_LABEL.application)
         assert response.status_code == 200
         assert response.json()["external_call_made"] is False
+
+
+class TestASidewaysPhotograph:
+    """The first real-artwork failure, end to end (UAT rows 23 and 24).
+
+    A photograph of a real bottle was submitted to the deployed prototype and
+    none of the five fields were found. Two things were wrong: the photograph
+    was turned a quarter-turn, and phone photographs carry the turn in an EXIF
+    tag that OpenCV drops on decode. Both are reproduced here against the API.
+    """
+
+    @pytest.mark.parametrize("turns", [1, 2, 3])
+    def test_a_turned_photograph_returns_its_fields_and_says_it_was_turned(
+        self, sample_label_png, turns
+    ):
+        turned = turned_png(sample_label_png, turns)
+        body = verify(turned, SAMPLE_LABEL.application).json()
+
+        assert body["orientation"]["rotation_degrees"] == turns * 90
+        assert body["orientation"]["method"] == "osd"
+        outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
+        assert outcomes["brand_name"] == "match"
+        assert outcomes["alcohol_content"] == "match"
+        assert outcomes["net_contents"] == "match"
+        assert outcomes["government_warning"] == "match"
+
+    def test_a_photograph_whose_turn_is_only_in_its_exif_tag_reads_the_same(self, sample_label_png):
+        """The pixels are stored sideways and the tag says so. Before this
+        change the tag was ignored and the pipeline read the sideways pixels."""
+        tagged = exif_tagged_jpeg(sample_label_png, orientation=6)
+        body = verify(tagged, SAMPLE_LABEL.application, content_type="image/jpeg").json()
+
+        assert body["orientation"]["exif_transposed"] is True
+        assert body["orientation"]["rotation_degrees"] == 0
+        outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
+        assert outcomes["brand_name"] == "match"
+        assert outcomes["government_warning"] == "match"
+
+    def test_an_upright_photograph_reports_that_nothing_was_turned(self, sample_label_png):
+        body = verify(sample_label_png, SAMPLE_LABEL.application).json()
+        assert body["orientation"] == {
+            "exif_transposed": False,
+            "rotation_degrees": 0,
+            "method": "osd",
+            "confidence": pytest.approx(body["orientation"]["confidence"]),
+        }
+
+    def test_the_turn_is_still_within_the_five_second_target(self, sample_label_png, capsys):
+        """NFR-1. Orientation detection is a second pass over the image, so the
+        budget is re-measured rather than assumed to still hold."""
+        turned = turned_png(sample_label_png, 1)
+        started = time.perf_counter()
+        response = verify(turned, SAMPLE_LABEL.application)
+        elapsed = time.perf_counter() - started
+
+        assert response.status_code == 200
+        with capsys.disabled():
+            print(
+                f"\nMeasured single-label verification of a turned photograph: "
+                f"{elapsed:.2f} s end to end "
+                f"({response.json()['ocr_ms']:.0f} ms of it in decode, orientation, "
+                f"preprocessing and OCR). Target is about {FIVE_SECOND_TARGET:.0f} s "
+                "(NFR-1). Measured on this runner, not on production hardware."
+            )
+        assert elapsed < FIVE_SECOND_TARGET
+
+
+class TestAHyphenatedWarningColumn:
+    """UAT row 25 and assumption A-15, end to end.
+
+    A real bottle sets the warning in a column a few words wide and hyphenates
+    to fill it. Before this change the split words read as altered wording and a
+    compliant label reported a mismatch.
+    """
+
+    def test_a_narrow_hyphenated_column_reports_a_match(self, label_png):
+        png = label_png(warning=hyphenated_column())
+        body = verify(png, SAMPLE_LABEL.application).json()
+
+        warning = next(f for f in body["fields"] if f["name"] == "government_warning")
+        assert body["warning_detail"]["statement_found"] is True
+        assert body["warning_detail"]["prefix_is_capitalized"] is True
+        assert body["warning_detail"]["body_matches_regulation"] is True
+        assert warning["outcome"] == "match"
+
+    def test_an_altered_word_in_a_hyphenated_column_still_reports_a_mismatch(self, label_png):
+        """FR-5 is unchanged. The join widens what counts as the same wording,
+        not what counts as a match."""
+        altered = hyphenated_column(
+            WARNING_STATEMENT.replace("should not drink", "should avoid drinking")
+        )
+        body = verify(label_png(warning=altered), SAMPLE_LABEL.application).json()
+
+        warning = next(f for f in body["fields"] if f["name"] == "government_warning")
+        assert body["warning_detail"]["body_matches_regulation"] is False
+        assert warning["outcome"] == "mismatch"

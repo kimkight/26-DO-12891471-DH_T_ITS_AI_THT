@@ -35,11 +35,15 @@ FROM python:3.11-slim-bookworm AS runtime
 # Tesseract and the English language data are installed here because the
 # default extraction path runs OCR locally, inside the container, with no
 # outbound network calls. See docs/adr/0003-local-ocr-default-bedrock-optional.md.
-# libgl1 and libglib2.0-0 are OpenCV runtime dependencies.
+# tesseract-ocr-osd carries the orientation and script detection model, which is
+# what turns a sideways photograph upright before it is read; without it
+# app/ocr.py reports the orientation as "unavailable" and reads the image as it
+# arrived. libgl1 and libglib2.0-0 are OpenCV runtime dependencies.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         tesseract-ocr \
         tesseract-ocr-eng \
+        tesseract-ocr-osd \
         libgl1 \
         libglib2.0-0 \
         curl \

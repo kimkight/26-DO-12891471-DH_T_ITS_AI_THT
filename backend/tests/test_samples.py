@@ -12,10 +12,11 @@ import re
 from pathlib import Path
 
 from samples.specs import ALTERED_WARNING, SPECS, TITLE_CASE_WARNING
+from samples.warning_text import HYPHENATED_SPLITS, hyphenated_column
 from samples.warning_text import WARNING_STATEMENT as SAMPLE_WARNING
 
 from app.warning import WARNING_STATEMENT as APP_WARNING
-from app.warning import check_warning, normalize_whitespace
+from app.warning import check_warning, join_line_break_hyphens, normalize_whitespace
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -83,3 +84,23 @@ class TestTheSampleSetCoversWhatItClaims:
                 "net_contents",
                 "beverage_type",
             }
+
+
+class TestTheHyphenatedColumnIsTheRegulationsText:
+    """A-15's fixture has to be the regulation set in a narrow column, and
+    nothing else. If it drifts, the test that uses it stops proving anything."""
+
+    def test_rejoining_the_hyphens_reproduces_the_statement_exactly(self):
+        column = hyphenated_column()
+        rejoined = normalize_whitespace(join_line_break_hyphens(column))
+        assert rejoined == SAMPLE_WARNING
+
+    def test_it_actually_splits_the_three_words_the_real_label_split(self):
+        column = hyphenated_column()
+        for head, tail in HYPHENATED_SPLITS.values():
+            assert f"{head}-\n{tail}" in column
+
+    def test_it_is_set_in_a_narrow_column(self):
+        lines = hyphenated_column().split("\n")
+        assert len(lines) > 5
+        assert max(len(line) for line in lines) <= 30

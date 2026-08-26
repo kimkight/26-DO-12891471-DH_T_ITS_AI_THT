@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     # See docs/07_TEST_STRATEGY.md section 4 for the latency budget this feeds.
     ocr_long_edge_px: int = 1600
 
+    # Turn a sideways photograph upright before reading it, using Tesseract's
+    # orientation and script detection. On by default because the first real
+    # photograph submitted to the deployed prototype was sideways and the engine
+    # found none of its five fields.
+    #
+    # It is a setting rather than a constant because it is not free: the OSD
+    # pass costs roughly as much again as the read it precedes, which matters
+    # most on the batch path where that cost is paid once per image. The
+    # measured figures are in docs/07_TEST_STRATEGY.md section 4.
+    correct_orientation: bool = True
+
     # Batch execution. See docs/adr/0006-batch-execution-model.md.
     #
     # 0 means "derive it", because both values follow from figures already set

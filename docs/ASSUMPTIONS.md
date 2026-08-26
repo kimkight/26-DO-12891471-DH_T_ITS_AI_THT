@@ -25,6 +25,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-12](#a-12) | Alcohol content must be numerically identical; no tolerance band | FR-7 | Medium |
 | [A-13](#a-13) | Net contents compared only when units match; no conversion | FR-7 | Low |
 | [A-14](#a-14) | Batch application data arrives as one CSV keyed by image filename | FR-8, US-9 | Medium |
+| [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
 
 ---
 
@@ -303,3 +304,110 @@ fixed layout. If it does, that layout wins and this assumption is discarded.
 **Risk if wrong:** medium. It is one input adapter, and the verification core
 does not depend on the format, so the blast radius is a parser and a document.
 The cost of being wrong is rework on FR-8 and US-9 rather than a redesign.
+
+## A-15
+**A word split across a line break by a printer's hyphen is presentation, and
+is rejoined before the government warning is compared. Cardinal orientation is
+corrected using Tesseract's orientation and script detection.**
+
+Two assumptions from one piece of evidence, recorded together because they come
+from the same photograph and are falsified by the same thing: looking at more
+real labels.
+
+### The hyphenation rule
+
+The first real-artwork test, run by the author against the deployed URL on
+2026-08-26, submitted a photograph of a commercial wine bottle. The label
+carried the full government warning and the engine reported it as a mismatch.
+The label sets the statement in a column a few words wide and the setter
+hyphenated to fill it, so the artwork reads `AC-` / `CORDING`, `GEN-` / `ERAL`
+and `CONSUMP-` / `TION` across three line breaks.
+
+27 CFR 16.21 fixes the wording of the statement. It says nothing about where
+the lines break, and 27 CFR 16.22 governs legibility and the bold prefix rather
+than line breaking. So a hyphen introduced to fill a column is a typesetting
+decision, not a word difference, and reporting it as altered wording reports a
+compliant label as defective. `app/warning.py` therefore removes a hyphen that
+sits between two word characters and is followed by whitespace, before the body
+is compared.
+
+**What keeps this from weakening FR-5.** It is applied to the label side only,
+never to the constant quoted from the regulation. It is applied after the
+`GOVERNMENT WARNING:` prefix has been taken off, so the capitalization check
+(FR-6) reads exactly the characters it read before and a title-case prefix
+still fails. And it is safe on this text specifically because 27 CFR 16.21
+contains no hyphen at all: every hyphen inside a located statement is either a
+line-break hyphen, which this removes correctly, or an inserted word
+difference, which FR-5 requires to be reported as a mismatch either way. A dash
+used as punctuation carries a space on both sides and is left alone.
+
+The same join is applied to the stopping rule in `app/parse.py` that decides
+how many lines the statement occupies. A hyphenated column carries two extra
+characters per split word, so measuring the printed text against the
+regulation's length stopped collecting early and truncated the statement, which
+would have produced a mismatch for a reason unrelated to the wording.
+
+### The orientation rule
+
+The same photograph was taken sideways, and phone photographs also record the
+camera's orientation in EXIF tag 0x0112 rather than turning the pixels, which
+`cv2.imdecode` ignores. Both are corrected: the EXIF transform is applied
+through Pillow before OpenCV sees a pixel, and a cardinal quarter-turn is
+detected with Tesseract's orientation and script detection (OSD).
+
+**OSD rather than reading the image four times and keeping the highest mean
+word confidence.** Both were measured over the twelve-label sample set at all
+four cardinal rotations, forty-eight cases, on 2026-08-26 on a session runner:
+
+| Strategy | Correct | Cost |
+| --- | --- | --- |
+| Tesseract OSD | 46 of 48 | about 760 ms per image |
+| Highest mean word confidence of four rotations | 7 of 48 | about 1,200 ms per image |
+
+The second one does not fail for want of tuning. Tesseract's own layout
+analysis already detects and corrects text turned a quarter-turn clockwise, so
+an upright image and the same image turned clockwise produce identical output:
+on the sample label, 62 words and a mean confidence of 95.4 either way. A score
+that is equal on the two cases it has to separate cannot separate them at any
+threshold. That is asserted in
+`backend/tests/test_ocr.py::TestWhyOrientationUsesOsd` rather than only written
+here, so a future Tesseract release that changes the behaviour fails a test
+instead of leaving a stale claim in a document.
+
+Both OSD misreads were on the sample carrying the least text, and both reported
+an orientation confidence below 1.0 where every correct answer reported above
+11. The confidence is carried out to the response rather than used to override
+the answer, because there is nothing better to fall back to.
+
+**What is deliberately not attempted:** perspective and cylinder dewarping. The
+label wraps a round bottle, so no single photograph shows it flat and the far
+edges compress. That is SG-1, which Jenny Park raised and immediately qualified
+as "maybe out of scope for a prototype," and it is the ADR 0003 risk that
+Tesseract reads real photographs worse than a cloud service would. Correcting
+it needs either a cylindrical unwrap with an estimated radius or a second
+photograph of the same label; the second is what
+[ADR 0007](adr/0007-multi-photo-single-label.md) does instead. Recorded here so
+that the orientation fix is not mistaken for a general imperfect-image fix.
+
+**Confirmed or falsified by:** running the engine over a set of real
+photographed labels rather than one. One bottle establishes that hyphenated
+columns occur; it does not establish how they are typically set, whether other
+label elements are hyphenated the same way, or how often OSD is wrong on real
+artwork. What would falsify the hyphenation rule specifically is a real label
+whose warning contains a hyphen that belongs to the word.
+**Risk if wrong:** low for the hyphenation rule. It can only turn a mismatch
+into a match on text that is otherwise word-for-word identical to the
+regulation, and the case it covers was observed on a commercial label. Low to
+medium for the orientation rule: a wrong turn produces unreadable text and
+fields reported as not found (FR-1), which is a visible failure rather than a
+false match, and the response says what was turned and how confidently.
+
+**Traceability:** Source: the author's first real-artwork test against the
+deployed URL, 2026-08-26; 27 CFR 16.21 and 16.22 (fetched 2026-08-20);
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) SG-1;
+[ADR 0003](adr/0003-local-ocr-default-bedrock-optional.md). Affects FR-1 and
+FR-5. Tested by `backend/tests/test_ocr.py::TestExifOrientation`,
+`TestCardinalOrientation`, `TestWhyOrientationUsesOsd`,
+`backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`,
+`backend/tests/test_verify_integration.py::TestASidewaysPhotograph`,
+`TestAHyphenatedWarningColumn`; UAT rows 23, 24, 25. Opens OQ-20.
