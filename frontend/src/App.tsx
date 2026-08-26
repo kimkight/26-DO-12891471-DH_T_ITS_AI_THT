@@ -1,6 +1,31 @@
 /**
  * The whole interface: one screen, two tabs (FR-10, NFR-4, NFR-5).
  *
+ * ## What this page claims to be, and what it refuses to claim
+ *
+ * The interface is dressed in federal design language: navy, a gold rule,
+ * Public Sans, a grey field under white panels. That is a deliberate choice,
+ * because the tool is about federal label compliance and a prototype that
+ * looked like a consumer app would be answering the wrong question about
+ * whether it belongs in this workflow.
+ *
+ * Dressing like federal work and *claiming to be* federal work are different
+ * things, and this file is where the difference is enforced:
+ *
+ * - The first thing on every view, before the masthead, is a banner saying this
+ *   is a prototype built for an employment assessment, that it is not an
+ *   official TTB or Treasury system, and that nothing uploaded is stored.
+ * - The footer names the author and the assignment.
+ * - There is no TTB seal, no Treasury seal, no eagle, and no "An official
+ *   website of the United States government" banner. Not a stylized one, not a
+ *   recreated one, not an approximation. `src/__tests__/branding.test.tsx`
+ *   fails if any of those appears.
+ *
+ * The agency's full name appears once, as plain text above the product name, at
+ * the size and weight a subject line gets. It says what the tool is about. The
+ * banner immediately above it has already said who built it and what it is not,
+ * which is what keeps the two from being confused.
+ *
  * NFR-4's first criterion is that the primary task is reachable from the
  * landing page with no navigation, so "Check one label" is the tab that is
  * already open. The batch tab is the second thing, not the first, because the
@@ -63,11 +88,34 @@ export default function App() {
         Skip to the label check
       </a>
 
-      <header className="masthead">
-        <h1>Label check</h1>
-        <p className="masthead__subtitle">
-          Compare label artwork against what the application says. This tool recommends. You decide.
+      {/*
+        Persistent, on every view, never dismissible, and above the masthead
+        rather than below it. Its position is the point: an agent who reads one
+        line of this page reads this one. It is not marked as an alert, because
+        it is not an error to clear; it is a standing statement of what this is.
+      */}
+      <div className="prototype-banner">
+        <p className="prototype-banner__text">
+          <span className="prototype-banner__lead">
+            Prototype built for an employment assessment.
+          </span>{' '}
+          Not an official TTB or Treasury system. Nothing you upload is stored.
         </p>
+      </div>
+
+      <header className="masthead">
+        <div className="masthead__inner">
+          {/*
+            Plain text styling only. Not a wordmark, not a lockup, and not
+            accompanied by any seal or emblem.
+          */}
+          <p className="masthead__agency">Alcohol and Tobacco Tax and Trade Bureau</p>
+          <h1>TTB Label Verifier</h1>
+          <p className="masthead__subtitle">
+            Compare label artwork against what the application says. This tool recommends. You
+            decide.
+          </p>
+        </div>
       </header>
 
       <main id="main">
@@ -114,10 +162,15 @@ export default function App() {
       </main>
 
       <footer className="site-footer">
-        <p>
-          Nothing you upload is stored. Images and the values you type are held only for as long as
-          the check takes, and the results live in this page until you leave it.
-        </p>
+        <div className="site-footer__inner">
+          <p>
+            Nothing you upload is stored. Images and the values you type are held only for as long
+            as the check takes, and the results live in this page until you leave it.
+          </p>
+          <p className="site-footer__attribution">
+            Built by Kimberly D. Kight as a take-home assignment.
+          </p>
+        </div>
       </footer>
     </>
   )

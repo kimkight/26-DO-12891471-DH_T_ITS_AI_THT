@@ -9,6 +9,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The interface rebranded in federal design language, in the spirit of the
+U.S. Web Design System: a navy masthead band (`#112e51`) ruled off in gold
+(`#ffbe2e`), navy as the working primary (`#1a4480`), gold for edges and rules
+(`#c05600`), neutral greys, white panels on a grey field, and a navy hairline
+across the top of each panel. The masthead reads "TTB Label Verifier" with
+"Alcohol and Tobacco Tax and Trade Bureau" above it as plain text styling only.
+- Public Sans as the typeface, the face the U.S. Web Design System commissioned,
+under the SIL Open Font License 1.1. It is bundled as a variable font through
+`@fontsource-variable/public-sans`, a dev dependency, with
+`frontend/package-lock.json` regenerated in the same change. It is served from
+the application's own origin and never fetched from a CDN, because NFR-3 applies
+to the page as well as to the API: a stylesheet linking a font CDN would break
+the interface on exactly the firewall Marcus Williams describes, and would do so
+silently. `system-ui` follows it in the stack, so a build whose font file failed
+still renders in something sensible.
+- **The disclosures that make the visual language legitimate rather than a
+forgery**, and the tests that keep them. A banner is the first element on every
+view, above the masthead, never dismissible: "Prototype built for an employment
+assessment. Not an official TTB or Treasury system. Nothing you upload is
+stored." The footer reads "Built by Kimberly D. Kight as a take-home
+assignment." The document title carries "(prototype)", which is the one place
+the page's own banner cannot reach.
+- **What is refused, in code rather than in a person's memory.** No TTB seal, no
+Treasury seal, no eagle, no coat of arms, and no "official website of the United
+States government" banner appears anywhere in the repository. No raster or
+vector asset is imported at all; the only SVG in the interface is the four
+outcome glyphs, drawn inline.
+`frontend/src/__tests__/branding.test.tsx` asserts both halves: that each
+disclosure is present in the words it was written in and in the position that
+makes it read first, and that none of the forbidden marks or phrases appears in
+any source file the built page is assembled from. It strips comments before
+scanning, so the comment explaining which marks are forbidden is not itself a
+violation of the rule it explains.
+- 15 new contrast assertions against the new tokens, in
+`frontend/src/__tests__/contrast.test.ts`. **No threshold was changed.** The
+gold exists in three tokens rather than one because one gold cannot do all three
+jobs and pass: `#c05600` clears 3:1 as a rule and an edge but reaches only 4.03
+against the grey surface as text, so `--gold-text` is the same hue darkened
+until it clears 4.5:1 on both surfaces, and `--gold-bright` is checked against
+the navy band, which is the only place it is used. The masthead, the page shell
+and the prototype banner are each checked as surfaces in their own right.
+- Two assertions in the same file that the stylesheet fetches nothing from an
+external origin and names a fallback after the bundled font, and one in the
+accessibility run that loading the built page issues no request off this origin
+at all (NFR-3).
+- Two accessibility tests against the built page: that the prototype banner and
+the author attribution are visible and that the masthead carries no image or
+inline SVG.
+
 - More than one photograph of one label on the single-label path, following
 [ADR 0007](docs/adr/0007-multi-photo-single-label.md) and implementing US-22
 (#61). `POST /api/verify` accepts one to three `image` parts. A label wraps a
