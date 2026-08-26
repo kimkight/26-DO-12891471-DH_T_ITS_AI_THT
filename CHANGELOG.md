@@ -126,17 +126,6 @@ applies that rule to the performance tier.
 in `frontend/src/__tests__/multiPhoto.test.tsx`, plus two accessibility tests.
 The suites are 187 backend and 81 frontend.
 
-### Changed
-
-- **The batch path stays at one photograph per row.** ADR 0007 does not extend
-to it this session: the A-14 CSV keys application data on one image filename, so
-a row covering several photographs would need a different column shape, a
-reconciliation rule for a partly matched group, and an answer for what a per-row
-error means when one photograph of three failed. None of that is difficult and
-none is asked for by any source. It is stated in the FR-8 notes and in ADR 0007,
-and asserted in `test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
-change unnoticed.
-
 - Orientation correction on the extraction path, after the first photograph of a
 real bottle returned none of its five fields. `app/ocr.py` decodes through
 Pillow so the EXIF orientation tag a phone writes is applied before OpenCV sees
@@ -366,6 +355,15 @@ order (ACM certificate and HTTPS listener, an auth layer at the edge, then WAF
 and rate limiting, then access logs and an audit trail).
 
 ### Changed
+
+- **The batch path stays at one photograph per row.** ADR 0007 does not extend
+to it this session: the A-14 CSV keys application data on one image filename, so
+a row covering several photographs would need a different column shape, a
+reconciliation rule for a partly matched group, and an answer for what a per-row
+error means when one photograph of three failed. None of that is difficult and
+none is asked for by any source. It is stated in the FR-8 notes and in ADR 0007,
+and asserted in `test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
+change unnoticed.
 
 - OQ-15 closed. The preflight it named as its own closing condition returned
 `200` from PyPI and from the npm registry in a new session, with Tesseract
