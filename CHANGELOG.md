@@ -645,6 +645,27 @@ workflow, and the still-undeployed URL.
 
 ### Fixed
 
+- The alcohol content was read from any percent on the label, including one in
+marketing copy. In the author's three-photograph bottle test against the
+deployed prototype on 2026-08-27 the field came back as `7%`, taken from a
+sentence on the back label about reducing environmental impact, because the
+pattern accepted any percent token in reading order. A candidate now counts
+only where the OCR line carrying the number also carries an alcohol marker:
+`ALC`, `ALC.`, `VOL`, `VOLUME`, `ABV`, `ALCOHOL` or `PROOF`, case-insensitively.
+`VOLUME` is admitted with `VOL` because it is the same word spelled out.
+
+The marker has to survive OCR; the words around it do not, so
+`12.5% AlC. 8Y VOL.` still reads. A number with no marker on its line and a
+marker with no number on its line are both reported as not found, which retires
+the old behaviour of reporting a bare `ALC./VOL.` with no figure in it as the
+alcohol content. This is a defect fix against FR-1 and FR-7, not a new
+requirement: the FR-7 acceptance criteria now state the rule, UAT row 30 tests
+it against a real bottle, and seven tests in
+`backend/tests/test_parse.py::TestAlcoholContentNeedsAnAlcoholMarker` cover it.
+The residual risk, a line carrying both an unrelated number and a marker word,
+is narrower than the risk it replaces and is stated rather than claimed away.
+- Two stale counts in `docs/TRACEABILITY_MATRIX.md`, corrected to what the
+suites report: 195 backend tests and 110 frontend tests.
 - Tesseract could not be called from a worker thread. Its OpenMP runtime
 deadlocks when the binary is invoked from any thread other than the process
 main thread, so the child process never exits and the request hangs rather
