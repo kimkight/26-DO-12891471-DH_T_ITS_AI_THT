@@ -76,13 +76,22 @@ class TestOversize:
         assert str(settings.max_upload_bytes) in error["limit"]
 
     def test_the_rejection_happens_from_the_declared_length(self):
-        """NFR-7: the size check reads Content-Length, before the body is read."""
+        """NFR-7: the size check reads Content-Length, before the body is read.
+
+        Measured against the route's envelope limit, which is
+        TTB_MAX_LABEL_PHOTOS times TTB_MAX_UPLOAD_BYTES since ADR 0007: the
+        route accepts up to three photographs of one label, so bounding the
+        envelope at one image would reject every two-photograph submission. Each
+        photograph is still checked exactly against TTB_MAX_UPLOAD_BYTES after
+        parsing, which is the case above.
+        """
         response = client.post(
             "/api/verify",
-            content=b"\x00" * (settings.max_upload_bytes + 1024),
+            content=b"\x00" * (settings.effective_max_verify_bytes + 1024),
             headers={"content-type": "multipart/form-data; boundary=x"},
         )
         assert response.status_code == 413
+        assert response.json()["error"]["code"] == "file_too_large"
 
 
 class TestUnreadableImage:

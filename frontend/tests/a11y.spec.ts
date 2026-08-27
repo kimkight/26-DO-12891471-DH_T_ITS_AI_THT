@@ -126,16 +126,24 @@ test.describe('what axe cannot check', () => {
     await page.keyboard.press('ArrowLeft')
     await expect(page.getByRole('tab', { name: 'Check one label' })).toBeFocused()
 
-    // Then the file input and the five application fields, in reading order.
+    // Then the file input, the control that adds a second photo of the same
+    // label (ADR 0007), and the five application fields, in reading order.
     //
     // Scoped to the single-label panel. The arrow-key steps above mounted the
     // batch panel too, and it stays mounted so a half-filled form survives a
     // look at the other tab. It is `hidden`, so it is out of the tab order,
-    // which is what the loop below proves by reaching these six in sequence;
-    // but an unscoped lookup would still match its controls by name.
+    // which is what the loop below proves by reaching these in sequence; but
+    // an unscoped lookup would still match its controls by name.
     const panel = page.locator('#panel-single')
+    await page.keyboard.press('Tab')
+    await expect(panel.getByLabel('Label image', { exact: true })).toBeFocused()
+
+    await page.keyboard.press('Tab')
+    await expect(
+      panel.getByRole('button', { name: 'Add another photo of this label' }),
+    ).toBeFocused()
+
     const expected = [
-      'Label image',
       'Beverage type',
       'Brand name',
       'Class or type designation',
@@ -161,6 +169,51 @@ test.describe('what axe cannot check', () => {
     await expect(page.getByLabel('Label image')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Check this label' })).toBeVisible()
   })
+
+  test('a second and third photo of the same label are reachable by keyboard', async ({ page }) => {
+    await page.goto('/')
+    const panel = page.locator('#panel-single')
+
+    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
+    await expect(panel.getByLabel('Label image, photo 2')).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove photo 2' })).toBeVisible()
+
+    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
+    await expect(panel.getByLabel('Label image, photo 3')).toBeVisible()
+    // The cap is enforced by withdrawing the control, so an agent never reaches
+    // the API's refusal (NFR-4, ADR 0007).
+    await expect(
+      panel.getByRole('button', { name: 'Add another photo of this label' }),
+    ).toHaveCount(0)
+
+    // Removing a slot has to leave focus somewhere usable, which is what a
+    // keyboard user loses if the removed button simply disappears.
+    await panel.getByRole('button', { name: 'Remove photo 3' }).click()
+    await expect(
+      panel.getByRole('button', { name: 'Add another photo of this label' }),
+    ).toBeFocused()
+  })
+
+  test('the axe scan covers a result built from two photos', async ({ page }) => {
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Label image').setInputFiles({
+      name: 'front.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([137, 80, 78, 71]),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+
+    await expect(page.getByRole('region', { name: 'Your 2 photos' })).toBeVisible()
+    await expect(page.getByText(/we turned it 90 degrees to read it/i)).toBeVisible()
+    await expect(page.getByText(/read from photo 2/i).first()).toBeVisible()
+  })
 })
 
 const WARNING_NOTE =
@@ -177,6 +230,7 @@ const RESULT = {
       score: 100,
       outcome: 'match',
       reason: 'Scored 100, at or above the match threshold of 95.',
+      source_photo: 1,
     },
     {
       name: 'class_type',
@@ -187,6 +241,7 @@ const RESULT = {
       score: 88,
       outcome: 'needs_review',
       reason: 'Scored 88, between the review threshold of 80 and the match threshold of 95.',
+      source_photo: 1,
     },
     {
       name: 'alcohol_content',
@@ -197,6 +252,7 @@ const RESULT = {
       score: null,
       outcome: 'mismatch',
       reason: 'The label states 45 percent and the application states 40 percent.',
+      source_photo: 2,
     },
     {
       name: 'net_contents',
@@ -207,6 +263,7 @@ const RESULT = {
       score: null,
       outcome: 'not_compared',
       reason: 'Net contents were not found on the label, so nothing was compared.',
+      source_photo: null,
     },
     {
       name: 'government_warning',
@@ -217,6 +274,7 @@ const RESULT = {
       score: null,
       outcome: 'mismatch',
       reason: `The prefix is not in capital letters. ${WARNING_NOTE}`,
+      source_photo: 2,
     },
   ],
   warning_detail: {
@@ -227,6 +285,32 @@ const RESULT = {
     bold_type_checked: false,
     bold_type_note: WARNING_NOTE,
   },
+  photos: [
+    {
+      index: 1,
+      orientation: {
+        exif_transposed: false,
+        rotation_degrees: 90,
+        method: 'osd',
+        confidence: 13.4,
+      },
+      ocr_confidence: 94.1,
+      text_found: true,
+      error: null,
+    },
+    {
+      index: 2,
+      orientation: {
+        exif_transposed: true,
+        rotation_degrees: 0,
+        method: 'osd',
+        confidence: 12.8,
+      },
+      ocr_confidence: 91.7,
+      text_found: true,
+      error: null,
+    },
+  ],
   ocr_confidence: 94.1,
   elapsed_ms: 540,
   ocr_ms: 530,

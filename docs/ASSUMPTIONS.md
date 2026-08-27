@@ -26,6 +26,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-13](#a-13) | Net contents compared only when units match; no conversion | FR-7 | Low |
 | [A-14](#a-14) | Batch application data arrives as one CSV keyed by image filename | FR-8, US-9 | Medium |
 | [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
+| [A-16](#a-16) | Three photographs of one label is enough, and no source states a number | FR-1, US-22 | Low |
 
 ---
 
@@ -411,3 +412,46 @@ FR-5. Tested by `backend/tests/test_ocr.py::TestExifOrientation`,
 `backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`,
 `backend/tests/test_verify_integration.py::TestASidewaysPhotograph`,
 `TestAHyphenatedWarningColumn`; UAT rows 23, 24, 25. Opens OQ-20.
+
+## A-16
+**Three photographs of one label is the cap, and every photograph in a
+submission is of the same label.**
+
+[ADR 0007](adr/0007-multi-photo-single-label.md) accepts up to three
+photographs of one label because a label wraps a round bottle and no single
+photograph shows all of it flat. Two things in that are assumed.
+
+**The number.** No source states how many photographs an agent would take, or
+whether they take more than one today. Sarah Chen describes an agent who "pulls
+up an application, looks at the label artwork", singular.
+[Source: Sarah Chen interview] Three is chosen because it is what the geometry
+asks for rather than what a stakeholder asked for: a front, a back, and the
+seam between them. It is `TTB_MAX_LABEL_PHOTOS`, so it changes without a code
+change, and a submission over it is refused with the limit named (NFR-7).
+
+**That the photographs are of the same label.** The API cannot tell. Nothing
+compares one photograph against another to confirm they show one bottle, and
+three photographs of three different labels would be merged into one result as
+readily as three of one. That is not a check the prototype can make honestly:
+it would mean deciding that two photographs are "the same label" from their
+text, which is precisely the judgement the tool defers to an agent everywhere
+else (FR-3, Dave Morrison's "you need judgment"). What is done instead is
+disclosure: the response says which photograph each field was read from, so a
+submission that mixed two labels produces a result whose provenance is visible
+rather than one that silently looks coherent.
+
+**Confirmed or falsified by:** asking Sarah Chen or a compliance agent how they
+photograph a bottle today, and whether an application already arrives with
+several images. If applications carry a fixed number of views, that number wins
+and this assumption is discarded.
+**Risk if wrong:** low. A cap that is too low is one environment variable. A cap
+that is too high costs latency on a path already measured against NFR-1. The
+same-label assumption's failure mode is an agent's own mistake, made visible by
+the per-field attribution rather than hidden by it.
+
+**Traceability:** Source: the author's first real-artwork test against the
+deployed URL, 2026-08-26; 27 CFR 16.21 (the warning may be on a back or side
+label); Jenny Park interview (SG-1). Recorded in
+[ADR 0007](adr/0007-multi-photo-single-label.md) and in the FR-1 acceptance
+criteria. Tested by `backend/tests/test_multi_photo.py::TestThePhotographCap`
+and `frontend/src/__tests__/multiPhoto.test.tsx`; UAT rows 26, 27, 28.

@@ -41,6 +41,8 @@ implements it is named alongside.
 | EXIF orientation and cardinal turns, `test_ocr.py` | A file storing its pixels sideways with an orientation tag decodes upright, including the mirrored orientations that leave the size unchanged; an untagged file reports that nothing was applied; bytes Pillow cannot open still decode through OpenCV; a quarter-turn is undone by its complement (A-15). |
 | Warning hyphenation, `test_warning.py` | A narrow column with printer's hyphens across line breaks matches the regulation; a dash used as punctuation is left alone; an altered word in the same column still fails; the capitalization check is unchanged (A-15, FR-5, FR-6). |
 | Sample set integrity, `test_samples.py` | The sample warning text is the regulation's; each labelled defect is actually defective. |
+| Photo list controls, `frontend/src/__tests__/multiPhoto.test.tsx` | Slots are added up to the cap and no further; the control is withdrawn rather than left to fail; each change is announced; removing a slot returns focus somewhere usable; one image part is sent per attached photograph and an empty slot is skipped (ADR 0007). |
+| Photo notes, `frontend/src/__tests__/multiPhoto.test.tsx` | An untouched photograph produces no note; a turned one says how far it was turned; an EXIF-tagged one says the camera saved it sideways; an unreadable one says so in plain language (A-15, FR-9). |
 
 **Deliberately not covered by this tier:** anything involving Tesseract, which
 is slow and environment dependent, and therefore belongs in the integration and
@@ -121,6 +123,22 @@ for 513 ms and 222 ms respectively.
   reports a match, and the same column with one word altered still reports a
   mismatch (A-15, FR-5). **Implemented**, as UAT row 25, in
   `test_verify_integration.py::TestAHyphenatedWarningColumn`.
+- Two photographs of one label whose fields are split between them return a
+  complete result, and each field names the photograph it came from (ADR 0007).
+  **Implemented**, as UAT row 26, in
+  `test_multi_photo.py::TestFieldsSplitAcrossTwoPhotographs`.
+- One unreadable photograph among good ones does not fail the submission, and is
+  reported rather than hidden (ADR 0007, FR-9). **Implemented**, as UAT row 27,
+  in `test_multi_photo.py::TestOneUnreadablePhotographAmongGood`.
+- A submission where no photograph could be read returns its own error code and
+  no field outcomes (FR-9). **Implemented**, in
+  `test_multi_photo.py::TestAllPhotographsUnreadable`.
+- More photographs than the cap are refused before any is processed, with the
+  limit named (NFR-7). **Implemented**, in
+  `test_multi_photo.py::TestThePhotographCap`.
+- A single photograph behaves exactly as it did before ADR 0007. **Implemented**,
+  in `test_multi_photo.py::TestOnePhotographIsUnchanged`, which is the test that
+  makes the rest of this section safe to add.
 - No image content and no extracted or application value reaches the logs
   (NFR-6). **Implemented**, as UAT row 17: distinctive values are searched for
   across every captured record, and the one record the verification path writes
@@ -212,6 +230,32 @@ target and the turned case is asserted against that target in
 paid once per row, and `TTB_CORRECT_ORIENTATION=false` turns it off for a
 submission known to be upright. No batch latency target exists (OQ-6).
 
+**More than one photograph multiplies that figure**, and it was measured rather
+than extrapolated. ADR 0007 accepts up to three photographs of one label, read
+one after another. Median of three runs each, same session runner, same sample
+label, through `POST /api/verify`:
+
+| Photographs | End to end | NFR-1 target |
+| --- | --- | --- |
+| 1 | 1.24 s | about 5 s |
+| 2 | 2.49 s | about 5 s |
+| 3 | 3.83 s | about 5 s |
+
+Three photographs is inside the target with about a second to spare on this
+hardware, and on slower hardware it may not be. That margin is the reason the
+three-photograph case is **measured and printed rather than asserted**:
+`test_multi_photo.py` prints the figure so a reviewer sees it, and does not gate
+on it, for the reason section 7 gives for the whole performance tier. A runner's
+timings vary enough that gating this close to the line would produce failures
+that say nothing about the change. The single-photograph assertion still gates,
+because it has four seconds of headroom.
+
+Two things bound the cost rather than one: `TTB_MAX_LABEL_PHOTOS`, and the fact
+that the ordinary case is one photograph, which is what the interface starts
+with. Measuring a three-photograph submission on the deployed target is on the
+section 9 checklist in [09_DEPLOYMENT.md](09_DEPLOYMENT.md); no figure from that
+hardware exists yet.
+
 **Batch performance** is measured separately: total wall clock for 300 labels,
 and per-label throughput. The assignment states no batch latency target; see
 OQ-6.
@@ -278,6 +322,10 @@ reads records the application emitted rather than what CloudWatch received.
 | 23 | A photograph of a label taken sideways, submitted through the interface | Every field that a clean upright photograph finds is still found; the result states that the photograph was turned and by how much | First real-artwork test, 2026-08-26; A-15 |
 | 24 | A phone photograph whose only turn is in its EXIF orientation tag, with the pixels stored sideways | Read the same as an upright photograph; the result states that the EXIF orientation was applied | First real-artwork test, 2026-08-26; A-15 |
 | 25 | A label whose warning is set in a narrow column with printer's hyphens across line breaks | The warning reports match. **A mismatch is a failure of this test.** An altered word in the same column still reports mismatch | First real-artwork test, 2026-08-26; A-15; FR-5 |
+| 26 | A round bottle photographed twice, front and back, with the fields split between them | Every field found on either photograph is reported as found, and each result names the photograph it was read from | ADR 0007; A-16 |
+| 27 | One unreadable photograph attached alongside a good one | The good photograph still produces a result, and the unreadable one is listed as unreadable rather than omitted | ADR 0007; FR-9 |
+| 28 | Attach photographs up to the limit, then look for the control that adds another | The control is no longer offered and the interface says why. **Reaching the API's refusal is a failure of this test.** | ADR 0007; NFR-4 |
+| 29 | Attach two photographs and check a label using only the keyboard | Every add and remove control is reachable, focus stays visible, and each change to the photo list is announced | ADR 0007; NFR-5 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.

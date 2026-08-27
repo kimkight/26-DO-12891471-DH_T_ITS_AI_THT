@@ -29,7 +29,8 @@ function toUiError(body: unknown): UiError {
 }
 
 /**
- * Verify one label (FR-1 through FR-7).
+ * Verify one label, from one to three photographs of it (FR-1 through FR-7,
+ * ADR 0007).
  *
  * The elapsed time reported to the agent is measured here, around the whole
  * request, not taken from the response. NFR-1 is about what an agent waits
@@ -37,11 +38,14 @@ function toUiError(body: unknown): UiError {
  * The server figure is still shown, as the detail underneath.
  */
 export async function verifyLabel(
-  image: File,
+  images: File[],
   application: ApplicationData,
 ): Promise<SingleOutcome> {
   const body = new FormData()
-  body.append('image', image)
+  // One `image` part per photograph of the same label (ADR 0007). One part is
+  // exactly the request this function always sent, so a single-photograph
+  // submission is unchanged on the wire.
+  for (const image of images) body.append('image', image)
   for (const [key, value] of Object.entries(application)) {
     body.append(key, value)
   }

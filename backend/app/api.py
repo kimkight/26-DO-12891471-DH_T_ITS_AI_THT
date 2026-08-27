@@ -32,7 +32,13 @@ from starlette.responses import Response
 from app import batch
 from app.config import settings
 from app.schemas import ErrorDetail, ErrorResponse, VerificationResult
-from app.verify import VerificationError, build_result, check_media_type, check_size, verify_image
+from app.verify import (
+    VerificationError,
+    build_result,
+    check_media_type,
+    check_size,
+    verify_photos,
+)
 
 __all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
 
@@ -72,7 +78,7 @@ def _envelope_limit(path: str) -> int | None:
     the check and the message that names it (NFR-7, NFR-11).
     """
     if path == "/api/verify":
-        return settings.max_upload_bytes
+        return settings.effective_max_verify_bytes
     if path == "/api/verify-batch":
         return settings.effective_max_batch_bytes
     return None
@@ -101,11 +107,23 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     returning here without calling ``call_next`` means the body is never
     consumed at all.
 
-    Content-Length covers the whole multipart envelope, so on the single-label
-    route the effective limit on the image itself is marginally below
-    TTB_MAX_UPLOAD_BYTES. Erring strict is the right direction for a guard whose
-    job is to stop a large body from being read, and the file's own size is
-    checked exactly, after parsing, by verify.check_size.
+    Content-Length covers the whole multipart envelope, and the single-label
+    route now accepts up to TTB_MAX_LABEL_PHOTOS photographs of one label
+    (ADR 0007), so its envelope limit is that many times TTB_MAX_UPLOAD_BYTES.
+
+    **That loosens this guard, and the loosening is deliberate and bounded.**
+    Before ADR 0007 a single-label body over TTB_MAX_UPLOAD_BYTES was refused
+    here, without being read. It now takes a body up to three times that before
+    this guard fires, and a 25 MB single-photograph submission is read into
+    memory and then refused exactly by verify.check_size after parsing. The
+    alternative was to bound the envelope at one photograph, which would reject
+    every two-photograph submission, so there is no version of this that both
+    accepts three photographs and refuses 25 MB from the header: the middleware
+    cannot count the parts without reading the body it is trying not to read.
+    What is kept is that the body is still bounded before it is read, at 30 MB
+    on the defaults rather than 10 MB, and that every individual photograph is
+    still checked exactly against TTB_MAX_UPLOAD_BYTES. Lower
+    TTB_MAX_LABEL_PHOTOS or TTB_MAX_UPLOAD_BYTES to tighten it.
 
     The batch route is measured against its own envelope limit, which is
     TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default. That bounds the
@@ -139,21 +157,55 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     summary="Verify one label against its application data",
 )
 async def verify(
-    image: Annotated[UploadFile, File(description="Label artwork, one image.")],
+    image: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "Label artwork. One part, or the same part repeated for up to "
+                "TTB_MAX_LABEL_PHOTOS photographs of the same label (ADR 0007)."
+            )
+        ),
+    ],
     brand_name: Annotated[str, Form()] = "",
     class_type: Annotated[str, Form()] = "",
     alcohol_content: Annotated[str, Form()] = "",
     net_contents: Annotated[str, Form()] = "",
     beverage_type: Annotated[str, Form()] = "",
 ) -> JSONResponse:
-    """Verify one label. Nothing is persisted and nothing is logged about it."""
+    """Verify one label from one to three photographs of it.
+
+    One `image` part behaves exactly as it always did. More than one is ADR
+    0007: a label wraps a round bottle, so no single photograph shows all of it
+    flat, and the photographs are read independently and their fields merged.
+
+    Nothing is persisted and nothing is logged about it.
+    """
+    # Counted before anything is read, decoded or compared, and named in the
+    # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
+    # parses the multipart form while resolving these parameters; the guarantee
+    # kept here is that no photograph is processed.
+    if len(image) > settings.max_label_photos:
+        return _error(
+            413,
+            "too_many_photos",
+            (
+                f"{len(image)} photographs were submitted for one label. Send at "
+                f"most {settings.max_label_photos} photographs of the same label, "
+                "or use the batch tab for many different labels."
+            ),
+            limit=f"maximum photographs of one label: {settings.max_label_photos}",
+        )
+
+    contents: list[bytes] = []
     try:
-        # Checked before any byte is decoded (NFR-7, second criterion).
-        check_media_type(image.content_type)
-        content = await image.read()
-        check_size(content)
-        result = verify_image(
-            content,
+        for part in image:
+            # Checked before any byte is decoded (NFR-7, second criterion).
+            check_media_type(part.content_type)
+            content = await part.read()
+            check_size(content)
+            contents.append(content)
+        result = verify_photos(
+            contents,
             {
                 "brand_name": brand_name,
                 "class_type": class_type,
@@ -169,7 +221,8 @@ async def verify(
     logger.info(
         "verification completed",
         extra={
-            "bytes_received": len(content),
+            "bytes_received": sum(len(content) for content in contents),
+            "photos_received": len(contents),
             "ocr_ms": result.ocr_ms,
             "beverage_type_supplied": bool(beverage_type.strip()),
         },
@@ -182,6 +235,11 @@ def _oversize_response(limit: int | None = None) -> JSONResponse:
     enforced = settings.max_upload_bytes if limit is None else limit
     if enforced == settings.max_upload_bytes:
         message = "The uploaded file is larger than this service accepts. Send a smaller image."
+    elif enforced == settings.effective_max_verify_bytes:
+        message = (
+            "This submission is larger than this service accepts in one request. "
+            "Send fewer photographs of the label, or smaller ones."
+        )
     else:
         message = (
             "This submission is larger than this service accepts in one request. "

@@ -30,8 +30,10 @@ from app.ocr import Orientation, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
 from app.schemas import (
     FIELD_LABELS,
+    ErrorDetail,
     FieldResult,
     OrientationDetail,
+    PhotoResult,
     VerificationResult,
     WarningResult,
 )
@@ -108,42 +110,256 @@ def check_size(content: bytes) -> None:
         )
 
 
-def verify_image(content: bytes, application: dict[str, str]) -> VerificationResult:
-    """Decode, read, parse and compare one image. Nothing is persisted (NFR-6).
+NO_TEXT_MESSAGE = (
+    "The image was read but no text could be extracted from it. This is not the "
+    "same as the fields failing to match: nothing was compared."
+)
 
-    Raises ``VerificationError`` for every FR-9 failure. The media type and size
-    checks are deliberately not called here: both have to happen before the
-    bytes are in hand on the single-label path, so the caller runs them.
+
+def verify_image(content: bytes, application: dict[str, str]) -> VerificationResult:
+    """Verify one label from one photograph.
+
+    Kept as its own entry point because that is what the batch path submits: one
+    image per CSV row (FR-8, ADR 0006, ADR 0007). It is a call to
+    ``verify_photos`` with a list of one, so a batch row runs exactly the code a
+    single-photograph submission runs.
+    """
+    return verify_photos([content], application)
+
+
+@dataclass(frozen=True)
+class _Read:
+    """One photograph, read or failed. Internal to the merge below."""
+
+    index: int
+    parsed: ParsedFields | None
+    orientation: Orientation
+    confidence: float
+    ocr_ms: float
+    error: VerificationError | None = None
+
+
+def verify_photos(contents: list[bytes], application: dict[str, str]) -> VerificationResult:
+    """Read every photograph of one label and compare the union (ADR 0007).
+
+    Each photograph is decoded, turned upright and read on its own, and the
+    fields found across all of them are merged: a field counts as found if any
+    photograph shows it, and where two photographs both show it the reading with
+    the higher per-field OCR confidence wins, ties going to the earlier
+    photograph. The response says which photograph each value came from.
+
+    A photograph that cannot be read does not fail the submission while another
+    one did read. That is the FR-8 rule for a batch, applied inside one label,
+    and for the same reason: an agent who took three photographs should not lose
+    the two good ones to the one that was out of focus. Every photograph is
+    still reported, so the result never looks like it used more evidence than it
+    had.
+
+    Raises ``VerificationError`` only when no photograph could be read at all
+    (FR-9). Nothing is persisted (NFR-6). The media type and size checks are
+    deliberately not called here: both have to happen before the bytes are in
+    hand on the single-label path, so the caller runs them.
     """
     started = time.perf_counter()
+    reads = [_read_one(index, content) for index, content in enumerate(contents, start=1)]
+    usable = [read for read in reads if read.parsed is not None]
 
+    if not usable:
+        raise _combined_failure(reads)
+
+    merged, sources = _merge(usable)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    return build_result(
+        merged,
+        application,
+        round(sum(read.confidence for read in usable) / len(usable), 1),
+        ocr_ms=round(sum(read.ocr_ms for read in reads), 1),
+        elapsed_ms=elapsed_ms,
+        photos=[_photo_result(read) for read in reads],
+        sources=sources,
+    )
+
+
+def _read_one(index: int, content: bytes) -> _Read:
+    """Decode, turn upright, read and parse one photograph. Never raises."""
     try:
         ocr = extract_text(content)
     except UndecodableImageError as exc:
         # Distinct from "no text found" below, because the agent's next action
         # differs: a corrupt file needs resending, a blank one needs a better
         # photograph (FR-9, Jenny Park interview).
-        raise VerificationError(code="unreadable_image", message=str(exc)) from exc
-
-    if not ocr.has_text:
-        raise VerificationError(
-            code="no_text_found",
-            message=(
-                "The image was read but no text could be extracted from it. This "
-                "is not the same as the fields failing to match: nothing was "
-                "compared."
-            ),
+        return _Read(
+            index=index,
+            parsed=None,
+            orientation=Orientation(),
+            confidence=0.0,
+            ocr_ms=0.0,
+            error=VerificationError(code="unreadable_image", message=str(exc)),
         )
 
-    parsed = parse_fields(ocr.lines)
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    return build_result(
-        parsed,
-        application,
-        ocr.mean_confidence,
-        ocr_ms=ocr.elapsed_ms,
-        elapsed_ms=elapsed_ms,
+    if not ocr.has_text:
+        return _Read(
+            index=index,
+            parsed=None,
+            orientation=ocr.orientation,
+            confidence=ocr.mean_confidence,
+            ocr_ms=ocr.elapsed_ms,
+            error=VerificationError(code="no_text_found", message=NO_TEXT_MESSAGE),
+        )
+
+    return _Read(
+        index=index,
+        parsed=parse_fields(ocr.lines),
         orientation=ocr.orientation,
+        confidence=ocr.mean_confidence,
+        ocr_ms=ocr.elapsed_ms,
+    )
+
+
+def _combined_failure(reads: list[_Read]) -> VerificationError:
+    """What to raise when not one photograph could be read (FR-9).
+
+    A single photograph keeps exactly the error it always returned, so nothing
+    about the one-photograph contract changes. Several photographs get their own
+    code, because "all three of your photographs were unreadable" is a different
+    thing for an agent to act on than "your photograph was unreadable", and
+    FR-9 requires the message to name the problem rather than approximate it.
+    """
+    if len(reads) == 1:
+        return reads[0].error or VerificationError(code="no_text_found", message=NO_TEXT_MESSAGE)
+
+    codes = {read.error.code for read in reads if read.error}
+    detail = (
+        "None of them could be decoded as an image."
+        if codes == {"unreadable_image"}
+        else "No text could be read from any of them."
+        if codes == {"no_text_found"}
+        else "Some could not be decoded and no text could be read from the rest."
+    )
+    return VerificationError(
+        code="all_photos_unreadable",
+        message=(
+            f"All {len(reads)} photographs of this label were unreadable. {detail} "
+            "Nothing was compared."
+        ),
+    )
+
+
+# Located by pattern, so confidence is the only evidence there is about which
+# of two readings is better.
+_PATTERN_FIELDS = ("alcohol_content", "net_contents")
+# Located by type size, so type size is what decides between two readings too.
+_TYPE_SIZE_FIELDS = ("brand_name", "class_type")
+_MERGED_FIELDS = (*_TYPE_SIZE_FIELDS, *_PATTERN_FIELDS)
+
+
+def _merge(reads: list[_Read]) -> tuple[ParsedFields, dict[str, int]]:
+    """Take each field from the photograph that read it best (ADR 0007).
+
+    **Each field is merged by the signal that located it**, which is the whole
+    of the rule and the reason it is not one line.
+
+    Alcohol content and net contents are found by pattern, so the only thing
+    that separates two readings of them is how confidently each was read.
+
+    The brand name and the class or type designation are found by type size:
+    on a label the brand name is the largest text (see app.parse). Merging
+    those two by confidence would let the small print on a photograph of the
+    back of the bottle, read perfectly, outscore the brand name on a photograph
+    of the front. So they are merged by type size as well, which is comparable
+    between photographs because every image is scaled to the same long edge
+    before it is read.
+
+    The warning is chosen differently again, and deliberately: see
+    ``_pick_warning``.
+
+    In every case an exact tie goes to the earlier photograph, so the result
+    does not depend on which of two equal readings the iterator reached first.
+    """
+    values: dict[str, str | None] = {}
+    sources: dict[str, int] = {}
+
+    for name in _MERGED_FIELDS:
+        candidates = [read for read in reads if getattr(read.parsed, name) is not None]
+        if not candidates:
+            values[name] = None
+            continue
+        best = max(candidates, key=_ranker(name))
+        values[name] = getattr(best.parsed, name)
+        sources[name] = best.index
+
+    warning_read = _pick_warning(reads)
+    if warning_read is not None:
+        sources["government_warning"] = warning_read.index
+
+    return (
+        ParsedFields(
+            brand_name=values["brand_name"],
+            class_type=values["class_type"],
+            alcohol_content=values["alcohol_content"],
+            net_contents=values["net_contents"],
+            warning=warning_read.parsed.warning if warning_read else reads[0].parsed.warning,
+            warning_text=warning_read.parsed.warning_text if warning_read else None,
+        ),
+        sources,
+    )
+
+
+def _ranker(name: str):
+    """The sort key that picks between two readings of one field."""
+    if name in _TYPE_SIZE_FIELDS:
+        return lambda read: (
+            read.parsed.prominence.get(name, 0.0),
+            read.parsed.confidence.get(name, 0.0),
+            -read.index,
+        )
+    return lambda read: (read.parsed.confidence.get(name, 0.0), -read.index)
+
+
+def _pick_warning(reads: list[_Read]) -> _Read | None:
+    """Choose the photograph the warning is reported from.
+
+    The longest located statement wins, ties going to the higher confidence and
+    then to the earlier photograph. Confidence alone is the wrong rule here: a
+    statement running off the edge of the frame is read with perfect confidence
+    and is simply incomplete, and it would beat the photograph that captured the
+    whole thing.
+
+    **This does not soften FR-5.** Length separates a photograph that saw more
+    of the statement from one that saw less; it does not separate a compliant
+    statement from a defective one. An altered or added word does not shorten
+    the text, and an omitted word can only be reported at all from a photograph
+    that shows the whole statement. The residual risk, that two photographs both
+    show the whole warning and one is misread longer than the other, is recorded
+    in ADR 0007 rather than dismissed.
+    """
+    found = [read for read in reads if read.parsed.warning.found]
+    if not found:
+        return None
+    return max(
+        found,
+        key=lambda read: (
+            len(read.parsed.warning_text or ""),
+            read.parsed.confidence.get("government_warning", 0.0),
+            -read.index,
+        ),
+    )
+
+
+def _photo_result(read: _Read) -> PhotoResult:
+    return PhotoResult(
+        index=read.index,
+        orientation=OrientationDetail(
+            exif_transposed=read.orientation.exif_transposed,
+            rotation_degrees=read.orientation.rotation_degrees,
+            method=read.orientation.method,
+            confidence=read.orientation.confidence,
+        ),
+        ocr_confidence=read.confidence,
+        text_found=read.parsed is not None,
+        error=None
+        if read.error is None
+        else ErrorDetail(code=read.error.code, message=read.error.message, limit=read.error.limit),
     )
 
 
@@ -154,13 +370,20 @@ def build_result(
     *,
     ocr_ms: float,
     elapsed_ms: float | None = None,
-    orientation: Orientation | None = None,
+    photos: list[PhotoResult] | None = None,
+    sources: dict[str, int] | None = None,
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
     Split out from the route so the comparison layer can be exercised without an
     HTTP client, and so scripts/measure.py runs exactly the code the API runs.
+
+    ``photos`` and ``sources`` carry ADR 0007's per-photograph reporting. Both
+    are optional so that a caller holding parsed fields and no images, which is
+    what the comparison tests and scripts/measure.py are, still gets a valid
+    response: one photograph is then assumed and no field is attributed.
     """
+    attribution = sources or {}
     comparisons = {
         "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
         "class_type": compare_text(parsed.class_type, application.get("class_type")),
@@ -184,20 +407,27 @@ def build_result(
             score=comparison.score,
             outcome=comparison.outcome,
             reason=comparison.reason,
+            source_photo=attribution.get(name),
         )
         for name, comparison in comparisons.items()
     ]
-    fields.append(_warning_field(parsed.warning, parsed.warning_text))
+    fields.append(
+        _warning_field(parsed.warning, parsed.warning_text, attribution.get("government_warning"))
+    )
 
-    turned = orientation or Orientation()
     return VerificationResult(
         fields=fields,
-        orientation=OrientationDetail(
-            exif_transposed=turned.exif_transposed,
-            rotation_degrees=turned.rotation_degrees,
-            method=turned.method,
-            confidence=turned.confidence,
-        ),
+        photos=photos
+        or [
+            PhotoResult(
+                index=1,
+                orientation=OrientationDetail(
+                    exif_transposed=False, rotation_degrees=0, method="disabled", confidence=None
+                ),
+                ocr_confidence=ocr_confidence,
+                text_found=True,
+            )
+        ],
         warning_detail=WarningResult(
             statement_found=parsed.warning.found,
             prefix_as_printed=parsed.warning.prefix_found,
@@ -211,7 +441,9 @@ def build_result(
     )
 
 
-def _warning_field(warning: WarningCheck, warning_text: str | None) -> FieldResult:
+def _warning_field(
+    warning: WarningCheck, warning_text: str | None, source_photo: int | None = None
+) -> FieldResult:
     """The warning as one field row, with no review band (FR-5).
 
     The comparison side is the regulation rather than the application form: the
@@ -228,4 +460,5 @@ def _warning_field(warning: WarningCheck, warning_text: str | None) -> FieldResu
         score=None,
         outcome=outcome,
         reason=f"{warning.reason} {warning.bold_type_note}",
+        source_photo=source_photo,
     )

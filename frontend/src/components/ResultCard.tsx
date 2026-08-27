@@ -15,6 +15,7 @@
  */
 import { OutcomeBadge } from './OutcomeBadge'
 import { presentation } from '../lib/outcomes'
+import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
 
 /**
@@ -52,9 +53,21 @@ function Value({
   )
 }
 
-export function ResultCard({ field, warning }: { field: FieldResult; warning?: WarningResult }) {
+export function ResultCard({
+  field,
+  warning,
+  photoCount = 1,
+}: {
+  field: FieldResult
+  warning?: WarningResult
+  /** How many photographs of the label were submitted (ADR 0007). */
+  photoCount?: number
+}) {
   const { tone } = presentation(field.outcome)
   const isWarning = field.name === 'government_warning'
+  // Which photograph this value came from. Shown only when there was a choice
+  // to make; on a one-photograph submission it says nothing new.
+  const source = sourceLabel(field.source_photo, photoCount)
 
   return (
     <article className={`card card--${tone}`} aria-labelledby={`card-${field.name}`}>
@@ -67,9 +80,15 @@ export function ResultCard({ field, warning }: { field: FieldResult; warning?: W
 
       <dl className="card__values">
         <Value
-          label="On the label"
+          label={source ? `On the label (${source.toLowerCase()})` : 'On the label'}
           value={field.label_value}
-          missing={field.found_on_label ? 'Blank' : 'Not found on the label'}
+          missing={
+            field.found_on_label
+              ? 'Blank'
+              : photoCount > 1
+                ? 'Not found on any of your photos'
+                : 'Not found on the label'
+          }
         />
         <Value
           label={isWarning ? 'Required by 27 CFR 16.21' : 'On the application'}

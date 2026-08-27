@@ -280,6 +280,80 @@ main {
   opacity: 0.55;
 }
 
+/* -------------------------------------------------------- photos fieldset */
+
+/*
+ * The photo slots (ADR 0007). A fieldset because the slots are one group with
+ * one question behind them, "which photos of this label", and a legend is how
+ * that question is announced once rather than repeated into every slot's label.
+ * The default fieldset border and padding are removed: the group is already
+ * legible from the legend and the slots, and a box around it would suggest a
+ * second panel inside the panel.
+ */
+.photos {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1rem;
+  min-width: 0;
+}
+
+.photos__legend {
+  padding: 0;
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.photos__count {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.photos__slot {
+  margin-bottom: 0.5rem;
+}
+
+/*
+ * A secondary button. Lower weight than the primary action so that "Check this
+ * label" stays the obvious thing to press (NFR-4), and still a real button with
+ * a real border, because a control that looks like text is a control an agent
+ * has to hunt for.
+ */
+.button--quiet {
+  font-size: 0.9375rem;
+  padding: 0.4375rem 0.875rem;
+  background: var(--surface);
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+/* --------------------------------------------------------------- photo notes */
+
+.photo-notes {
+  margin-bottom: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+
+.photo-notes__list {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.9375rem;
+}
+
+.photo-notes__list li + li {
+  margin-top: 0.25rem;
+}
+
+/*
+ * A photograph that could not be read. Colour is not carrying this on its own:
+ * the sentence next to it says the photo could not be read, which is the text
+ * half NFR-5 requires.
+ */
+.photo-notes__item--failed {
+  color: var(--mismatch);
+}
+
 /* --------------------------------------------------------------- drop zone */
 
 .dropzone {

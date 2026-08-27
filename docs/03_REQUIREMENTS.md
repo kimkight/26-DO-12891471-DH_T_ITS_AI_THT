@@ -68,7 +68,10 @@ supplies none and inventing them is prohibited by the ground rules. See OOS-7.
 **Source:** Technical Requirements, Sample Label section
 
 Extract brand name, class/type designation, alcohol content, net contents, and
-the government warning statement from an uploaded label image.
+the government warning statement from uploaded label artwork. One label may be
+submitted as more than one photograph of itself, because a label wraps a round
+bottle and no single photograph shows all of it flat. See
+[ADR 0007](adr/0007-multi-photo-single-label.md).
 
 **Acceptance criteria**
 - Given the sample distilled spirits label, when it is submitted, then the
@@ -82,6 +85,19 @@ the government warning statement from an uploaded label image.
 - Given a warning set in a narrow column with printer's hyphens across line
   breaks, then the split words are rejoined before the body is compared, so the
   line breaking does not read as altered wording. `(Assumption)` A-15.
+- Given between one and `TTB_MAX_LABEL_PHOTOS` photographs of one label, then
+  each is read independently and a field is reported as found if any of them
+  shows it, and the result names which photograph each value was read from.
+  `(Assumption)` A-16.
+- Given two photographs that both show one field, then the reading from the
+  photograph that read it best is reported, judged by the same signal the field
+  was located by. See [ADR 0007](adr/0007-multi-photo-single-label.md).
+- Given one unreadable photograph among readable ones, then the readable ones
+  still produce a result and the unreadable one is reported rather than hidden.
+- Given more photographs than the configured limit, then the request is rejected
+  with a message naming the limit, before any photograph is processed.
+- Given a submission in which no photograph could be read, then no field reports
+  a match and the message says that none of them could be read (see FR-9).
 
 ### FR-2 Comparison against application data
 
@@ -287,6 +303,20 @@ on us at once. Right now we literally have to process them one at a time."
 [Source: Sarah Chen interview] The default configured batch limit is 300 files,
 which is the top of the range she names. `(Assumption)`
 
+**One photograph per row, and that is a stated limit rather than an oversight.**
+FR-1 accepts up to `TTB_MAX_LABEL_PHOTOS` photographs of one label on the
+single-label path ([ADR 0007](adr/0007-multi-photo-single-label.md)). The batch
+path does not: the A-14 CSV keys application data on one image filename, so a
+row covering several photographs would need a different column shape, a
+reconciliation rule for a group only partly matched, and an answer for what a
+per-row error means when one photograph of three failed. None of that is
+difficult and none of it is asked for by any source, so it is not invented here.
+An agent with a bulk submission of round bottles has to check those labels one
+at a time on the single-label tab. The limitation is asserted in
+`backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
+change without being noticed, and it is recorded in ADR 0007 under
+"Deliberately out of scope this session".
+
 ### FR-9 Error handling for unreadable images
 
 **Priority:** Must
@@ -303,6 +333,10 @@ An image that cannot be processed returns a clear message naming the problem.
   before decoding, with a message naming the accepted types.
 - Given a file larger than the configured size limit, then it is rejected before
   reading, with a message naming the limit.
+- Given a single-label submission in which no photograph could be read, then the
+  message says that none of them could be read, which is distinct from one
+  photograph being unreadable, and no field reports a match
+  ([ADR 0007](adr/0007-multi-photo-single-label.md)).
 - No error path returns a match outcome for any field.
 
 Today's fallback behaviour sets the bar: "Right now if an agent can't read the
