@@ -76,6 +76,12 @@ the government warning statement from an uploaded label image.
 - Given a field that cannot be located, then the field is reported as not found
   rather than reported as empty or silently omitted.
 - Extraction adds no outbound network call on the default path (see NFR-6).
+- Given a photograph taken sideways, or one whose orientation is recorded only
+  in its EXIF tag, then it is turned upright before it is read, and the result
+  states what was turned and on what confidence. `(Assumption)` A-15.
+- Given a warning set in a narrow column with printer's hyphens across line
+  breaks, then the split words are rejoined before the body is compared, so the
+  line breaking does not read as altered wording. `(Assumption)` A-15.
 
 ### FR-2 Comparison against application data
 

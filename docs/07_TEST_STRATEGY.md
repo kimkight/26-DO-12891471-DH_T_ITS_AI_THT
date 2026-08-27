@@ -3,19 +3,17 @@
 Testing is organized in five tiers. Each tier states what it covers, what it
 deliberately does not, and how it is run.
 
-**Current state:** the unit, integration, accuracy and performance tiers exist
-for the single-label path. Accessibility has nothing to test yet, because there
-is no user interface. Nothing below is described as passing unless it has
-actually been run.
+**Current state:** every tier exists. Nothing below is described as passing
+unless it has actually been run.
 
 | Tier | Exists today | Blocked on |
 | --- | --- | --- |
-| Unit | Yes: `test_compare.py`, `test_warning.py`, `test_parse.py`, `test_ocr.py`, `test_samples.py`, `test_health.py` | Nothing for the single-label path |
-| Integration | Yes: `test_api_validation.py`, `test_verify_integration.py` | Batch, which needs FR-8 |
+| Unit | Yes: `test_compare.py`, `test_warning.py`, `test_parse.py`, `test_ocr.py`, `test_samples.py`, `test_health.py` | Nothing |
+| Integration | Yes: `test_api_validation.py`, `test_verify_integration.py`, `test_batch.py` | Nothing |
 | Accuracy | Yes: `scripts/measure.py` over `samples/` | Real label artwork; the set is synthetic |
-| Performance | Yes: single-label latency, measured by the same script | Batch throughput, which needs FR-8 |
-| Accessibility | No | The verification UI |
-| Manual UAT | Checklist written, section 6 | A user interface for rows 12, 13 and 14 |
+| Performance | Yes: single-label latency and a twelve-label batch, measured by the same script and by `test_batch.py` | A 300-label run, and any run on the deployed target |
+| Accessibility | Yes: `frontend/tests/a11y.spec.ts` (axe-core plus a keyboard walk) and `frontend/src/__tests__/contrast.test.ts` | Nothing automated; the screen reader and greyscale rows in section 6 are manual by nature |
+| Manual UAT | Checklist written, section 6 | Being run against the deployed URL |
 
 The integration tier needs Tesseract, which is a system package rather than a
 Python one. CI installs it; a checkout without it skips those tests rather than
@@ -38,8 +36,10 @@ implements it is named alongside.
 | Numeric parsing, `test_compare.py` | `45% Alc./Vol. (90 Proof)` yields 45; `750 mL` yields 750 with unit `mL`; `45` and `45.0` compare equal; an unparseable value falls back to text comparison (FR-7). |
 | Government warning body, `test_warning.py` | Exact text from 27 CFR 16.21 after whitespace normalization matches; a single changed, added, or removed word does not (FR-5). |
 | Warning capitalization, `test_warning.py` | `GOVERNMENT WARNING:` passes; `Government Warning:` fails; `government warning:` fails (FR-6). |
-| Validation, `test_api_validation.py` | Size and MIME type limits reject before any decoding happens (NFR-7). The batch count limit is unbuilt with FR-8. |
+| Validation, `test_api_validation.py` | Size and MIME type limits reject before any decoding happens (NFR-7). The batch file-count limit rejects before any file is processed (FR-8). |
 | Image preprocessing, `test_ocr.py` | The long edge lands on the configured size and the aspect ratio holds; a rotated image comes back closer to upright, and an upright one is left alone. |
+| EXIF orientation and cardinal turns, `test_ocr.py` | A file storing its pixels sideways with an orientation tag decodes upright, including the mirrored orientations that leave the size unchanged; an untagged file reports that nothing was applied; bytes Pillow cannot open still decode through OpenCV; a quarter-turn is undone by its complement (A-15). |
+| Warning hyphenation, `test_warning.py` | A narrow column with printer's hyphens across line breaks matches the regulation; a dash used as punctuation is left alone; an altered word in the same column still fails; the capitalization check is unchanged (A-15, FR-5, FR-6). |
 | Sample set integrity, `test_samples.py` | The sample warning text is the regulation's; each labelled defect is actually defective. |
 
 **Deliberately not covered by this tier:** anything involving Tesseract, which
@@ -56,6 +56,35 @@ fixture images.
 Label artwork is rendered by `samples/labelmaker.py` at test time rather than
 committed, so no binary fixture enters the repository.
 
+**The orientation strategy, and the measurement behind it.** Turning a sideways
+photograph upright is a decision with two candidate implementations, so it was
+measured rather than argued. Both were run over the twelve-label sample set at
+all four cardinal rotations, forty-eight cases, on 2026-08-26 on a four-core
+session runner with Tesseract 5.3.4:
+
+| Strategy | Correct | Cost per image |
+| --- | --- | --- |
+| Tesseract orientation and script detection (OSD) | 46 of 48 | about 760 ms |
+| Read at 0, 90, 180 and 270 and keep the highest mean word confidence | 7 of 48 | about 1,200 ms |
+
+The second is not a tuning problem. Tesseract's layout analysis already detects
+and corrects text turned a quarter-turn clockwise, so the upright image and the
+clockwise-turned image produce identical output: 62 words at a mean confidence
+of 95.4 either way on the sample label. A score equal on the two cases it has to
+separate cannot separate them. `test_ocr.py::TestWhyOrientationUsesOsd` asserts
+that equality, so a Tesseract release that changes the behaviour fails a test
+rather than leaving this paragraph stale.
+
+Both OSD misreads were on the sample with the least text on it, and both
+reported an orientation confidence below 1.0 where every correct answer was
+above 11. The figure is reported in the response rather than used to override
+the answer: there is nothing better to fall back to, and an agent who can see
+that the tool was unsure can retake the photograph.
+
+Downscaling the image before the OSD call was measured and rejected: at a
+900-pixel long edge accuracy fell to 38 of 48, and at 600 pixels to 22 of 48,
+for 513 ms and 222 ms respectively.
+
 **Cases:**
 
 - `POST /api/verify` with a clean label and matching application data returns
@@ -66,14 +95,14 @@ committed, so no binary fixture enters the repository.
 - A disallowed MIME type is rejected before decoding (NFR-7). **Implemented.**
 - An image with no text reads differently from fields that did not match (FR-9).
   **Implemented.**
-- `POST /api/verify/batch` returns one identified result set per label (FR-8).
-  **Not built.**
+- `POST /api/verify-batch` returns one identified result set per label (FR-8).
+  **Implemented**, in `test_batch.py`.
 - A batch containing one unreadable image returns results for every other label
   in the batch (US-10). This is the single most important integration case,
   because it is the property that makes batch handling worth having.
-  **Not built.**
+  **Implemented**, in `test_batch.py::TestOneBadImageDoesNotFailTheBatch`.
 - A batch exceeding the file-count limit is rejected before any file is
-  processed (FR-8). **Not built.**
+  processed (FR-8). **Implemented**, in `test_batch.py::TestOverCount`.
 - With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted
   (NFR-3). **Implemented**, as UAT row 16: the test replaces the socket
   constructor so that any attempt to open an IP socket raises, proves the guard
@@ -81,6 +110,17 @@ committed, so no binary fixture enters the repository.
   200 with `external_call_made` false. AF_UNIX is left alone, because asyncio
   builds its own self-pipe from a Unix socketpair and refusing that would break
   the event loop rather than test the application.
+- A photograph turned a quarter-turn, half-turn or three-quarter-turn returns
+  the same field outcomes as the upright one, and the response states the turn
+  that was applied (A-15). **Implemented**, as UAT row 23, in
+  `test_verify_integration.py::TestASidewaysPhotograph`.
+- A photograph whose turn is recorded only in its EXIF orientation tag, with the
+  pixels stored sideways, reads the same as an upright one (A-15).
+  **Implemented**, as UAT row 24.
+- A warning set in a narrow column with printer's hyphens across line breaks
+  reports a match, and the same column with one word altered still reports a
+  mismatch (A-15, FR-5). **Implemented**, as UAT row 25, in
+  `test_verify_integration.py::TestAHyphenatedWarningColumn`.
 - No image content and no extracted or application value reaches the logs
   (NFR-6). **Implemented**, as UAT row 17: distinctive values are searched for
   across every captured record, and the one record the verification path writes
@@ -159,9 +199,18 @@ be revised once real numbers exist. `(Assumption)`
 | --- | --- |
 | Request handling and validation | under 100 ms |
 | Image decode and preprocessing (OpenCV) | under 500 ms |
+| Orientation detection (Tesseract OSD) | under 1,000 ms |
 | OCR (Tesseract) | under 3,000 ms |
 | Matching and response assembly | under 200 ms |
 | Headroom | remainder of the 5,000 ms budget |
+
+Orientation detection is a second pass over the image and it roughly doubles the
+per-label cost: single-label verification measured 1.3 s end to end on a session
+runner with it on, against 0.5 s before it existed. Both are inside NFR-1's
+target and the turned case is asserted against that target in
+`test_verify_integration.py`. It is a real cost on the batch path, where it is
+paid once per row, and `TTB_CORRECT_ORIENTATION=false` turns it off for a
+submission known to be upright. No batch latency target exists (OQ-6).
 
 **Batch performance** is measured separately: total wall clock for 300 labels,
 and per-label throughput. The assignment states no batch latency target; see
@@ -226,6 +275,9 @@ reads records the application emitted rather than what CloudWatch received.
 | 20 | Label stating `45% Alc./Vol. (90 Proof)` against application `45` | Proof cross-check passes, because 90 equals 2 x 45; the alcohol content outcome is match | FR-7; A-12; 27 CFR 5.65 |
 | 21 | Label stating `45% Alc./Vol. (92 Proof)` against application `45` | Needs human review, with both numbers shown, because 92 does not equal 2 x 45 | FR-7; A-12; 27 CFR 5.65 |
 | 22 | Net contents `750 mL` against application `25.4 fl oz` | Needs human review. **No conversion is performed and no match is reported.** | FR-7; A-13 |
+| 23 | A photograph of a label taken sideways, submitted through the interface | Every field that a clean upright photograph finds is still found; the result states that the photograph was turned and by how much | First real-artwork test, 2026-08-26; A-15 |
+| 24 | A phone photograph whose only turn is in its EXIF orientation tag, with the pixels stored sideways | Read the same as an upright photograph; the result states that the EXIF orientation was applied | First real-artwork test, 2026-08-26; A-15 |
+| 25 | A label whose warning is set in a narrow column with printer's hyphens across line breaks | The warning reports match. **A mismatch is a failure of this test.** An altered word in the same column still reports mismatch | First real-artwork test, 2026-08-26; A-15; FR-5 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.
@@ -239,10 +291,12 @@ Defined in `.github/workflows/ci.yml`. All jobs gate the aggregate `ci` check.
 | Job | Contents |
 | --- | --- |
 | `backend` | Installs Tesseract and a TrueType font, then `ruff check`, `ruff format --check` over `backend/`, `samples/` and `scripts/`, and `pytest` with coverage |
-| `frontend` | `eslint`, `prettier --check`, `tsc -b`, `vite build` |
+| `frontend` | `eslint`, `prettier --check`, `tsc -b`, `vite build`, `vitest run`, then Chromium and `frontend/tests/a11y.spec.ts`: axe-core over the landing page, the batch tab and a rendered result set, plus a keyboard walk and a focus-visibility assertion. The report is uploaded on failure |
+| `infra` | `terraform fmt -check -recursive` and `terraform validate` over `infra/terraform/` |
 | `audit` | `pip-audit --strict`, `npm audit --audit-level=high` |
 | `container` | Docker build, health endpoint probe against the running container, non-root user assertion, SBOM generation and upload |
 | `ci` | Aggregate gate; fails if any job above failed or was cancelled |
+
 
 The accuracy and performance tiers run as scripts rather than as CI gates.
 `scripts/measure.py` is run by hand and its output is quoted in the pull request
@@ -251,7 +305,8 @@ them would produce failures that say nothing about the change. The single-label
 latency assertion in `test_verify_integration.py` does gate, against the
 5-second target rather than against a tighter number.
 
-The accessibility tier is **not** in CI, because there is no UI to scan.
+The accessibility tier **is** in CI. What it does not cover, and what section 5
+says is manual by nature, is the screen reader pass and the greyscale check.
 
 ## 8. Test data policy
 

@@ -40,7 +40,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            tesseract-ocr tesseract-ocr-eng fonts-dejavu-core
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd fonts-dejavu-core
           tesseract --version
 
       # This job lints and tests, so it needs the dev lock file:

@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Orientation correction on the extraction path, after the first photograph of a
+real bottle returned none of its five fields. `app/ocr.py` decodes through
+Pillow so the EXIF orientation tag a phone writes is applied before OpenCV sees
+a pixel, then asks Tesseract's orientation and script detection which cardinal
+quarter-turn brings the text upright, turns it, and runs the existing
+small-angle deskew after that rather than before. What was applied, by what
+method and at what confidence is carried out to the response as `orientation`,
+so an agent can be told the photograph was turned. `TTB_CORRECT_ORIENTATION`
+turns it off. `tesseract-ocr-osd` is added to the container image and to CI,
+because the orientation model is a separate Debian package.
+- The measurement behind that choice, in `docs/07_TEST_STRATEGY.md` section 2
+and assumption A-15. Over the twelve-label sample set at all four cardinal
+rotations, forty-eight cases: Tesseract OSD was right in 46, and picking the
+rotation with the highest mean word confidence was right in 7. The second is
+not a tuning problem. Tesseract's layout analysis already corrects text turned
+a quarter-turn clockwise, so the upright image and the clockwise-turned image
+produce identical output, 62 words at a mean confidence of 95.4 either way, and
+a score equal on the two cases it must separate cannot separate them.
+`test_ocr.py::TestWhyOrientationUsesOsd` asserts that equality so the claim
+cannot go stale.
+- Rejoining of words split across a line break by a printer's hyphen, before the
+government warning body is compared. The same real label sets the statement in a
+narrow column and hyphenates to fill it, reading `AC-` / `CORDING`, `GEN-` /
+`ERAL` and `CONSUMP-` / `TION`. 27 CFR 16.21 fixes the wording, not the line
+breaks. Applied to the label side only, after the `GOVERNMENT WARNING:` prefix
+has been taken off, so the FR-6 capitalization check reads exactly the
+characters it read before. The same join is applied to the stopping rule in
+`app/parse.py` that decides how many lines the statement occupies, which
+otherwise truncated a hyphenated column.
+- Assumption A-15, recording both rules, the measurement that chose OSD, and
+what is deliberately not attempted: perspective and cylinder dewarping. That is
+recorded against SG-1 in `docs/02_PROJECT_SCOPE.md` and against the accepted
+risk in ADR 0003 rather than attempted on a sample of one photograph.
+- OQ-20, whether a warning body set entirely in capital letters matches
+27 CFR 16.21. The comparison is left case sensitive, which is what FR-5 as
+written requires; nothing was changed on the strength of the question.
+- OQ-21, how often real photographed labels need cylinder dewarping and how much
+accuracy is lost without it. It needs measurement over real artwork, which the
+repository does not hold.
+- UAT rows 23, 24 and 25 in `docs/07_TEST_STRATEGY.md` section 6: a sideways
+photograph, a photograph turned only by its EXIF tag, and a hyphenated warning
+column.
+- 39 backend tests for the above, taking the suite to 165.
+`samples/labelmaker.py` now honours explicit line breaks in the warning rather
+than reflowing it, and `samples/warning_text.py` derives the hyphenated column
+from the regulation constant so the fixture cannot drift from it.
+
 - `frontend/package-lock.json`, and two Python lock files:
 `backend/requirements.lock` (the ocr and matching extras, 27 packages) and
 `backend/requirements-dev.lock` (the same plus the dev extra, 61 packages).

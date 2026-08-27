@@ -99,7 +99,7 @@ sequenceDiagram
         F-->>A: Clear message, no field outcomes
     else Accepted
         V->>O: Decode and preprocess in memory
-        O->>O: Deskew, threshold, extract text
+        O->>O: Threshold, turn upright, deskew, extract text
         alt No text extracted
             O-->>API: Unreadable
             API-->>F: Image could not be read
@@ -172,7 +172,7 @@ find out why it exists.
 | Module | Responsibility | Governing requirements | Tests |
 | --- | --- | --- | --- |
 | `config.py` | Every tunable value, read once from the environment at startup | NFR-11, NFR-3, NFR-7 | `tests/test_compare.py` reads the thresholds it asserts against |
-| `ocr.py` | Decode, preprocess (long edge to 1600 px, grayscale, adaptive threshold, bounded deskew), run Tesseract, return text with word confidence, line geometry and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
+| `ocr.py` | Decode honouring the EXIF orientation tag, preprocess (long edge to 1600 px, grayscale, adaptive threshold, cardinal turn from Tesseract OSD, then bounded deskew), run Tesseract, return text with word confidence, line geometry, the orientation applied and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
 | `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |

@@ -45,6 +45,12 @@ BOLD_TYPE_NOTE = (
 _PREFIX_PATTERN = re.compile(r"government\s+warning\s*:?", re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
 
+# A word split across a line break by a printer's hyphen. The hyphen has to sit
+# between two word characters, so a dash used as punctuation, which carries a
+# space on both sides, is left alone. U+2010 and U+2011 are included because
+# Tesseract reports whichever hyphen the typeface actually drew.
+_LINE_BREAK_HYPHEN = re.compile(r"(?<=\w)[-\u2010\u2011]\s+(?=\w)")
+
 
 def normalize_whitespace(text: str) -> str:
     """Collapse runs of whitespace, including line breaks, and strip the ends.
@@ -53,6 +59,30 @@ def normalize_whitespace(text: str) -> str:
     and runs of spaces are presentational, and everything else is substantive.
     """
     return _WHITESPACE.sub(" ", text).strip()
+
+
+def join_line_break_hyphens(text: str) -> str:
+    """Rejoin words a printer's hyphen split across a line break (A-15).
+
+    A real bottle sets the warning in a column a few words wide, and the setter
+    hyphenates to fill it: the label photographed in the first real-artwork test
+    printed ``AC-`` / ``CORDING``, ``GEN-`` / ``ERAL`` and ``CONSUMP-`` /
+    ``TION``. 27 CFR 16.21 fixes the wording of the statement, not where the
+    lines break, so treating those splits as altered wording would report a
+    compliant label as a mismatch on a typesetting decision.
+
+    Applied to the label side only, and only to the body, which is what keeps it
+    from weakening anything. It is not applied to the regulation constant, so a
+    genuinely hyphenated word in the required text would still fail; and it is
+    not applied before the prefix is located, so ``Government Warning:`` still
+    fails the capitalization check exactly as it did (FR-6).
+
+    Safe on this text specifically because 27 CFR 16.21 contains no hyphen at
+    all: every hyphen inside a located statement is either a line-break hyphen,
+    which this removes correctly, or an inserted word difference, which FR-5
+    requires to be reported as a mismatch either way.
+    """
+    return _LINE_BREAK_HYPHEN.sub("", text)
 
 
 @dataclass(frozen=True)
@@ -110,6 +140,10 @@ def check_warning(text: str) -> WarningCheck:
         )
 
     prefix_as_printed, remainder = located
+    # The join is applied here, after the prefix has been taken off, so that
+    # what is reported as printed is what was printed and the capitalization
+    # check reads the same characters it always did (FR-6, A-15).
+    remainder = join_line_break_hyphens(remainder)
     prefix_normalized = normalize_whitespace(prefix_as_printed)
     # The colon is part of the required prefix but its absence is a wording
     # question, not a capitalization one, so the capitalization check reads the

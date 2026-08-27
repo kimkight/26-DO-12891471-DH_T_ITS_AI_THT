@@ -80,11 +80,52 @@ class WarningResult(BaseModel):
     bold_type_note: str = BOLD_TYPE_NOTE
 
 
+class OrientationDetail(BaseModel):
+    """How the submitted image was turned before it was read (FR-1, FR-10).
+
+    Reported because the correction is invisible in the result otherwise. A
+    photograph the tool turned and then read well and a photograph the tool
+    turned the wrong way and then read badly produce the same shape of
+    response, and only this tells them apart. It is also what lets the
+    interface say "we turned your photograph upright" rather than leaving an
+    agent to wonder why a sideways photograph worked.
+    """
+
+    exif_transposed: bool = Field(
+        description=(
+            "Whether the EXIF orientation tag was applied. True means the file "
+            "stored its pixels sideways and recorded which way up the camera was."
+        )
+    )
+    rotation_degrees: int = Field(
+        description=(
+            "The clockwise quarter-turn applied after the EXIF transform, in "
+            "degrees: 0, 90, 180 or 270."
+        )
+    )
+    method: Literal["osd", "unavailable", "disabled"] = Field(
+        description=(
+            "Where the rotation came from. 'osd' is Tesseract's orientation and "
+            "script detection; 'unavailable' means it could not judge, usually "
+            "too little text, and the image was left as it arrived; 'disabled' "
+            "means TTB_CORRECT_ORIENTATION is off."
+        )
+    )
+    confidence: float | None = Field(
+        default=None,
+        description=(
+            "Tesseract's confidence in the orientation. Null when no judgement "
+            "was made. A value near zero means the answer was a guess."
+        ),
+    )
+
+
 class VerificationResult(BaseModel):
     """The full single-label response (US-1, FR-1 through FR-7)."""
 
     fields: list[FieldResult]
     warning_detail: WarningResult
+    orientation: OrientationDetail
     ocr_confidence: float = Field(
         description="Mean Tesseract word confidence from 0 to 100 for this image."
     )

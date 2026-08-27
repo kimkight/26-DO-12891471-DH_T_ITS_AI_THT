@@ -121,6 +121,23 @@ per-field accuracy against the sample set is required work; see
 - That Tesseract's accuracy on real label artwork proves insufficient. This is
   unmeasured and is the largest open technical risk in the prototype. It is why
   accuracy is measured and published per field rather than asserted (US-21).
+
+  **Partly realized, 2026-08-26.** The first photograph of a real bottle
+  submitted to the deployed prototype returned none of the five fields. Three
+  causes were found by inspecting the photograph, and two are fixed: the
+  photograph was sideways and carried its turn in an EXIF tag OpenCV ignores
+  (now corrected, with Tesseract's orientation and script detection measured at
+  46 of 48 against a best-of-four confidence score at 7 of 48), and the warning
+  was set in a narrow column with printer's hyphens that the exact comparison
+  read as altered wording (now rejoined). Both are recorded as assumption A-15.
+
+  The third is not fixed and is this risk in its original form: the label wraps
+  a round bottle, so the far edges compress and distort, and no single
+  photograph shows the label flat. Perspective and cylinder dewarping are
+  deliberately not attempted, for the reason this ADR gives for keeping SG-1 a
+  stretch goal. [ADR 0007](0007-multi-photo-single-label.md) works around it by
+  accepting up to three photographs of the same label rather than correcting
+  the geometry of one.
 - That enabling the Bedrock fallback later reintroduces every constraint this
   decision avoids: egress, data leaving the boundary, FedRAMP status, and
   fabricated values. Mitigated by making it off by default, by requiring the

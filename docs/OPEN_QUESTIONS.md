@@ -29,6 +29,8 @@ updates every artifact the answer affects.
 | [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
 | [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
+| [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
+| [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 
 ---
 
@@ -1015,3 +1017,65 @@ document's recommendations carry a manual step.
 **Blocks:** nothing in the prototype. It makes Dependabot triage a two-party
 operation: a session can read the pull requests and write the recommendation,
 and a person issues the command.
+
+## OQ-20
+**Does a government warning printed entirely in capital letters match
+27 CFR 16.21?**
+
+**Status: Open, 2026-08-26.**
+
+FR-5 compares the warning body for exact text after whitespace normalization,
+and the comparison is case sensitive: `app/warning.py` tests
+`body_found == expected_body`. 27 CFR 16.21 prints the statement with only the
+first two words capitalized, and 27 CFR 16.22(a)(2) requires capitals for those
+two words specifically, which implies the rest is not required to be in capitals
+but does not say that setting it in capitals is a defect.
+
+The question arose while writing assumption A-15. The real label examined for
+that assumption was read for its hyphenation, not for its case, so this is not a
+finding about that label; it is a gap noticed in the rule. Many commercial labels
+do set the whole statement in capitals.
+
+**Nothing is guessed here.** The comparison is left case sensitive, which is what
+FR-5 as written requires, and no case folding was added on the strength of a
+question. If the answer is that capitals are acceptable, the fix is one
+normalization step in `app/warning.py` and one acceptance criterion in FR-5.
+
+**Who can answer:** Jenny Park, or a compliance agent, or published TTB guidance
+on 27 CFR part 16. Jenny is the stakeholder who described rejecting a label for a
+title-case prefix, so she is the person most likely to know whether the reverse,
+an all-capitals body, is also a rejection.
+**Blocks:** nothing today. It would change FR-5's acceptance criteria and one
+comparison in `app/warning.py`.
+
+## OQ-21
+**How often does real label artwork need cylinder or perspective dewarping, and
+how much accuracy is lost without it?**
+
+**Status: Open, 2026-08-26.**
+
+The first real-artwork test found three causes for a photograph returning none of
+its five fields. Two are fixed and recorded as A-15. The third is that the label
+wraps a round bottle, so the far edges compress and no single photograph shows
+the label flat. That is SG-1 and the ADR 0003 risk, and it is not attempted:
+correcting it needs a cylindrical unwrap with an estimated radius, which is a
+substantial piece of image processing to build against a sample of one
+photograph.
+
+[ADR 0007](adr/0007-multi-photo-single-label.md) works around it rather than
+solving it, by accepting up to three photographs of the same label so an agent
+can photograph the parts a single frame distorts. Whether that is sufficient in
+practice is exactly what is unknown.
+
+**What would answer it:** running the engine over a set of real photographed
+bottles with ground truth, and reporting per-field accuracy with and without a
+second photograph. That is the accuracy tier of
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 3 applied to real artwork
+rather than to the synthetic set, which is already named there as the largest
+open technical risk.
+
+**Who can answer:** measurement, not a person. It needs real label photographs,
+which the repository does not hold and cannot redistribute
+(`samples/README.md`).
+**Blocks:** nothing in the prototype. It bounds any claim about accuracy on real
+artwork, and it is the reason no such claim is made.

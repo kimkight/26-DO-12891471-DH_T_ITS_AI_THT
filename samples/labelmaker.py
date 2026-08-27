@@ -137,9 +137,15 @@ def render(spec: LabelSpec) -> Image.Image:
     y += 60
 
     if spec.warning:
-        for line in _wrap(draw, spec.warning, warning_font, width):
-            draw.text((margin, y), line, font=warning_font, fill=ink)
-            y += 36
+        # Explicit line breaks in the warning are honoured rather than reflowed.
+        # A real bottle sets the warning in a column a few words wide and
+        # hyphenates to fill it, and the only way to render that faithfully is
+        # to let the caller say where the lines break. Everything else still
+        # wraps to the label width, so the twelve committed specs are unchanged.
+        for paragraph in spec.warning.split("\n"):
+            for line in _wrap(draw, paragraph, warning_font, width):
+                draw.text((margin, y), line, font=warning_font, fill=ink)
+                y += 36
 
     if spec.rotate_degrees:
         image = image.rotate(spec.rotate_degrees, expand=True, fillcolor=background)
