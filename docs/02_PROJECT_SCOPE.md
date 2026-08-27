@@ -74,7 +74,7 @@ used, and assumptions made. [Source: Deliverables]
 
 | ID | Excluded | Why | Source |
 | --- | --- | --- | --- |
-| OOS-1 | COLA system integration | "We're not looking to integrate with COLA directly; that's a whole different beast with its own authorization requirements." Treated as "a standalone proof-of-concept." | Marcus Williams interview |
+| OOS-1 | COLA system integration | "We're not looking to integrate with COLA directly; that's a whole different beast with its own authorization requirements." Treated as "a standalone proof-of-concept." **See the note below on what this does and does not exclude.** | Marcus Williams interview |
 | OOS-2 | Authentication and authorization | No authentication in the prototype. Production would require it; the path is described in [06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md). | Decision D-9 |
 | OOS-3 | Persistent storage of images or form data | Nothing is retained beyond the request lifecycle. "We're not storing anything sensitive for this exercise." | Decision D-9; Marcus Williams interview |
 | OOS-4 | Any claim about bold typeface detection | Jenny states the prefix must be "all caps and bold," and 27 CFR 16.22(a)(2) confirms bold type is required. The prototype checks capitalization only. It must not report or imply that it has verified boldness. | Decision D-5; Jenny Park interview; 27 CFR 16.22(a)(2) |
@@ -83,6 +83,32 @@ used, and assumptions made. [Source: Deliverables]
 | OOS-7 | Beverage-type-specific rule engines | The assignment states "The exact requirements vary by beverage type (beer, wine, distilled spirits)" but supplies rules for none of them. Encoding them would require inventing regulation. | Technical Requirements, Additional Context |
 | OOS-8 | Determining whether a label is compliant overall | The tool reports per-field agreement between label and application. It does not issue an approval decision. The agent decides. | Decision D-9; Dave Morrison interview |
 | OOS-9 | Production deployment to a government region on either platform | This assignment deploys to AWS commercial `us-east-1` by the author's choice. The build stays cloud-portable, but neither AWS GovCloud (US) nor the agency's Azure platform is exercised. | Decision D-11 |
+
+### Note on OOS-1: what it excludes, and what it does not
+
+OOS-1 excludes integrating with the COLA system. Read as Marcus Williams stated
+it, that means:
+
+- no calls to any COLA or COLAs Online API,
+- no COLAs Online authorization, credentials, accounts or sessions,
+- no lookups against the TTB Public COLA Registry from the application, by API
+  or by scraping.
+
+**It does not exclude accepting an uploaded copy of a completed label
+application.** FR-11 accepts one: the agent attaches the applicant's
+TTB Form 5100.31, or the Registry printout for it, and the tool reads the file.
+That is document parsing, in the same sense that reading a label photograph is
+document parsing. It needs no credential, contacts nothing, and is the same kind
+of act as the upload the tool already accepts.
+
+The distinction matters because it is what Marcus's objection is actually about.
+The "whole different beast" he names is the authorization requirement, and an
+uploaded file has none. NFR-3 holds: the default path still makes no outbound
+call. NFR-6 holds: the document is read in memory and released with the request.
+
+A future version that looked an application **up** rather than being handed one
+would be the excluded thing, and would need Marcus's decision rather than an
+ADR. See [ADR 0008](adr/0008-cola-form-as-application-input.md).
 
 ## 3. Stretch goals
 

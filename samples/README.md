@@ -18,12 +18,30 @@ python samples/generate_samples.py
 | Path | Purpose | Committed |
 | --- | --- | --- |
 | `labelmaker.py` | Renders one label from a specification, with Pillow | Yes |
+| `formmaker.py` | Writes a synthetic COLA application document from a specification: a PDF with a real text layer, a fillable PDF whose values live in AcroForm fields, and a PNG with no text layer at all (FR-11, ADR 0008) | Yes |
 | `specs.py` | The twelve label specifications and the application data submitted against each | Yes |
 | `generate_samples.py` | Renders the images and writes both CSVs | Yes |
 | `warning_text.py` | The 27 CFR 16.21 statement, kept separate from the application's copy | Yes |
 | `images/` | Rendered label artwork used as test input | No, git-ignored; see below |
 | `expected.csv` | Ground truth: one row per image | Yes |
 | `applications/applications.csv` | The application side of each case, in the A-14 column names | Yes |
+
+### COLA application documents
+
+`formmaker.py` is the same idea as `labelmaker.py`, applied to the application
+rather than to the label. It writes three shapes of one invented application so
+that each of the parser's three ways in is exercised on a document it did not
+also produce: a digitally generated PDF, a filled-in fillable PDF, and a
+rasterized copy with no text layer.
+
+Nothing it produces is committed and nothing real is used. A filed
+TTB F 5100.31 carries a permit number, a signature and a named person on every
+copy, and the test data policy in
+[docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md) section 8 forbids real
+application data and personal data in any fixture. Every value in `formmaker.py`
+is invented, and the permit and serial numbers are deliberately not in a format
+TTB issues. The consequence is recorded honestly as OQ-22: the parser has never
+been run against a real application.
 
 ### `expected.csv` columns
 

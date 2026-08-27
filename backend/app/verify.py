@@ -24,15 +24,19 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from app.application_form import APPLICATION_FIELDS, ParsedApplication
 from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
 from app.ocr import Orientation, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
 from app.schemas import (
     FIELD_LABELS,
+    ApplicationDocumentResult,
+    ApplicationSource,
     ErrorDetail,
     FieldResult,
     OrientationDetail,
+    ParsedApplicationField,
     PhotoResult,
     VerificationResult,
     WarningResult,
@@ -91,6 +95,79 @@ def check_media_type(content_type: str | None) -> None:
         )
 
 
+def check_document_media_type(content_type: str | None) -> None:
+    """The same guard for an uploaded COLA document (FR-11, NFR-7, FR-9).
+
+    A separate list rather than the label one, because a PDF is the ordinary
+    shape of this document and is not something to accept as label artwork.
+    """
+    if content_type not in settings.allowed_document_mime_types:
+        raise VerificationError(
+            code="unsupported_application_document",
+            message=(
+                f"{content_type or 'The submitted file'} is not an accepted type "
+                "for a label application. Send a PDF, or a scan or photograph of "
+                "the form, or type the application values instead."
+            ),
+            status_code=415,
+            limit=(
+                "accepted application document types: "
+                f"{', '.join(settings.allowed_document_mime_types)}"
+            ),
+        )
+
+
+def resolve_application(
+    typed: dict[str, str], parsed: ParsedApplication | None
+) -> tuple[dict[str, str], dict[str, ApplicationSource]]:
+    """Decide each application value, and record where it came from (FR-11).
+
+    **A typed value always wins.** An agent who corrects a field has read the
+    document and disagreed with what was read off it, and the tool defers to the
+    agent everywhere else it makes a judgement (FR-3, OOS-8). A blank field is
+    not a correction: it is the absence of one, so the parsed value stands.
+
+    The returned source map is reported per field, because a submission can mix
+    the two and a result that did not say which was which would leave an agent
+    unable to tell what they were checking.
+    """
+    values: dict[str, str] = {}
+    sources: dict[str, ApplicationSource] = {}
+    for name in APPLICATION_FIELDS:
+        entered = (typed.get(name) or "").strip()
+        from_document = (parsed.values.get(name) if parsed else None) or ""
+        if entered:
+            values[name] = entered
+            sources[name] = "typed"
+        elif from_document:
+            values[name] = from_document
+            sources[name] = "parsed_from_form"
+        else:
+            values[name] = ""
+            sources[name] = "absent"
+    return values, sources
+
+
+def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
+    """The parsed block, reported in its own right rather than folded in."""
+    return ApplicationDocumentResult(
+        extraction_path=parsed.path,
+        pages_read=parsed.pages_read,
+        fields=[
+            ParsedApplicationField(
+                name=name,
+                display_name=FIELD_LABELS[name],
+                value=parsed.values.get(name),
+                found_on_document=parsed.values.get(name) is not None,
+            )
+            for name in APPLICATION_FIELDS
+        ],
+        fanciful_name=parsed.fanciful_name,
+        class_type_code=parsed.class_type_code,
+        notes=parsed.notes,
+    )
+
+
 def check_size(content: bytes) -> None:
     """Reject an oversize image exactly, after parsing (NFR-7, FR-9).
 
@@ -139,7 +216,13 @@ class _Read:
     error: VerificationError | None = None
 
 
-def verify_photos(contents: list[bytes], application: dict[str, str]) -> VerificationResult:
+def verify_photos(
+    contents: list[bytes],
+    application: dict[str, str],
+    *,
+    application_sources: dict[str, ApplicationSource] | None = None,
+    application_document: ApplicationDocumentResult | None = None,
+) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
 
     Each photograph is decoded, turned upright and read on its own, and the
@@ -177,6 +260,8 @@ def verify_photos(contents: list[bytes], application: dict[str, str]) -> Verific
         elapsed_ms=elapsed_ms,
         photos=[_photo_result(read) for read in reads],
         sources=sources,
+        application_sources=application_sources,
+        application_document=application_document,
     )
 
 
@@ -372,6 +457,8 @@ def build_result(
     elapsed_ms: float | None = None,
     photos: list[PhotoResult] | None = None,
     sources: dict[str, int] | None = None,
+    application_sources: dict[str, ApplicationSource] | None = None,
+    application_document: ApplicationDocumentResult | None = None,
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
@@ -382,8 +469,14 @@ def build_result(
     are optional so that a caller holding parsed fields and no images, which is
     what the comparison tests and scripts/measure.py are, still gets a valid
     response: one photograph is then assumed and no field is attributed.
+
+    ``application_sources`` and ``application_document`` carry FR-11. Both are
+    optional too, and a caller that omits them gets exactly the response this
+    function always returned: every supplied application value reads as typed,
+    which is what it was, and no parsed block is reported.
     """
     attribution = sources or {}
+    value_sources = application_sources or {}
     comparisons = {
         "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
         "class_type": compare_text(parsed.class_type, application.get("class_type")),
@@ -408,6 +501,9 @@ def build_result(
             outcome=comparison.outcome,
             reason=comparison.reason,
             source_photo=attribution.get(name),
+            application_value_source=value_sources.get(
+                name, "typed" if application.get(name) else "absent"
+            ),
         )
         for name, comparison in comparisons.items()
     ]
@@ -438,6 +534,7 @@ def build_result(
         elapsed_ms=round(ocr_ms if elapsed_ms is None else elapsed_ms, 1),
         ocr_ms=round(ocr_ms, 1),
         external_call_made=False,
+        application_document=application_document,
     )
 
 

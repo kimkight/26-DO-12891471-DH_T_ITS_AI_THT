@@ -31,6 +31,10 @@ const MESSAGES: Record<string, string> = {
   duplicate_application_row:
     'The application data file has more than one row for this image, so nothing was compared.',
   verification_failed: "We couldn't check this label. Try submitting it on its own.",
+  unsupported_application_document:
+    'That file is not one we can read as a label application. Send a PDF, or a photo or scan of the form.',
+  unreadable_application_document:
+    "We couldn't read that label application. Check the file, or type the values in yourself.",
 }
 
 /**

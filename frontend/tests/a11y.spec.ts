@@ -143,6 +143,11 @@ test.describe('what axe cannot check', () => {
       panel.getByRole('button', { name: 'Add another photo of this label' }),
     ).toBeFocused()
 
+    // Then the COLA document upload, which sits between the photographs and
+    // the fields it fills (FR-11, ADR 0008).
+    await page.keyboard.press('Tab')
+    await expect(panel.getByLabel('Label application', { exact: true })).toBeFocused()
+
     const expected = [
       'Beverage type',
       'Brand name',
@@ -242,6 +247,34 @@ test.describe('what axe cannot check', () => {
     ).toBeFocused()
   })
 
+  test('the COLA document upload is labelled, announced and axe-clean', async ({ page }) => {
+    await page.route('**/api/read-application', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(PARSED_APPLICATION),
+      })
+    })
+    await page.goto('/')
+    const panel = page.locator('#panel-single')
+
+    await panel.getByLabel('Label application', { exact: true }).setInputFiles({
+      name: 'application.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from([37, 80, 68, 70]),
+    })
+
+    // The parsed values reach the same fields an agent would have typed into,
+    // and every one of them says where it came from (FR-11, ADR 0008).
+    await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
+    await expect(panel.getByText('Read from the application form. Change it if it is wrong.')
+      .first()).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove this application form' })).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
   test('the axe scan covers a result built from two photos', async ({ page }) => {
     await page.route('**/api/verify', async (route) => {
       await route.fulfill({
@@ -279,6 +312,7 @@ const RESULT = {
       outcome: 'match',
       reason: 'Scored 100, at or above the match threshold of 95.',
       source_photo: 1,
+      application_value_source: 'typed',
     },
     {
       name: 'class_type',
@@ -290,6 +324,7 @@ const RESULT = {
       outcome: 'needs_review',
       reason: 'Scored 88, between the review threshold of 80 and the match threshold of 95.',
       source_photo: 1,
+      application_value_source: 'typed',
     },
     {
       name: 'alcohol_content',
@@ -301,6 +336,7 @@ const RESULT = {
       outcome: 'mismatch',
       reason: 'The label states 45 percent and the application states 40 percent.',
       source_photo: 2,
+      application_value_source: 'typed',
     },
     {
       name: 'net_contents',
@@ -312,6 +348,7 @@ const RESULT = {
       outcome: 'not_compared',
       reason: 'Net contents were not found on the label, so nothing was compared.',
       source_photo: null,
+      application_value_source: 'typed',
     },
     {
       name: 'government_warning',
@@ -323,6 +360,7 @@ const RESULT = {
       outcome: 'mismatch',
       reason: `The prefix is not in capital letters. ${WARNING_NOTE}`,
       source_photo: 2,
+      application_value_source: 'typed',
     },
   ],
   warning_detail: {
@@ -363,4 +401,48 @@ const RESULT = {
   elapsed_ms: 540,
   ocr_ms: 530,
   external_call_made: false,
+  application_document: null,
+}
+
+/** What POST /api/read-application returns for a registry printout (FR-11). */
+const PARSED_APPLICATION = {
+  extraction_path: 'embedded_text',
+  pages_read: 1,
+  fields: [
+    {
+      name: 'brand_name',
+      display_name: 'Brand name',
+      value: "STONE'S THROW",
+      found_on_document: true,
+    },
+    {
+      name: 'class_type',
+      display_name: 'Class or type designation',
+      value: 'KENTUCKY STRAIGHT BOURBON WHISKEY',
+      found_on_document: true,
+    },
+    {
+      name: 'alcohol_content',
+      display_name: 'Alcohol content',
+      value: '45% ALC/VOL',
+      found_on_document: true,
+    },
+    {
+      name: 'net_contents',
+      display_name: 'Net contents',
+      value: '750 ML',
+      found_on_document: true,
+    },
+    {
+      name: 'beverage_type',
+      display_name: 'Beverage type',
+      value: null,
+      found_on_document: false,
+    },
+  ],
+  fanciful_name: 'Small Batch Reserve',
+  class_type_code: '141',
+  notes: [
+    'The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document\'s text, and this document did not name one type on its own. Choose it yourself.',
+  ],
 }

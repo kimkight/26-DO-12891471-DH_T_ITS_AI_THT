@@ -127,6 +127,22 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
   })
 
   /*
+   * The mark on a field filled from an uploaded COLA document (FR-11). It is
+   * text, so 4.5:1 applies, and it sits on the white panel and on the grey
+   * surface of the upload block. Asserted through the class rather than only
+   * through the token, so that changing the class to a colour that has not been
+   * checked fails here.
+   */
+  it('the "read from the application form" mark uses a verified text colour', () => {
+    const rule = CSS.match(/\.field__source\s*{[^}]*}/)
+    expect(rule, 'index.css does not define .field__source').not.toBeNull()
+    expect(rule![0]).toContain('var(--gold-text)')
+    for (const surface of [...surfaces, 'shell']) {
+      expect(ratio(token('gold-text'), token(surface))).toBeGreaterThanOrEqual(AA_BODY)
+    }
+  })
+
+  /*
    * The shell is the grey field the white panels sit on. It is the same value
    * as --surface today and it is checked separately rather than assumed to
    * stay that way, because a change to one is not a change to the other.

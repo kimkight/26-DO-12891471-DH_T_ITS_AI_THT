@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     max_label_photos: int = 3
     allowed_mime_types: tuple[str, ...] = ("image/jpeg", "image/png", "image/webp", "image/tiff")
 
+    # How many pages of an uploaded COLA document are read (ADR 0008, FR-11).
+    # The application side of TTB F 5100.31 is page 1; the rest of the file is
+    # instructions and the allowable-revisions table, which carry no applicant
+    # values. A Public COLA Registry printout runs to one or two. Three is one
+    # more than either needs, and it bounds what a 400-page PDF can cost when
+    # the OCR fallback runs: that path reads each page the way it reads a label
+    # photograph, so the page count is a latency limit as much as a parsing one.
+    max_document_pages: int = 3
+
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
     review_threshold: int = 80
@@ -109,16 +118,35 @@ class Settings(BaseSettings):
         return max(1, available)
 
     @property
+    def allowed_document_mime_types(self) -> tuple[str, ...]:
+        """What an uploaded COLA document may be (FR-11, NFR-7).
+
+        A PDF is what COLAs Online and the Public COLA Registry produce. The
+        image types are the ones already accepted for label artwork, because a
+        scan or a phone photograph of a printed form is the other way the
+        document reaches an agent, and there is no reason for the two lists to
+        drift apart.
+        """
+        return ("application/pdf", *self.allowed_mime_types)
+
+    @property
     def effective_max_verify_bytes(self) -> int:
         """The largest single-label request body accepted, in bytes.
 
-        ``max_label_photos * max_upload_bytes``, for the same reason the batch
-        envelope is derived rather than set: that product is the largest
-        submission the two stated limits already permit, and a smaller figure
-        here would be a third limit no source asks for. Each photograph is still
-        checked exactly against ``max_upload_bytes`` after parsing.
+        ``(max_label_photos + 1) * max_upload_bytes``, for the same reason the
+        batch envelope is derived rather than set: that product is the largest
+        submission the stated limits already permit, and a smaller figure here
+        would be a further limit no source asks for. The plus one is the
+        optional COLA document (FR-11, ADR 0008), which is an upload in its own
+        right and is bounded by the same per-file limit. Without it a submission
+        of three photographs plus the application would be refused for being one
+        file larger than the photographs alone.
+
+        Each file is still checked exactly against ``max_upload_bytes`` after
+        parsing, so this loosens only what the Content-Length guard rejects
+        before reading, not what is accepted.
         """
-        return self.max_label_photos * self.max_upload_bytes
+        return (self.max_label_photos + 1) * self.max_upload_bytes
 
     @property
     def effective_max_batch_bytes(self) -> int:

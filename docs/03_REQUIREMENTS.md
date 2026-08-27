@@ -383,6 +383,62 @@ Present per-field outcomes so an agent can act without re-reading the label.
 This replaces Jenny's "printed checklist on my desk that I go through for every
 label." [Source: Jenny Park interview]
 
+### FR-11 The label application accepted as an input, instead of typed
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-27:
+"Why do I have to enter in all this information?"
+
+Accept an uploaded copy of the applicant's label application, TTB Form 5100.31,
+or of the Public COLA Registry detail page for an application, as an alternative
+to typing the same values. Read it locally and offer what it says for the
+agent's confirmation. See
+[ADR 0008](adr/0008-cola-form-as-application-input.md) and assumption A-17.
+
+**This is not the COLA system integration OOS-1 excludes.** OOS-1 rules out API
+calls, COLAs Online authorization and registry lookups from the application.
+Accepting a document the agent already holds is document parsing: it needs no
+credential and opens no socket, and NFR-3 and NFR-6 apply to it exactly as they
+apply to a label image. The note under OOS-1 in
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) records the same distinction.
+
+**Acceptance criteria**
+- Given a COLA document uploaded on the single-label path, then the values it
+  carries are extracted and reported as a block distinct from the comparison,
+  each value marked found or not found.
+- Given a digitally generated document, for example COLAs Online output or a
+  Registry printout, then extraction reads the file's own content rather than
+  recognizing pixels, and reports which path was used.
+- Given a filled-in copy of the fillable form, then the values are read from its
+  form fields, which is where they are, rather than from the blank template's
+  text.
+- Given a scan or a photograph of a printed form, then it is read through the
+  same local OCR pipeline label artwork is read through, and the response says
+  so.
+- Given a value that is not an item on the form, then it is reported as not
+  found **with the reason**, rather than reported as a bare absence. On
+  TTB F 5100.31 (04/2023) the class or type designation and the alcohol content
+  are not items at all, and the net contents is item 15 only when it is blown,
+  branded or embossed on the container and does not appear on the labels.
+- Given a document that names all three of item 5's product types, then the
+  beverage type is reported as not found, because a ticked box cannot be read
+  from a document's text.
+- Given a field the agent typed and a document that also carries it, then the
+  typed value is used and the response says the value was typed. A blank field
+  is not a correction and the parsed value stands.
+- Given any parsed value, then it is presented in an editable field before a
+  verification runs, marked as read from the application form, and the
+  verification uses what is in the field.
+- Given an empty or unreadable document, then the response names the problem,
+  carries no field outcomes at all, and the typed path remains available (FR-9).
+- Given a document of a type that is not accepted, then it is refused before
+  anything is decoded, with the accepted types named (NFR-7).
+- No outbound network call is made to read the document (NFR-3), and nothing
+  about it is persisted or logged beyond a byte count and the path used (NFR-6).
+
+**Not built.** The batch path keeps the CSV contract in A-14. Per-row COLA
+documents are a possible future extension and no part of them exists.
+
 ## 4. Non-functional requirements
 
 ### NFR-1 Response time of about 5 seconds

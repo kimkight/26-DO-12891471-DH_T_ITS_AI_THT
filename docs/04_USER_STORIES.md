@@ -847,3 +847,88 @@ elements need not all be on one face.
 The decision, the alternatives rejected, and what is deliberately left out is
 [ADR 0007](adr/0007-multi-photo-single-label.md). The number of photographs is
 assumption A-16. Cylinder dewarping is not attempted; see OQ-21.
+
+### US-23 Upload the label application instead of typing it
+
+| | |
+| --- | --- |
+| Epic | Real label artwork |
+| Priority | Should |
+| Requirements | FR-11, FR-2, FR-3, FR-9 |
+| Points | |
+| Issue | [#65](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/65) |
+| Source | The author's own use of the deployed prototype, 2026-08-27 |
+
+Numbered #65 rather than #23 for the reason given under US-22: GitHub draws
+issue and pull request numbers from one sequence, and this repository was past
+64 by the time this story was written.
+
+**As a** compliance agent who already has the applicant's label application in
+front of me,
+**I want** to attach that document instead of retyping what it says,
+**so that** I spend my attention on judging the label rather than on data entry.
+
+**Acceptance criteria**
+
+```
+Given a COLA document, a PDF or an image of one
+When  I attach it on the single-label view
+Then  the values it carries are put into the same fields I would have typed into
+And   each filled field is marked as read from the application form
+And   every filled field is still editable
+```
+
+```
+Given a value the document does not carry
+When  the document has been read
+Then  that field is left for me to fill in
+And   the interface says why the form does not carry it
+```
+
+```
+Given a field I have typed and a document that also carries it
+When  I run the check
+Then  my typed value is used
+And   the response says that value was typed rather than parsed
+```
+
+```
+Given a filled-in copy of the fillable form
+When  I attach it
+Then  the values are read from its form fields, which is where they are
+And   item 5's ticked box gives the beverage type
+```
+
+```
+Given a scan or a photograph of a printed form
+When  I attach it
+Then  it is read through the same local OCR the tool reads labels with
+And   the response says it was read that way
+```
+
+```
+Given an empty or unreadable document
+When  I attach it
+Then  the message names the problem
+And   no field reports a match
+And   I can still type the values in myself
+```
+
+```
+Given I attach nothing
+When  I run the check
+Then  it behaves exactly as it did before this capability existed
+```
+
+The question this story exists for is the author's own, while using the
+deployed prototype: why enter all this information, when the applicant already
+submitted it? The values the form asks for are on TTB Form 5100.31, the COLA
+application, and on the Public COLA Registry detail page for an approved one.
+
+**This is not the COLA system integration OOS-1 excludes.** Nothing here calls
+an API, holds a credential or looks anything up. It reads a file the agent
+already has. The note under OOS-1 in
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) records the distinction, and
+[ADR 0008](adr/0008-cola-form-as-application-input.md) records the decision, the
+alternatives rejected, and what the form does not carry. The field map is
+assumption A-17; what has not been verified against a real document is OQ-22.

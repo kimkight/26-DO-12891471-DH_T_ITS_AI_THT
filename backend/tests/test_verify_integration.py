@@ -200,7 +200,13 @@ class TestNothingSensitiveReachesTheLogs:
             "photos_received",
             "ocr_ms",
             "beverage_type_supplied",
+            # FR-11 added two. Both are a count and a path name; neither can
+            # carry an item value, a filename or anything the document said.
+            "application_document_bytes",
+            "application_document_path",
         }
+        assert record.application_document_bytes == 0
+        assert record.application_document_path is None
 
 
 class TestEgressBlocked:

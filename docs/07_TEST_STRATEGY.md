@@ -327,6 +327,11 @@ reads records the application emitted rather than what CloudWatch received.
 | 28 | Attach photographs up to the limit, then look for the control that adds another | The control is no longer offered and the interface says why. **Reaching the API's refusal is a failure of this test.** | ADR 0007; NFR-4 |
 | 29 | Attach two photographs and check a label using only the keyboard | Every add and remove control is reachable, focus stays visible, and each change to the photo list is announced | ADR 0007; NFR-5 |
 | 30 | A bottle whose back label carries a percentage in marketing copy, for example "reduce our environmental impact by 7%", and whose alcohol statement is on the front | The alcohol content reports the front label's statement, or not found. **Reporting the marketing percentage is a failure of this test.** | Deployed-target test, 2026-08-27; FR-1; FR-7 |
+| 31 | Attach a Public COLA Registry printout on the single-label view | The brand name, class or type designation, alcohol content and net contents appear in the application fields, each marked as read from the application form, before any check is run | FR-11; ADR 0008 |
+| 32 | Attach a filled-in copy of TTB F 5100.31 | The brand name and fanciful name are read from the form's own fields, and the ticked product-type box gives the beverage type. **The class or type designation, alcohol content and net contents are reported as not found, with the reason: they are not items on the form.** | FR-11; A-17 |
+| 33 | Attach a document, correct one filled field by hand, then run the check | The corrected value is what is compared, and the result says that value was typed. The parsed block still shows what the document said. | FR-11; ADR 0008 |
+| 34 | Attach a photograph or scan of a printed form | It is read through the same local OCR the tool reads labels with, and the interface says so. **Values OCR could not read are reported as not found rather than approximated.** | FR-11; FR-1 |
+| 35 | Attach a file that is not a readable application, for example an empty PDF | The message names the problem, no field reports a match, and the typed fields are still usable | FR-11; FR-9 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.
@@ -359,7 +364,12 @@ says is manual by nature, is the screen reader pass and the greyscale check.
 
 ## 8. Test data policy
 
-- No real application data and no personal data in any fixture (NFR-6).
+- No real application data and no personal data in any fixture (NFR-6). This
+  covers COLA documents as well as labels: `samples/formmaker.py` generates a
+  filled TTB F 5100.31 and a Registry printout at test time, with invented
+  values and permit and serial numbers deliberately not in a format TTB
+  issues. No real filed application is committed, and none has been parsed;
+  that limit is OQ-22.
 - Sample label artwork is generated or sourced by the contributor and is
   git-ignored; see `samples/README.md` for why.
 - Ground truth lives in `samples/expected.csv` and is version controlled once it

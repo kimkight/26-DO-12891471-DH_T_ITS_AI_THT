@@ -1,13 +1,19 @@
 /**
- * The two calls this interface makes, and nothing else.
+ * The three calls this interface makes, and nothing else.
  *
- * Both are plain `fetch` against the same origin, because the backend serves
- * the built frontend from its own container (docs/05_ARCHITECTURE.md). There is
- * no client library and no state manager: two endpoints do not need one, and
+ * All plain `fetch` against the same origin, because the backend serves the
+ * built frontend from its own container (docs/05_ARCHITECTURE.md). There is no
+ * client library and no state manager: three endpoints do not need one, and
  * NFR-4 is better served by an interface with less machinery under it.
  */
 import { NETWORK_MESSAGE, plainMessage } from './plainLanguage'
-import type { ApplicationData, BatchLine, ErrorDetail, VerificationResult } from '../types'
+import type {
+  ApplicationData,
+  ApplicationDocumentResult,
+  BatchLine,
+  ErrorDetail,
+  VerificationResult,
+} from '../types'
 
 /** What the UI shows when something goes wrong: a plain line plus the detail. */
 export interface UiError {
@@ -20,6 +26,11 @@ export interface SingleOutcome {
   error: UiError | null
   /** Round trip as the agent experienced it, in seconds. */
   seconds: number
+}
+
+export interface ApplicationOutcome {
+  document: ApplicationDocumentResult | null
+  error: UiError | null
 }
 
 function toUiError(body: unknown): UiError {
@@ -67,6 +78,32 @@ export async function verifyLabel(
     return { result: null, error: toUiError(await safeJson(response)), seconds }
   }
   return { result: (await response.json()) as VerificationResult, error: null, seconds }
+}
+
+/**
+ * Read a COLA document and return what it says, verifying nothing (FR-11).
+ *
+ * Called when the agent attaches the label application, before any check runs.
+ * The values come back so the interface can put them into the same fields the
+ * agent would have typed into, marked as read from the application form and
+ * still editable: the check then runs on what the agent confirmed, which is
+ * what keeps the judgement theirs (FR-3, ADR 0008).
+ *
+ * This is document parsing, not COLA system integration. The request goes to
+ * this application's own origin; nothing here reaches TTB (OOS-1, NFR-3).
+ */
+export async function readApplication(document: File): Promise<ApplicationOutcome> {
+  const body = new FormData()
+  body.append('application_document', document)
+
+  let response: Response
+  try {
+    response = await fetch('/api/read-application', { method: 'POST', body })
+  } catch {
+    return { document: null, error: { message: NETWORK_MESSAGE, detail: null } }
+  }
+  if (!response.ok) return { document: null, error: toUiError(await safeJson(response)) }
+  return { document: (await response.json()) as ApplicationDocumentResult, error: null }
 }
 
 /**
