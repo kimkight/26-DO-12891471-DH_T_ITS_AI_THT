@@ -20,6 +20,7 @@ The rate at which it fails is measured, not asserted: see scripts/measure.py.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from app.ocr import OcrLine
@@ -32,10 +33,42 @@ from app.warning import (
 )
 
 _NUMBER = r"\d+(?:\.\d+)?"
-_ABV_LINE = re.compile(
-    rf"{_NUMBER}\s*(?:%|percent)|{_NUMBER}\s*proof|alc\.?\s*(?:/|\s)?\s*vol|abv",
-    re.IGNORECASE,
-)
+
+# An alcohol content candidate is a number that carries an alcohol marker on the
+# same OCR line. A bare percent is not one.
+#
+# **This is a defect fix, and the defect was found on real artwork.** In the
+# author's three-photograph bottle test on 2026-08-27 the deployed prototype
+# reported the alcohol content as `7%`, read from a sentence of marketing copy
+# on the back label about reducing environmental impact. The pattern accepted
+# any percent token, so the first percent anywhere in the reading order won,
+# whatever it was a percentage of. A label carrying a percentage of recycled
+# glass, of grain in the mash bill, or of anything else printed before the
+# alcohol statement produced a confident, wrong number.
+#
+# The rule now is FR-7's own vocabulary: the marker set is ALC, ALC., VOL, ABV,
+# ALCOHOL and PROOF, matched case-insensitively. VOLUME is admitted with VOL
+# because it is the same word spelled out, not a further term. The marker has to
+# be a word of its own, so a garbled neighbouring word does not create one and
+# does not destroy one either: "12.5% AlC. 8Y VOL." still matches on VOL even
+# though Tesseract mangled two words around it, which is the OCR noise this has
+# to survive.
+#
+# A number with no marker on its line, and a marker with no number on its line,
+# are both not found. Reporting `ALC./VOL.` with no figure in it, which the old
+# pattern did whenever OCR split the statement across two lines, is a guess
+# dressed as a reading; FR-1 requires not found instead. The residual risk is a
+# line that genuinely carries both an unrelated number and a marker word, which
+# is narrower than the risk it replaces and is recorded in FR-7.
+_ABV_MARKER = re.compile(r"\b(?:alcohol|alc|abv|vol(?:ume)?|proof)\b", re.IGNORECASE)
+_ABV_NUMBER = re.compile(_NUMBER)
+
+
+def is_alcohol_content_line(text: str) -> bool:
+    """Whether one OCR line states an alcohol content (FR-1, FR-7)."""
+    return bool(_ABV_MARKER.search(text) and _ABV_NUMBER.search(text))
+
+
 _NET_CONTENTS_LINE = re.compile(
     rf"{_NUMBER}\s*(fl\.?\s*oz\.?|fluid\s+ounces?|milli\s?lit(?:er|re)s?|lit(?:er|re)s?|ml|mls|l)\b",
     re.IGNORECASE,
@@ -94,8 +127,8 @@ def parse_fields(lines: list[OcrLine]) -> ParsedFields:
     warning_indices, warning_text = _find_warning(lines)
     warning = check_warning(warning_text) if warning_text else check_warning("")
 
-    abv_index = _first_match(lines, _ABV_LINE, skip=warning_indices)
-    net_index = _first_match(lines, _NET_CONTENTS_LINE, skip=warning_indices)
+    abv_index = _first_match(lines, is_alcohol_content_line, skip=warning_indices)
+    net_index = _first_match(lines, _matcher(_NET_CONTENTS_LINE), skip=warning_indices)
 
     claimed = set(warning_indices)
     claimed.update(index for index in (abv_index, net_index) if index is not None)
@@ -160,14 +193,23 @@ def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
     return indices, normalize_whitespace(" ".join(collected))
 
 
-def _first_match(lines: list[OcrLine], pattern: re.Pattern[str], skip: list[int]) -> int | None:
+def _matcher(pattern: re.Pattern[str]) -> Callable[[str], bool]:
+    """Adapt a pattern to the predicate ``_first_match`` takes."""
+    return lambda text: bool(pattern.search(text))
+
+
+def _first_match(
+    lines: list[OcrLine], matches: Callable[[str], bool], skip: list[int]
+) -> int | None:
+    """The first line the predicate accepts, ignoring lines already claimed.
+
+    A predicate rather than a pattern because alcohol content is no longer one
+    regular expression: it is a number and a marker on the same line, which two
+    patterns express more clearly than one does.
+    """
     skipped = set(skip)
     return next(
-        (
-            index
-            for index, line in enumerate(lines)
-            if index not in skipped and pattern.search(line.text)
-        ),
+        (index for index, line in enumerate(lines) if index not in skipped and matches(line.text)),
         None,
     )
 

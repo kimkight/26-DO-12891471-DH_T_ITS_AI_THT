@@ -101,3 +101,65 @@ class TestWarningBlockAssembly:
         assert parsed.warning.found is True
         assert parsed.warning.prefix_is_upper_case is False
         assert parsed.warning.body_matches is True
+
+
+class TestAlcoholContentNeedsAnAlcoholMarker:
+    """FR-1 and FR-7: a percent is only an ABV when its line says so.
+
+    The defect this tier exists for was found on real artwork. In the author's
+    three-photograph bottle test on 2026-08-27 the deployed prototype reported
+    the alcohol content as `7%`, read from a line of marketing copy on the back
+    label about reducing environmental impact, because the pattern accepted any
+    percent token in reading order.
+    """
+
+    MARKETING_BACK_LABEL = "\n".join(
+        [
+            "STONE'S THROW",
+            "Kentucky Straight Bourbon Whiskey",
+            "Our lighter bottle and recycled carton reduce our environmental",
+            "impact by 7% against the 2024 baseline.",
+            "750 mL",
+        ]
+    )
+
+    def test_a_percent_in_marketing_copy_is_not_read_as_alcohol_content(self):
+        parsed = parse_fields(lines_from_text(self.MARKETING_BACK_LABEL))
+        assert parsed.alcohol_content is None
+
+    def test_the_rest_of_that_label_is_still_read(self):
+        """Not found is one field, not a failed parse (FR-1)."""
+        parsed = parse_fields(lines_from_text(self.MARKETING_BACK_LABEL))
+        assert parsed.brand_name == "STONE'S THROW"
+        assert parsed.net_contents == "750 mL"
+
+    def test_the_sample_label_statement_still_extracts(self):
+        parsed = parse_fields(lines_from_text(SAMPLE_LABEL_TEXT))
+        assert parsed.alcohol_content == "45% Alc./Vol. (90 Proof)"
+
+    def test_a_real_photograph_style_statement_still_extracts(self):
+        text = "STONE'S THROW\n12.5% ALC. BY VOL.\n750 mL"
+        parsed = parse_fields(lines_from_text(text))
+        assert parsed.alcohol_content == "12.5% ALC. BY VOL."
+
+    def test_ocr_noise_around_an_intact_marker_does_not_lose_the_line(self):
+        """The marker has to survive OCR, the words around it do not."""
+        text = "STONE'S THROW\n12.5% AlC. 8Y VOL.\n750 mL"
+        parsed = parse_fields(lines_from_text(text))
+        assert parsed.alcohol_content == "12.5% AlC. 8Y VOL."
+
+    def test_each_marker_in_the_fr_7_set_is_accepted(self):
+        for statement in (
+            "45% ALC/VOL",
+            "45% ALC. BY VOL.",
+            "ALCOHOL 45% BY VOLUME",
+            "ABV 45%",
+            "90 PROOF",
+        ):
+            parsed = parse_fields(lines_from_text(f"STONE'S THROW\n{statement}\n750 mL"))
+            assert parsed.alcohol_content == statement, statement
+
+    def test_a_marker_with_no_number_is_not_reported_as_a_reading(self):
+        """OCR splitting the statement gives not found, not `ALC./VOL.`."""
+        parsed = parse_fields(lines_from_text("STONE'S THROW\nALC./VOL.\n750 mL"))
+        assert parsed.alcohol_content is None
