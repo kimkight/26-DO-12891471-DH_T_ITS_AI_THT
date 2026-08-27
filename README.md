@@ -12,12 +12,19 @@ seconds, or agents go back to doing it manually.
 
 **Author:** Kimberly D. Kight
 
-> **Status: the prototype works, and nothing is deployed.** Single-label and
-> batch verification and the agent-facing interface are built and tested.
-> Accuracy and latency are measured on synthetic labels and on developer
-> hardware, not on a deployed target, and there is no deployed URL. See
-> [Status](#status) below for exactly what works and
-> [Known limitations](#known-limitations) for what those measurements do not
+> **Status: the prototype works and is deployed. Accuracy on real label
+> artwork is the open question.** Single-label and batch verification and the
+> agent-facing interface are built, tested, and running on ECS Fargate behind
+> an Application Load Balancer in `us-east-1`, deployed by image digest.
+>
+> Accuracy and latency are still measured on synthetic labels and on developer
+> hardware, not on the deployed target. The first photograph of a real bottle
+> submitted to the deployed prototype returned none of its five fields; two of
+> the three causes are fixed and recorded as assumption A-15, and the third,
+> that a label wrapping a round bottle is never flat in one photograph, is
+> worked around by [ADR 0007](docs/adr/0007-multi-photo-single-label.md) rather
+> than solved. See [Status](#status) below for exactly what works and
+> [Known limitations](#known-limitations) for what the measurements do not
 > cover.
 
 ## Repository map
@@ -132,6 +139,21 @@ looks unfinished. The requirement behind it is a stakeholder's, not a
 designer's: "clean, obvious, no hunting for buttons," for a team where technology
 comfort varies widely.
 
+**It is dressed in federal design language, and it says plainly that it is not
+an official system.** Navy, a gold rule, Public Sans, and a grey field under
+white panels, in the spirit of the U.S. Web Design System, because the tool is
+about federal label compliance and a prototype that looked like a consumer app
+would answer the wrong question about whether it belongs in this workflow.
+
+The line between reflecting a design language and impersonating an agency is
+drawn at the seal and at claims of officialdom, and it is drawn in tests rather
+than left to judgement. A banner is the first thing on every view: "Prototype
+built for an employment assessment. Not an official TTB or Treasury system.
+Nothing you upload is stored." The footer names the author and the assignment.
+There is no TTB seal, no Treasury seal, no eagle, and no "official website of
+the United States government" banner anywhere in the repository, and
+`frontend/src/__tests__/branding.test.tsx` fails if one is added.
+
 **The tool recommends; the agent decides.** Nothing here issues an approval or a
 rejection, and every result carries the label value, the application value, and
 the score so an agent can overrule it. The interface says so on screen, beneath
@@ -145,6 +167,7 @@ section 6.
 | --- | --- |
 | Backend | Python 3.11, FastAPI, uvicorn |
 | Frontend | React 19, TypeScript, Vite |
+| Typeface | Public Sans, the face the U.S. Web Design System commissioned, under the SIL Open Font License 1.1. Bundled as a variable font and served from the application's own origin, never fetched from a CDN, because NFR-3 applies to the page as well as to the API |
 | OCR | Tesseract via pytesseract, OpenCV for preprocessing |
 | Matching | rapidfuzz |
 | Container | Docker, multi-stage, non-root |
@@ -159,16 +182,16 @@ section 6.
 | [01 Project Charter](docs/01_PROJECT_CHARTER.md) | Purpose, background, stakeholders, success criteria, constraints, deliverables |
 | [02 Project Scope](docs/02_PROJECT_SCOPE.md) | In scope, out of scope, stretch goals, Definition of Done |
 | [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-10, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
-| [04 User Stories](docs/04_USER_STORIES.md) | 21 stories across 5 epics, with Given/When/Then criteria |
+| [04 User Stories](docs/04_USER_STORIES.md) | 22 stories across 6 epics, with Given/When/Then criteria |
 | [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, government-region portability |
 | [06 Security and Compliance](docs/06_SECURITY_AND_COMPLIANCE.md) | Threat model, controls, FedRAMP posture, ATO readiness, AI governance |
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
 | [08 SDLC Process](docs/08_SDLC_PROCESS.md) | Phases with entry and exit criteria, Git Flow, PR checklist, DoR and DoD, releases |
-| [09 Deployment](docs/09_DEPLOYMENT.md) | Outline only; infrastructure is a later task |
-| [Open Questions](docs/OPEN_QUESTIONS.md) | 18 questions, 6 still open, each recorded rather than guessed |
-| [Assumptions](docs/ASSUMPTIONS.md) | 14 inferences, each with what would confirm or falsify it |
+| [09 Deployment](docs/09_DEPLOYMENT.md) | The author's runbook: commands, variables, task sizing, cost, post-deploy verification, teardown |
+| [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
+| [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -186,23 +209,26 @@ figure in this repository was measured on a deployed target.**
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Verification interface, one label | Works: one screen, a drop zone, the five application fields, five result cards |
-| Verification interface, batch | Works: a second tab with progress driven by the stream, a sortable results table, and a results CSV built in the browser |
+| Verification interface, one label | Works: one screen, up to three photographs of the same label, the five application fields, five result cards, and a note saying what was done to each photograph |
+| Verification interface, batch | Works: a second tab with progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per row; see ADR 0007 |
+| Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
 | One bad image failing only its own row in a batch | Works; covered by tests |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Infrastructure as code | Works as code: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI. **Never applied to an AWS account.** |
-| Deployment workflow | Enabled. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. Never run. |
-| Deployed URL | **Not deployed.** The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies from her own machine. |
-| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware; see below. |
+| Infrastructure as code | Works: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI, and applied to an AWS account in `us-east-1`. |
+| Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
+| Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
+| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware, not on the deployed target; see below and `docs/09_DEPLOYMENT.md` section 9. |
+| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
 Numbers are deliberately absent from this table. Accuracy and latency figures
 belong here once they have been measured on the target they describe, and the
-target does not exist yet. `scripts/measure.py` prints the current figures for
-whatever machine runs it, and each pull request that measured something records
-its numbers with the hardware they came from.
+target now exists but has not been measured. The checklist that turns that
+around is `docs/09_DEPLOYMENT.md` section 9. `scripts/measure.py` prints the
+current figures for whatever machine runs it, and each pull request that
+measured something records its numbers with the hardware they came from.
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
@@ -243,8 +269,14 @@ one per user story.
   applies to this prototype is unanswered (OQ-7), and that is what would turn
   NFR-5 from a target into an obligation.
 - **The interface has one light palette and no dark mode.** Contrast is asserted
-  against that palette. A dark palette is a second palette to verify, not a
-  toggle.
+  against that palette, token by token, in
+  `frontend/src/__tests__/contrast.test.ts`. A dark palette is a second palette
+  to verify, not a toggle.
+- **The visual design reflects federal design language; it is not endorsed by,
+  affiliated with, or issued by TTB or the Department of the Treasury.** That is
+  stated on every view of the interface itself, not only here. Public Sans is
+  used under the SIL Open Font License, which is a licensing question with a
+  clear answer rather than a branding claim.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
   no audit record that a verification occurred. For batch, the same decision
   means a dropped connection loses the whole submission: there is no

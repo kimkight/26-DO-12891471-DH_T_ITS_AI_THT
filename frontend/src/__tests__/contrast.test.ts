@@ -55,9 +55,17 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
 
   it.each(
     surfaces.flatMap((surface) =>
-      ['text', 'text-muted', 'accent', 'match', 'review', 'mismatch', 'neutral'].map(
-        (foreground) => [foreground, surface] as const,
-      ),
+      [
+        'text',
+        'text-muted',
+        'accent',
+        'accent-dark',
+        'gold-text',
+        'match',
+        'review',
+        'mismatch',
+        'neutral',
+      ].map((foreground) => [foreground, surface] as const),
     ),
   )('--%s on --%s is at least 4.5:1', (foreground, surface) => {
     expect(ratio(token(foreground), token(surface))).toBeGreaterThanOrEqual(AA_BODY)
@@ -89,6 +97,65 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     for (const surface of surfaces) {
       expect(ratio(token('focus'), token(surface))).toBeGreaterThanOrEqual(AA_NON_TEXT)
     }
+  })
+
+  /*
+   * The masthead is the one dark surface in the interface, so the tokens that
+   * appear on it are checked against it rather than against the light ones.
+   * --gold-bright is brilliant on navy and illegible on white, which is why it
+   * is not in the list above: it is checked where it is used.
+   */
+  it('everything on the navy masthead is readable against it', () => {
+    expect(ratio('#ffffff', token('accent-dark'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('gold-bright'), token('accent-dark'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  it('the focus ring used on the navy masthead is visible against it', () => {
+    expect(ratio(token('focus-on-dark'), token('accent-dark'))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+  })
+
+  it('the prototype banner is readable, and its gold edge is visible on it', () => {
+    expect(ratio(token('text'), token('notice'))).toBeGreaterThanOrEqual(AA_BODY)
+    // The edge is a rule, not text, so 3:1 is the applicable minimum (1.4.11).
+    expect(ratio(token('gold'), token('notice'))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+  })
+
+  it('the gold rule and edges are visible against every surface they sit on', () => {
+    for (const surface of [...surfaces, 'page']) {
+      expect(ratio(token('gold'), token(surface))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+    }
+  })
+
+  /*
+   * The shell is the grey field the white panels sit on. It is the same value
+   * as --surface today and it is checked separately rather than assumed to
+   * stay that way, because a change to one is not a change to the other.
+   */
+  it('body text is readable on the page shell', () => {
+    expect(ratio(token('text'), token('shell'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('text-muted'), token('shell'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  /*
+   * NFR-3 forbids an outbound network call on the default path, and the page is
+   * part of that path. A font fetched from a CDN would make the interface break
+   * on exactly the network Marcus Williams describes, and it would do so
+   * silently: the page still renders, in a fallback face, on a firewall that
+   * blocks the request. The font is a bundled dependency served from this
+   * origin instead, so this asserts the stylesheet imports it rather than
+   * linking out to one.
+   */
+  it('fetches no font, and no other asset, from an external origin (NFR-3)', () => {
+    expect(DECLARATIONS).not.toMatch(/@import\s+url\(\s*['"]?https?:/i)
+    expect(DECLARATIONS).not.toMatch(/url\(\s*['"]?https?:\/\//i)
+    expect(DECLARATIONS).not.toMatch(/fonts\.(googleapis|gstatic)\.com/i)
+    expect(DECLARATIONS).toMatch(/@import\s+'@fontsource-variable\/public-sans/)
+  })
+
+  it('names a fallback after the bundled font, so a missing file is not a blank page', () => {
+    const stack = CSS.match(/font-family:\s*([^;]+);/)?.[1] ?? ''
+    expect(stack).toMatch(/Public Sans Variable/)
+    expect(stack).toMatch(/system-ui/)
   })
 
   it('does not hand the background colour to the browser', () => {

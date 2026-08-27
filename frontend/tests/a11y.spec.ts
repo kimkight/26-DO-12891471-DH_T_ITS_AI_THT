@@ -68,7 +68,7 @@ function report(found: AxeViolation[]): string {
 test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
   test('the landing page, which is the single-label task', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('heading', { name: 'Label check', level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'TTB Label Verifier', level: 1 })).toBeVisible()
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
@@ -162,6 +162,54 @@ test.describe('what axe cannot check', () => {
       .getByLabel('Net contents', { exact: true })
       .evaluate((element) => getComputedStyle(element).outlineWidth)
     expect(parseFloat(outline)).toBeGreaterThan(0)
+  })
+
+  /*
+   * The disclosures, checked in the built page rather than only in jsdom. What
+   * a reviewer will look at is the deployed URL, and what is asserted here is
+   * that the two things separating design-language homage from impersonation
+   * survive the build: the banner is on screen before anything else, and the
+   * masthead carries no seal or emblem of any kind.
+   */
+  test('the prototype banner and the author attribution are on the built page', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await expect(
+      page.getByText(
+        'Prototype built for an employment assessment. Not an official TTB or Treasury ' +
+          'system. Nothing you upload is stored.',
+      ),
+    ).toBeVisible()
+    await expect(
+      page.getByText('Built by Kimberly D. Kight as a take-home assignment.'),
+    ).toBeVisible()
+    // No seal, emblem or wordmark image in the masthead.
+    await expect(page.locator('.masthead img, .masthead svg')).toHaveCount(0)
+  })
+
+  test('the bundled font loads from this origin and nothing is fetched externally', async ({
+    page,
+  }) => {
+    // NFR-3 applies to the page, not only to the API. A stylesheet linking a
+    // font CDN would break the interface on the firewall Marcus Williams
+    // describes, and would do it silently.
+    // Anything not on the loopback address the preview server binds to. Not
+    // compared against `page.url()`, which is still about:blank when the first
+    // request is made and would count the page's own document as external.
+    const external: string[] = []
+    page.on('request', (request) => {
+      const { hostname } = new URL(request.url())
+      if (hostname !== '127.0.0.1' && hostname !== 'localhost') external.push(request.url())
+    })
+    await page.goto('/')
+    await page.waitForLoadState('networkidle')
+    expect(external).toEqual([])
+
+    const family = await page
+      .locator('h1')
+      .evaluate((element) => getComputedStyle(element).fontFamily)
+    expect(family).toContain('Public Sans Variable')
   })
 
   test('the primary task is on the landing page with no navigation (NFR-4)', async ({ page }) => {

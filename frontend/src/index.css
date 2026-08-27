@@ -6,58 +6,124 @@
  * visible focus, 4.5:1 body text contrast, outcomes not conveyed by colour
  * alone).
  *
- * Two decisions worth stating because they are visible and deliberate:
+ * ## The visual direction, and the line it does not cross
  *
- * 1. **One light palette, no dark mode.** The previous scaffold declared
- *    `color-scheme: light dark`, which hands the background colour to the
- *    browser and makes the contrast ratio a property of the visitor's settings
- *    rather than of this file. NFR-5 asks for 4.5:1, so every colour here is
- *    explicit and every pair is checked by src/__tests__/contrast.test.ts. A
- *    dark palette is a good addition later; it is a second palette to verify,
- *    not a toggle.
+ * This reads as federal work in the spirit of the U.S. Web Design System:
+ * navy, a gold rule, a grey field, and type doing the work that boxes and
+ * shadows do elsewhere. The reference is a well-set government form, not a
+ * product landing page.
+ *
+ * **It is not, and must never look like, an official TTB or Treasury system.**
+ * That line is drawn at the seal and at claims of officialdom, and it is drawn
+ * in code rather than left to judgement:
+ *
+ * - No TTB seal, no Treasury seal, no eagle, no "An official website of the
+ *   United States government" banner. None of those marks appears anywhere in
+ *   this repository, and `src/__tests__/branding.test.tsx` fails if one is
+ *   added.
+ * - A prototype banner is the first thing on every view, before the masthead,
+ *   saying what this is and what it is not.
+ * - The footer names the author and the assignment.
+ *
+ * The agency name is set as plain text at a small size above the product name.
+ * It says which domain the tool is about; it does not claim to be issued by
+ * that agency, which is what the banner directly above it settles.
+ *
+ * ## Typography
+ *
+ * Public Sans, bundled, not fetched. It is the typeface the U.S. Web Design
+ * System commissioned and it is published under the SIL Open Font License, so
+ * using it is a licensing question with a clear answer rather than a branding
+ * one. It ships in the bundle as a variable font served from this origin:
+ * NFR-3 forbids outbound calls on the default path, and a stylesheet that
+ * fetches from a font CDN would make the page itself violate that on a network
+ * like the one Marcus Williams describes. `system-ui` follows it in the stack,
+ * so a build where the font file fails still renders in something sensible.
+ *
+ * ## Two decisions worth stating because they are visible and deliberate
+ *
+ * 1. **One light palette, no dark mode.** Declaring `color-scheme: light dark`
+ *    would hand the background colour to the browser and make the contrast
+ *    ratio a property of the visitor's settings rather than of this file.
+ *    NFR-5 asks for 4.5:1, so every colour here is explicit and every pair is
+ *    checked by src/__tests__/contrast.test.ts. A dark palette is a good
+ *    addition later; it is a second palette to verify, not a toggle.
  *
  * 2. **Every token is a colour that passed the check.** The ratios are in the
  *    test, not in comments here, because a comment cannot fail.
  */
 
+@import '@fontsource-variable/public-sans/wght.css';
+
 :root {
-  /* Surfaces */
+  /* Surfaces. --shell is the grey field the white panels sit on. */
   --page: #ffffff;
-  --surface: #f6f8fa;
-  --border: #d0d7de;
-  --border-strong: #8c959f;
+  --shell: #f0f0f0;
+  --surface: #f0f0f0;
+  --border: #dfe1e2;
+  --border-strong: #71767a;
 
   /* Text. Both pass 4.5:1 on --page and on --surface. */
-  --text: #1f2328;
-  --text-muted: #4a5158;
+  --text: #1b1b1b;
+  --text-muted: #565c65;
+
+  /*
+   * Navy. --accent is the working primary and carries text and buttons;
+   * --accent-dark is the masthead band, which only ever holds white text and
+   * the gold rule.
+   */
+  --accent: #1a4480;
+  --accent-dark: #112e51;
+
+  /*
+   * Gold, in three roles, because one gold cannot do all three and pass.
+   *
+   * --gold is the rule, the edge, and the leading bar: non-text, so WCAG's 3:1
+   * applies and #c05600 clears it on both surfaces.
+   * --gold-text is the same hue darkened until it clears 4.5:1 on both
+   * surfaces, which #c05600 does not: it reaches 4.59 on white and only 4.03
+   * on the grey. Text needs the darker one. That is the whole reason there are
+   * two, and it is a contrast constraint rather than a preference.
+   * --gold-bright is for the navy band only. It is brilliant against navy and
+   * illegible on white, so it is never used on a light surface, and the test
+   * checks it where it is used rather than where it is not.
+   */
+  --gold: #c05600;
+  --gold-text: #a8500a;
+  --gold-bright: #ffbe2e;
 
   /* Outcome tones. Each has a foreground, a tint, and an edge. */
-  --match: #0f6b30;
-  --match-tint: #e8f5ec;
+  --match: #136c3a;
+  --match-tint: #eaf4ee;
   --review: #7a4b00;
   --review-tint: #fdf3e0;
   --mismatch: #a5231b;
   --mismatch-tint: #fdeceb;
-  --neutral: #4a5158;
-  --neutral-tint: #f0f2f4;
+  --neutral: #565c65;
+  --neutral-tint: #eef0f2;
 
-  --accent: #0b4f9e;
-  --focus: #0b4f9e;
+  /* The prototype banner, which is neither an outcome nor chrome. */
+  --notice: #fff8e6;
 
-  --radius: 8px;
+  --focus: #1a4480;
+  --focus-on-dark: #ffbe2e;
+
+  --radius: 4px;
   --gap: 1rem;
+  --measure: 84rem;
+  --rule: 4px;
 
   font-family:
+    'Public Sans Variable',
     system-ui,
     -apple-system,
     'Segoe UI',
-    Roboto,
     sans-serif;
   /* 1.5 body line height and 16px base: WCAG 1.4.12 and plain readability. */
   line-height: 1.5;
   font-size: 100%;
   color: var(--text);
-  background: var(--page);
+  background: var(--shell);
 }
 
 * {
@@ -68,19 +134,25 @@ body {
   margin: 0;
   padding: 0;
   color: var(--text);
-  background: var(--page);
+  background: var(--shell);
 }
 
 /*
  * NFR-5, second criterion: visible focus on every interactive control. Set once
  * on :focus-visible for everything rather than per component, so a control
  * added later cannot be added without it. The 3:1 minimum for a focus indicator
- * is met by --focus against both --page and --surface.
+ * is met by --focus against both --page and --surface, and by --focus-on-dark
+ * against the navy band, which is the one place --focus itself would vanish.
  */
 :focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 2px;
   border-radius: 2px;
+}
+
+.masthead :focus-visible,
+.prototype-banner :focus-visible {
+  outline-color: var(--focus-on-dark);
 }
 
 /* Content hidden visually but kept for assistive technology. Not display:none,
@@ -103,9 +175,9 @@ body {
   left: -9999px;
   top: 0;
   padding: 0.75rem 1rem;
-  background: var(--page);
-  color: var(--accent);
-  font-weight: 600;
+  background: var(--accent-dark);
+  color: #ffffff;
+  font-weight: 700;
   z-index: 10;
 }
 
@@ -113,38 +185,121 @@ body {
   left: 0;
 }
 
+/* ------------------------------------------------------- prototype banner */
+
+/*
+ * The first thing on every view, above the masthead, and the reason the rest of
+ * the page is allowed to look like federal work at all. It says what this is
+ * and, more importantly, what it is not.
+ *
+ * It is deliberately not styled as an alert: no icon, no red, nothing that
+ * reads as an error the agent should clear. It is a standing statement of fact
+ * and it is meant to be read once and then trusted, so it is quiet, permanent,
+ * and never dismissible. The gold bar down its leading edge is the same mark
+ * that rules off the masthead below it, which is what ties the two together
+ * rather than making the banner look bolted on.
+ */
+.prototype-banner {
+  background: var(--notice);
+  border-bottom: 1px solid var(--border);
+  border-left: var(--rule) solid var(--gold);
+}
+
+.prototype-banner__text {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 0.625rem 1.5rem;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+
+.prototype-banner__lead {
+  font-weight: 700;
+}
+
 /* ---------------------------------------------------------------- masthead */
 
+/*
+ * The navy band. One rule of gold under it, four pixels, full bleed. That rule
+ * is the only ornament in the whole interface and it is the one thing a person
+ * will remember about the page, which is exactly the amount of ornament a
+ * compliance tool should carry.
+ */
 .masthead {
-  padding: 1.5rem 1.5rem 0.75rem;
-  max-width: 84rem;
+  background: var(--accent-dark);
+  border-bottom: var(--rule) solid var(--gold-bright);
+  color: #ffffff;
+}
+
+.masthead__inner {
+  max-width: var(--measure);
   margin: 0 auto;
+  padding: 1.5rem;
+}
+
+/*
+ * The agency name, as plain text styling only. Small, letterspaced, upper case:
+ * the typographic treatment a subject line gets, not the treatment a seal or a
+ * wordmark gets. It says what domain this tool is about. The banner directly
+ * above it has already said who built it and that it is not an official system.
+ */
+.masthead__agency {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
 }
 
 .masthead h1 {
-  margin: 0;
-  font-size: 1.75rem;
-  line-height: 1.2;
+  margin: 0.25rem 0 0;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.015em;
 }
 
 .masthead__subtitle {
-  margin: 0.25rem 0 0;
-  color: var(--text-muted);
-  max-width: 60ch;
+  margin: 0.5rem 0 0;
+  color: #ffffff;
+  opacity: 0.92;
+  max-width: 62ch;
+  font-size: 1rem;
 }
 
 main {
-  max-width: 84rem;
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: 0 1.5rem 2rem;
+  padding: 0 1.5rem 3rem;
 }
 
 .site-footer {
-  max-width: 84rem;
+  border-top: 1px solid var(--border);
+  background: var(--page);
+}
+
+.site-footer__inner {
+  max-width: var(--measure);
   margin: 0 auto;
-  padding: 0 1.5rem 2rem;
+  padding: 1.5rem;
   color: var(--text-muted);
   font-size: 0.9375rem;
+}
+
+.site-footer p {
+  margin: 0 0 0.5rem;
+  max-width: 78ch;
+}
+
+.site-footer p:last-child {
+  margin-bottom: 0;
+}
+
+.site-footer__attribution {
+  font-weight: 600;
+  color: var(--text);
 }
 
 /* -------------------------------------------------------------------- tabs */
@@ -153,7 +308,7 @@ main {
   display: flex;
   gap: 0.25rem;
   border-bottom: 2px solid var(--border);
-  margin: 1rem 0 1.5rem;
+  margin: 1.75rem 0 1.5rem;
 }
 
 .tab {
@@ -161,17 +316,17 @@ main {
   border: 0;
   background: none;
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-muted);
   padding: 0.625rem 1rem;
   cursor: pointer;
-  border-bottom: 3px solid transparent;
+  border-bottom: var(--rule) solid transparent;
   margin-bottom: -2px;
 }
 
 .tab--active {
   color: var(--accent);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--gold);
 }
 
 /* ------------------------------------------------------------------ layout */
@@ -183,7 +338,7 @@ main {
  */
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 24rem) minmax(0, 1fr);
   gap: 1.5rem;
   align-items: start;
 }
@@ -194,23 +349,32 @@ main {
   }
 }
 
+/*
+ * A white panel on the grey field, with a navy hairline across its top. The
+ * hairline is what makes a panel read as a section of a document rather than
+ * as a card in a dashboard, and it costs one line of CSS instead of a shadow.
+ */
 .panel {
   background: var(--page);
   border: 1px solid var(--border);
+  border-top: 3px solid var(--accent);
   border-radius: var(--radius);
-  padding: 1.25rem;
+  padding: 1.5rem;
   min-width: 0;
 }
 
 .panel > h2 {
-  margin: 0 0 1rem;
+  margin: 0 0 1.25rem;
   font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.005em;
 }
 
 .placeholder {
   color: var(--text-muted);
   background: var(--surface);
-  border-radius: var(--radius);
+  border-left: var(--rule) solid var(--border-strong);
+  border-radius: 0 var(--radius) var(--radius) 0;
   padding: 1rem;
   margin: 0;
 }
@@ -218,24 +382,26 @@ main {
 .footnote {
   color: var(--text-muted);
   font-size: 0.9375rem;
-  margin: 1rem 0 0;
+  margin: 1.25rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
 }
 
 /* ------------------------------------------------------------------- forms */
 
 .field {
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
 }
 
 .field label,
 .dropzone__label {
   display: block;
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 0.25rem;
 }
 
 .field__hint {
-  margin: 0 0 0.25rem;
+  margin: 0 0 0.375rem;
   color: var(--text-muted);
   font-size: 0.9375rem;
 }
@@ -253,7 +419,7 @@ main {
 
 .button {
   font: inherit;
-  font-weight: 600;
+  font-weight: 700;
   padding: 0.625rem 1.25rem;
   border-radius: var(--radius);
   border: 1px solid var(--border-strong);
@@ -267,6 +433,29 @@ main {
   background: var(--accent);
   border-color: var(--accent);
   color: #ffffff;
+}
+
+.button--primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+/*
+ * A secondary button. Lower weight than the primary action so that "Check this
+ * label" stays the obvious thing to press (NFR-4), and still a real button with
+ * a real border, because a control that looks like text is a control an agent
+ * has to hunt for.
+ */
+.button--quiet {
+  font-size: 0.9375rem;
+  padding: 0.4375rem 0.875rem;
+  background: var(--surface);
+  color: var(--accent);
+  border-color: var(--border-strong);
+}
+
+.button--quiet:hover {
+  background: var(--border);
 }
 
 .button:disabled {
@@ -293,56 +482,44 @@ main {
 .photos {
   border: 0;
   padding: 0;
-  margin: 0 0 1rem;
+  margin: 0 0 1.25rem;
   min-width: 0;
 }
 
 .photos__legend {
   padding: 0;
-  font-weight: 600;
+  font-weight: 700;
   margin-bottom: 0.25rem;
 }
 
 .photos__count {
   font-weight: 400;
   color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .photos__slot {
   margin-bottom: 0.5rem;
 }
 
-/*
- * A secondary button. Lower weight than the primary action so that "Check this
- * label" stays the obvious thing to press (NFR-4), and still a real button with
- * a real border, because a control that looks like text is a control an agent
- * has to hunt for.
- */
-.button--quiet {
-  font-size: 0.9375rem;
-  padding: 0.4375rem 0.875rem;
-  background: var(--surface);
-  color: var(--accent);
-  border-color: var(--border-strong);
-}
-
-/* --------------------------------------------------------------- photo notes */
+/* -------------------------------------------------------------- photo notes */
 
 .photo-notes {
-  margin-bottom: 1rem;
-  padding: 0.75rem 1rem;
+  margin-bottom: 1.25rem;
+  padding: 0.875rem 1rem;
   background: var(--surface);
-  border-radius: var(--radius);
+  border-left: var(--rule) solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .photo-notes__list {
-  margin: 0.25rem 0 0;
+  margin: 0.375rem 0 0;
   padding-left: 1.25rem;
   font-size: 0.9375rem;
 }
 
 .photo-notes__list li + li {
-  margin-top: 0.25rem;
+  margin-top: 0.375rem;
 }
 
 /*
@@ -367,6 +544,7 @@ main {
 .dropzone--dragging {
   border-color: var(--accent);
   border-style: solid;
+  background: var(--page);
 }
 
 .dropzone:focus-within {
@@ -387,7 +565,7 @@ main {
 
 .dropzone__chosen {
   margin: 0.625rem 0 0;
-  font-weight: 600;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
@@ -400,9 +578,9 @@ main {
 
 .card {
   border: 1px solid var(--border);
-  border-left: 4px solid var(--neutral);
-  border-radius: var(--radius);
-  padding: 1rem;
+  border-left: var(--rule) solid var(--neutral);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 1.125rem 1.25rem;
   background: var(--page);
 }
 
@@ -432,18 +610,19 @@ main {
   gap: 0.5rem;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.875rem;
 }
 
 .card__title {
   margin: 0;
   font-size: 1rem;
+  font-weight: 700;
 }
 
 .card__values {
-  margin: 0 0 0.75rem;
+  margin: 0 0 0.875rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
 
 @media (min-width: 40rem) {
@@ -453,14 +632,15 @@ main {
 }
 
 .card__value dt {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
 }
 
 .card__value dd {
-  margin: 0.125rem 0 0;
+  margin: 0.1875rem 0 0;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
@@ -477,16 +657,17 @@ main {
 }
 
 .card__detail {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
   border-top: 1px solid var(--border);
 }
 
 .card__subtitle {
-  margin: 0.5rem 0 0.125rem;
-  font-size: 0.875rem;
+  margin: 0.75rem 0 0.1875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
 }
 
@@ -498,7 +679,7 @@ main {
 .card__detail--fail {
   margin: 0;
   color: var(--mismatch);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 /* ------------------------------------------------------------------ badges */
@@ -508,10 +689,11 @@ main {
   align-items: center;
   gap: 0.375rem;
   padding: 0.1875rem 0.5rem;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border: 1px solid currentColor;
-  font-size: 0.875rem;
+  font-size: 0.8125rem;
   font-weight: 700;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
@@ -551,7 +733,7 @@ main {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: 1.25rem;
   flex-wrap: wrap;
 }
 
@@ -561,27 +743,30 @@ main {
 }
 
 .progress label {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .summary {
   list-style: none;
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
-  padding: 0.75rem 1rem;
-  margin: 0 0 1rem;
+  gap: 1.25rem;
+  padding: 0.875rem 1rem;
+  margin: 0 0 1.25rem;
   background: var(--surface);
-  border-radius: var(--radius);
+  border-left: var(--rule) solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .summary strong {
   font-size: 1.125rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .timing {
-  margin: 0 0 1rem;
-  font-weight: 600;
+  margin: 0 0 1.25rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
 .timing__detail {
@@ -619,6 +804,7 @@ main {
 
 .results-table .numeric {
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .results-table .filename {
@@ -659,10 +845,12 @@ main {
 /* ----------------------------------------------------------------- notices */
 
 .notice {
-  border-radius: var(--radius);
-  padding: 1rem;
-  margin-bottom: 1rem;
-  border: 1px solid;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 1rem 1.125rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--border);
+  border-left-width: var(--rule);
+  border-left-style: solid;
 }
 
 .notice--error {
@@ -684,13 +872,13 @@ main {
 }
 
 .details {
-  margin-top: 1rem;
+  margin-top: 1.25rem;
   font-size: 0.9375rem;
 }
 
 .details summary {
   cursor: pointer;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .details p {
@@ -700,5 +888,5 @@ main {
 .details code {
   background: var(--surface);
   padding: 0.0625rem 0.25rem;
-  border-radius: 4px;
+  border-radius: 2px;
 }

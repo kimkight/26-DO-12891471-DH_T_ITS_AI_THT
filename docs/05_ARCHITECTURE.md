@@ -226,10 +226,52 @@ runtime dependency beyond `react` and `react-dom`. Two endpoints and one screen
 do not need more, and every layer added between an agent and a form is a layer
 NFR-4 has to survive.
 
+**The visual design, and the line it does not cross.** The interface is dressed
+in federal design language in the spirit of the U.S. Web Design System: navy
+(`#112e51` for the masthead band, `#1a4480` for working primary), a gold rule
+(`#c05600` for edges, `#ffbe2e` on navy only), neutral greys, and Public Sans.
+The tool is about federal label compliance, and a prototype that looked like a
+consumer product would be answering the wrong question about whether it belongs
+in this workflow.
+
+Reflecting a design language and impersonating an agency are different things,
+and the difference is enforced in tests rather than left to judgement:
+
+- A banner is the first element on every view, before the masthead: "Prototype
+  built for an employment assessment. Not an official TTB or Treasury system.
+  Nothing you upload is stored." It is never dismissible.
+- The footer names the author and the assignment.
+- There is no TTB seal, no Treasury seal, no eagle, no coat of arms, and no
+  "official website of the United States government" banner anywhere in the
+  repository. No raster or vector asset is imported at all; the only SVG is the
+  four outcome glyphs, drawn inline.
+- The agency's full name appears once, as plain text above the product name, at
+  the size and weight a subject line gets rather than a wordmark's.
+
+`src/__tests__/branding.test.tsx` asserts both halves: that the disclosures are
+present in the words they were written in and in the positions that make them
+read first, and that none of the forbidden marks or phrases appears in any
+source file the built page is assembled from. It strips comments before
+scanning, so the comment explaining which marks are forbidden is not itself a
+violation.
+
+**Public Sans is bundled, not fetched.** It is the typeface the U.S. Web Design
+System commissioned, published under the SIL Open Font License 1.1, so using it
+is a licensing question with a clear answer. It ships as a variable font in the
+build output and is served from the application's own origin.
+`@fontsource-variable/public-sans` is a dev dependency, which is correct because
+the container's frontend stage runs a full `npm ci` before `npm run build`.
+NFR-3 is the reason it is not linked from a font CDN: a stylesheet that fetched
+from one would break the interface on exactly the firewall Marcus Williams
+describes, and would do so silently, rendering in a fallback face rather than
+failing. The a11y run asserts that loading the built page issues no request off
+this origin.
+
 | Module | Responsibility | Governing requirements | Tests |
 | --- | --- | --- | --- |
-| `App.tsx` | The one screen: the skip link, the two tabs, and the ARIA tabs keyboard behaviour | NFR-4, NFR-5 | `tests/a11y.spec.ts` |
-| `components/SingleLabelTab.tsx` | The drop zone, the five labelled inputs, the check button, the result cards, the timing line, and the live region | FR-10, NFR-1, NFR-4, NFR-5 | `src/__tests__/liveRegion.test.tsx` |
+| `App.tsx` | The one screen: the prototype banner, the masthead, the skip link, the two tabs, the ARIA tabs keyboard behaviour, and the footer attribution | NFR-4, NFR-5 | `tests/a11y.spec.ts`, `src/__tests__/branding.test.tsx` |
+| `components/SingleLabelTab.tsx` | The photo slots and their add and remove controls, the five labelled inputs, the check button, the result cards, the timing line, and the live regions | FR-10, NFR-1, NFR-4, NFR-5, ADR 0007 | `src/__tests__/liveRegion.test.tsx`, `src/__tests__/multiPhoto.test.tsx` |
+| `components/PhotoNotes.tsx` | What was done to each submitted photograph, rendered only when there is something to say | FR-10, ADR 0007, A-15 | `src/__tests__/multiPhoto.test.tsx` |
 | `components/BatchTab.tsx` | The two pickers, the progress indicator driven by the stream, the summary counts, and the CSV download | FR-8, NFR-2 | `src/__tests__/batchTable.test.tsx` |
 | `components/BatchTable.tsx` | The sortable results table with a status chip per row | FR-8, FR-10, NFR-5 | `src/__tests__/batchTable.test.tsx` |
 | `components/ResultCard.tsx` | One field's card, and the warning's separate capitalization and bold-type sections | FR-3, FR-6, FR-10, OOS-4 | `src/__tests__/outcomes.test.tsx` |
@@ -240,7 +282,8 @@ NFR-4 has to survive.
 | `lib/outcomes.ts` | The text, shape and tone for each outcome, and the live-region sentence | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
 | `lib/plainLanguage.ts` | API error codes rendered as something an agent can act on | FR-9, NFR-4 | `src/__tests__/liveRegion.test.tsx` |
 | `lib/csv.ts` | The results CSV, built in the browser | FR-8, D-9 | `src/__tests__/batchTable.test.tsx` |
-| `index.css` | One light palette, defined as tokens, with every contrast pair checked | NFR-5 | `src/__tests__/contrast.test.ts` |
+| `lib/photos.ts` | The wording for each photograph's note, and the per-field attribution label | FR-10, ADR 0007 | `src/__tests__/multiPhoto.test.tsx` |
+| `index.css` | One light palette, defined as tokens, with every contrast pair checked, and the bundled font imported rather than linked | NFR-3, NFR-5 | `src/__tests__/contrast.test.ts` |
 
 Four notes that are not obvious from the table:
 

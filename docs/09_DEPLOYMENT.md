@@ -393,6 +393,22 @@ not change.
       4.3 with a measurement, and it is what tells you whether 8 GiB was right.
 - [ ] **The stream arrived progressively**, from section 8.4, recorded as a
       yes or no with the timestamps that show it.
+- [ ] **A three-photograph single-label submission** (ADR 0007). On a session
+      runner one, two and three photographs measured 1.24 s, 2.49 s and 3.83 s
+      end to end, so three photographs is inside NFR-1's roughly 5 seconds with
+      about a second to spare, and on the deployed task it may not be. That is
+      the thinnest margin against NFR-1 anywhere in the prototype and it is the
+      figure most worth having from real hardware. If it exceeds the target,
+      the lever is `TTB_MAX_LABEL_PHOTOS` or `TTB_CORRECT_ORIENTATION`, both of
+      which are task environment variables and neither of which needs a code
+      change.
+- [ ] **A real photograph, not a rendered one.** Submit an actual bottle
+      photographed sideways, and confirm the five fields come back, that the
+      response names the rotation it applied, and that a warning set in a
+      narrow hyphenated column reports a match (assumption A-15). This is the
+      check that found the failure the orientation and hyphenation work exists
+      to fix, and running it once against a synthetic label proves nothing
+      about it.
 - [ ] Record all of it with the date, the task size, and the image digest, the
       way every other measurement in this repository is recorded.
 
