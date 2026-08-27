@@ -31,6 +31,7 @@ updates every artifact the answer affects.
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 | [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
+| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17) |
 
 ---
 
@@ -1079,3 +1080,46 @@ which the repository does not hold and cannot redistribute
 (`samples/README.md`).
 **Blocks:** nothing in the prototype. It bounds any claim about accuracy on real
 artwork, and it is the reason no such claim is made.
+
+## OQ-22
+**Which COLA document shapes and which form editions has the parser actually
+been verified against?**
+
+**Status: Open, 2026-08-27.**
+
+FR-11 accepts an uploaded label application and reads the values off it. Two
+things about that are verified and two are not, and the difference matters
+because a reader who assumes all four will over-trust the feature.
+
+**Verified.** The item map in assumption A-17 is read off the blank
+TTB F 5100.31 (04/2023), downloaded once during development from
+`https://www.ttb.gov/system/files/images/pdfs/forms/f510031.pdf`, including its
+AcroForm field names and item 5's radio group export values. The three
+extraction paths are each exercised against synthetic documents generated at
+test time by `samples/formmaker.py`.
+
+**Not verified.** No real filed application has been parsed, and no real Public
+COLA Registry printout has been parsed. Both are real applicants' records, and
+the no-personal-data rule in [07_TEST_STRATEGY.md](07_TEST_STRATEGY.md)
+section 8 forbids committing one as a fixture. So the Registry captions the
+parser matches, `BRAND NAME`, `FANCIFUL NAME`, `CLASS/TYPE`, `ALCOHOL CONTENT`
+and `NET CONTENTS`, are the ones a printout is expected to carry rather than
+ones that have been read off a printout. And the item map holds for the 04/2023
+edition only: the form states that previous editions are obsolete without saying
+how they differed, and an earlier edition may number its items differently.
+
+**What would answer it:** running the parser over a set of real applications and
+Registry printouts with the values known, and reporting per-field extraction
+rates by document shape and edition, the way
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 3 does for label artwork. A
+redacted or synthetic set produced by TTB would serve, and would not carry the
+personal-data problem.
+
+**Who can answer:** Sarah Chen or Jenny Park, for which of the two documents an
+agent actually holds and in what editions they arrive; measurement, for the
+extraction rate.
+**Blocks:** nothing in the prototype. Every parsed value is shown for
+confirmation in an editable field before a check runs (ADR 0008), so a caption
+this parser does not recognize costs an agent the typing they were doing
+anyway rather than producing a wrong comparison. It bounds any claim that the
+feature works on real documents, and it is the reason no such claim is made.

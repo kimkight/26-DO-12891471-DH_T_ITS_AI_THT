@@ -11,6 +11,9 @@
 /** FR-3's three outcomes, plus FR-2's "the application did not supply this". */
 export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared'
 
+/** Where an application value came from (FR-11, ADR 0008). */
+export type ApplicationSource = 'typed' | 'parsed_from_form' | 'absent'
+
 /** One field row (FR-3): both values, the score, the outcome, and why. */
 export interface FieldResult {
   name: string
@@ -26,6 +29,36 @@ export interface FieldResult {
    * (ADR 0007). Null where the field was not found on any of them.
    */
   source_photo: number | null
+  /**
+   * Whether the agent typed this application value or it was read off an
+   * uploaded COLA document (FR-11). A typed value always wins over a parsed
+   * one, so this is what tells an agent which of the two they are looking at.
+   */
+  application_value_source: ApplicationSource
+}
+
+/** One value read off an uploaded COLA document (FR-11, ADR 0008). */
+export interface ParsedApplicationField {
+  name: string
+  display_name: string
+  value: string | null
+  found_on_document: boolean
+}
+
+/**
+ * What an uploaded COLA document was read to say (FR-11, ADR 0008).
+ *
+ * Surfaced for confirmation, never silently trusted: the interface puts these
+ * into the same editable fields an agent would have typed into, marked as read
+ * from the application form, and the verification runs on what is in the fields.
+ */
+export interface ApplicationDocumentResult {
+  extraction_path: 'form_fields' | 'embedded_text' | 'ocr'
+  pages_read: number
+  fields: ParsedApplicationField[]
+  fanciful_name: string | null
+  class_type_code: string | null
+  notes: string[]
 }
 
 /** How one photograph was turned before it was read (A-15). */
@@ -70,6 +103,7 @@ export interface VerificationResult {
   elapsed_ms: number
   ocr_ms: number
   external_call_made: boolean
+  application_document: ApplicationDocumentResult | null
 }
 
 /** An error body (FR-9). It carries no field outcomes at all. */

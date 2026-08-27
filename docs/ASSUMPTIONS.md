@@ -27,6 +27,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-14](#a-14) | Batch application data arrives as one CSV keyed by image filename | FR-8, US-9 | Medium |
 | [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
 | [A-16](#a-16) | Three photographs of one label is enough, and no source states a number | FR-1, US-22 | Low |
+| [A-17](#a-17) | The COLA form field map, and that three of the five compared values are not items on the form | FR-11, US-23 | Medium |
 
 ---
 
@@ -455,3 +456,70 @@ label); Jenny Park interview (SG-1). Recorded in
 [ADR 0007](adr/0007-multi-photo-single-label.md) and in the FR-1 acceptance
 criteria. Tested by `backend/tests/test_multi_photo.py::TestThePhotographCap`
 and `frontend/src/__tests__/multiPhoto.test.tsx`; UAT rows 26, 27, 28.
+
+## A-17
+**The COLA document field map, and the fact that three of the five values this
+tool compares are not items on the form at all.**
+
+[ADR 0008](adr/0008-cola-form-as-application-input.md) accepts an uploaded copy
+of the label application as an alternative to typing the same values. The map
+below was read off the blank form, downloaded once during development from
+`https://www.ttb.gov/system/files/images/pdfs/forms/f510031.pdf`. **Edition:
+TTB F 5100.31 (04/2023), OMB No. 1513-0020.** It was not recalled and it was not
+inferred from the requirement text. Nothing is fetched at runtime.
+
+**The map, item by item.**
+
+| This tool's field | Source on the form | AcroForm field name on the downloaded PDF |
+| --- | --- | --- |
+| Brand name | Item 6, "BRAND NAME (Required)" | `6. BRAND NAME (Required)` |
+| Fanciful name (carried, not compared) | Item 7, "FANCIFUL NAME (If any)" | `7. FANCIFUL NAME (If any)` |
+| Beverage type | Item 5, "TYPE OF PRODUCT (Required)": WINE, DISTILLED SPIRITS, MALT BEVERAGES | `Check Box22`, one radio group, export values `Wine`, `Spirits`, `Malt` |
+| Class or type designation | **Not an item.** On the labels affixed to the application; on a Public COLA Registry printout as `CLASS/TYPE` | none |
+| Class or type code (recorded, not compared) | **Not an item.** On a Registry printout, printed before the description | none |
+| Alcohol content | **Not an item.** On the labels affixed to the application; on a Registry printout as `ALCOHOL CONTENT` | none |
+| Net contents | Item 15 **only** when blown, branded or embossed on the container and not on the labels; otherwise on the labels, and on a Registry printout as `NET CONTENTS` | `15.  SHOW ANY INFORMATION THAT IS BLOWN, BRANDED, OR EMBOSSED ON THE CONTAINER (e.g., net contents) ONLY IF IT DOES NOT APPEAR ON THE LABELS` |
+
+Related items exist and are deliberately not read: item 1 (representative ID),
+item 2 (plant registry, basic permit or brewer's notice number), item 3 (source
+of product), item 4 (serial number), item 8 and 8a (applicant name and
+addresses), items 9 through 13, item 14 (type of application), items 16 through
+18 (date, signature, printed name) and items 19 and 20 (the TTB certificate
+block). Several carry personal data or permit numbers, none is compared against
+a label, and reading them would put values into a response that has no use for
+them (NFR-6, OOS-6).
+
+**What is assumed rather than read.**
+
+1. **That item 15 must not be read as a net contents statement.** The box holds
+   whatever is blown, branded or embossed on the container; net contents is the
+   form's example, not the box's meaning. Taking its contents as a net contents
+   statement would report a guess as a reading. The parser leaves it and says
+   the value has to be entered.
+2. **That a Registry printout labels its rows `BRAND NAME`, `FANCIFUL NAME`,
+   `CLASS/TYPE`, `ALCOHOL CONTENT` and `NET CONTENTS`.** This is the weakest
+   link in the map. The blank form was downloaded and read; a Registry detail
+   page was not, because the only real ones are real applicants' records and the
+   no-personal-data rule forbids committing one as a fixture. The parser matches
+   those captions case-insensitively, tolerantly, and at the start of a line.
+   Tracked as OQ-22.
+3. **That a class or type printed as `141 - BOURBON WHISKY` is a code followed
+   by a description.** The description is what is compared; the code is
+   recorded and reported and compared against nothing.
+4. **That a document naming exactly one of the three product types is stating
+   it.** A form that names all three is offering a choice and has said nothing,
+   which is what an unticked checkbox looks like in a text layer.
+5. **That the edition matters and other editions exist.** The map is verified
+   against 04/2023 only. An earlier edition may number its items differently,
+   and the form itself says previous editions are obsolete without saying what
+   they contained. Tracked as OQ-22.
+
+**Confirmed or falsified by:** running the parser against a real filed
+application and a real Registry printout, which the author could not do without
+using an applicant's record. Ask Sarah Chen or Jenny Park which of the two
+documents an agent actually has in front of them, and on which editions.
+
+**Risk if wrong:** medium. A wrong caption means a value reads as not found and
+the agent types it, which is where they started; it does not produce a wrong
+comparison, because every parsed value is shown for confirmation in an editable
+field before the check runs (ADR 0008).

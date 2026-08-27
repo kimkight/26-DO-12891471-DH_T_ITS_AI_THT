@@ -206,10 +206,11 @@ figure in this repository was measured on a deployed target.**
 | `GET /api/health` | Works |
 | `POST /api/verify` (one label against its application data) | Works |
 | `POST /api/verify-batch` (many labels plus one CSV of application data) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md). |
+| `POST /api/read-application` (read a COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Verification interface, one label | Works: one screen, up to three photographs of the same label, the five application fields, five result cards, and a note saying what was done to each photograph |
+| Verification interface, one label | Works: one screen, up to three photographs of the same label, the five application fields, an optional upload of the label application that fills those fields for confirmation, five result cards, and a note saying what was done to each photograph |
 | Verification interface, batch | Works: a second tab with progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per row; see ADR 0007 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
@@ -221,6 +222,7 @@ figure in this repository was measured on a deployed target.**
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware, not on the deployed target; see below and `docs/09_DEPLOYMENT.md` section 9. |
 | Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
+| COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
 Numbers are deliberately absent from this table. Accuracy and latency figures

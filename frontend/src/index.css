@@ -502,6 +502,61 @@ main {
   margin-bottom: 0.5rem;
 }
 
+/* -------------------------------------------------- the application upload */
+
+/*
+ * The COLA form upload (FR-11, ADR 0008). Set off from the typed fields by a
+ * ruled surface rather than by colour, so it reads as an alternative to typing
+ * rather than as a further required step, and reads that way in greyscale too
+ * (NFR-5).
+ */
+.application-upload {
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.125rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: var(--rule) solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.application-upload__heading {
+  margin: 0 0 0.25rem;
+  font-size: 1.0625rem;
+}
+
+.application-upload__result {
+  margin-top: 0.75rem;
+}
+
+.application-upload__summary {
+  margin: 0 0 0.375rem;
+  font-size: 0.9375rem;
+}
+
+.application-upload__notes {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+}
+
+.application-upload__notes li {
+  margin-bottom: 0.25rem;
+}
+
+/*
+ * The per-field mark. Text, not a colour swatch: NFR-5's greyscale rule means
+ * every state the interface reports has to survive having its colour removed,
+ * and this one is bound to its input through aria-describedby so it is read out
+ * as well as seen.
+ */
+.field__source {
+  margin: 0 0 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--gold-text);
+}
+
 /* -------------------------------------------------------------- photo notes */
 
 .photo-notes {

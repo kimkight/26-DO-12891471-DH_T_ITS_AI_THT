@@ -9,6 +9,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The label application accepted as an input, instead of typed** (FR-11,
+US-23, [#65](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/65),
+[ADR 0008](docs/adr/0008-cola-form-as-application-input.md)). The question this
+answers was the author's, while using the deployed prototype: why enter all this
+information, when the applicant already submitted it? The five values the form
+asks an agent to type are on the label application, TTB Form 5100.31, and on the
+Public COLA Registry detail page for an approved one. An agent can now attach
+that document instead.
+
+**This is not the COLA system integration OOS-1 excludes**, and the boundary is
+now written down rather than left to be inferred: a note under OOS-1 in
+`docs/02_PROJECT_SCOPE.md` and a section in ADR 0008 state that the exclusion
+covers API calls, COLAs Online authorization and registry lookups, and does not
+cover reading a file the agent already holds. NFR-3 and NFR-6 apply to the
+document exactly as they apply to a label image: nothing is fetched, nothing is
+kept.
+- Three ways into a COLA document, tried in order, because the document reaches
+an agent in three shapes. **Form fields** first: a filled-in copy of the
+downloadable PDF keeps its values in AcroForm fields, which is also the only
+place a ticked checkbox can be read. **The text layer** next: COLAs Online
+output and a Registry printout are digitally generated, so extraction is
+deterministic, with no recognition step and no misread. **OCR** last, and only
+when neither of the other two produced a single value: pages are rendered and
+read through exactly the Tesseract pipeline label artwork goes through, bounded
+by `TTB_MAX_DOCUMENT_PAGES`, defaulting to 3.
+- **What the form does not carry, said out loud.** The blank form was downloaded
+once during development and its items read off the file: TTB F 5100.31
+(04/2023), OMB No. 1513-0020. Of the five values this tool compares, two are
+items on the form and three are not. The brand name is item 6 and the beverage
+type is item 5's three checkboxes. The class or type designation and the alcohol
+content are not items at all, and the net contents is item 15 only when it is
+blown, branded or embossed on the container and does not appear on the affixed
+labels. Each of those is reported as not found **with the reason**, so an agent
+is not sent looking for a box that does not exist. The fanciful name, item 7, is
+read and reported and compared against nothing. The full map is assumption A-17.
+- `POST /api/read-application`, which parses a document and compares nothing. It
+exists for the interface rather than for the API: the parsed values have to
+reach an agent as editable fields before a verification runs, and routing that
+through `POST /api/verify` would mean submitting the label photographs and
+running OCR over them once to read the form and again to run the check the agent
+then asked for.
+- An optional `application_document` part on `POST /api/verify`, with the
+precedence rule ADR 0008 states: **any explicitly typed field overrides the
+parsed value**, field by field, and a blank field is not a correction. Every
+field result now carries `application_value_source`, one of `typed`,
+`parsed_from_form` or `absent`, and the response carries the parsed application
+data as a distinct block rather than folded into the comparison.
+- **Parsed values are surfaced for confirmation, never silently trusted.** On
+the single-label view, "Upload the label application (COLA form) instead" sits
+alongside the typed fields. What comes back fills those same fields, each marked
+"Read from the application form. Change it if it is wrong." Every field stays
+editable, editing one clears its mark, and the check runs on what is in the
+fields when the button is pressed. This is FR-3's philosophy applied one step
+earlier: the tool reads, the agent judges.
+- The upload is keyboard reachable in reading order between the photographs and
+the fields it fills, labelled, and announced through its own live region rather
+than the results one. An empty or unparseable document gets an FR-9 message
+naming the problem, fills nothing in, and leaves the typed path open. The axe
+run covers a form filled from a document, and the contrast check covers the new
+mark through its class rather than only through its token.
+- `pypdfium2` as a runtime dependency, with both lock files regenerated in the
+same change and both audited in CI. One library rather than three: it reads
+AcroForm values, extracts a text layer and renders pages, and it carries PDFium
+as a wheel so nothing further is installed in the image. Licensed BSD-3-Clause
+and Apache-2.0; PyMuPDF was rejected because it is AGPL.
+- `TTB_MAX_DOCUMENT_PAGES`, defaulting to 3. The single-label request envelope is
+now one more than `TTB_MAX_LABEL_PHOTOS` times `TTB_MAX_UPLOAD_BYTES`, 40 MB on
+the defaults rather than 30 MB, because the request may carry the document as a
+fourth upload. Every individual file is still checked exactly against
+`TTB_MAX_UPLOAD_BYTES` after parsing.
+- Assumption A-17 (the field map, and the three values the form has no item
+for), open question OQ-22, UAT rows 31 to 35, and 43 backend tests across
+`backend/tests/test_application_form.py` and `test_cola_document_api.py`, 21
+frontend tests in `frontend/src/__tests__/applicationUpload.test.tsx`, one
+accessibility test and one contrast assertion.
+- **What is not claimed.** The parser has been exercised against documents
+generated at test time by `samples/formmaker.py` and against the item map read
+off the blank form. No real filed application and no real Registry printout has
+been parsed, because committing one would put an applicant's record in this
+repository. That is OQ-22, and it is why the README says the feature is
+unverified on real documents rather than saying it works.
+- **The batch path is unchanged.** It keeps the CSV contract in A-14. Per-row
+COLA documents are a possible future extension and no part of them is built.
+
 - The interface rebranded in federal design language, in the spirit of the
 U.S. Web Design System: a navy masthead band (`#112e51`) ruled off in gold
 (`#ffbe2e`), navy as the working primary (`#1a4480`), gold for edges and rules

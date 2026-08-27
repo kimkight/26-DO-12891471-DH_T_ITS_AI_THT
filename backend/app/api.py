@@ -1,4 +1,4 @@
-"""The verification HTTP surface: POST /api/verify and POST /api/verify-batch.
+"""The HTTP surface: POST /api/verify, /api/verify-batch and /api/read-application.
 
 Governing requirements: FR-1 and FR-2 (accept a label image plus application
 data for the same five fields), FR-3 (one outcome per field), FR-8 (many labels
@@ -11,10 +11,15 @@ the body is read, MIME before anything is decoded, and the batch file count
 before anything is processed), NFR-3 (the default path makes no outbound call
 and says so in the response).
 
-US-1 through US-7 and US-9 through US-11 are implemented here at the API level.
-The pipeline both routes run is in ``app.verify``; the batch reconciliation,
-worker pool and stream are in ``app.batch``. US-2 and FR-10 are presentation
-requirements and are not part of this module.
+There is a third route, ``POST /api/read-application``: it parses an uploaded
+COLA document and compares nothing (FR-11, ADR 0008). It exists so that the
+parsed values reach an agent as editable fields before a verification runs.
+
+US-1 through US-7 and US-9 through US-11 are implemented here at the API level,
+and US-23 is the COLA document path. The pipeline both verification routes run
+is in ``app.verify``; the batch reconciliation, worker pool and stream are in
+``app.batch``; the document parser is in ``app.application_form``. US-2 and
+FR-10 are presentation requirements and are not part of this module.
 """
 
 from __future__ import annotations
@@ -30,13 +35,22 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app import batch
+from app.application_form import UnreadableDocumentError, parse_application_document
 from app.config import settings
-from app.schemas import ErrorDetail, ErrorResponse, VerificationResult
+from app.schemas import (
+    ApplicationDocumentResult,
+    ErrorDetail,
+    ErrorResponse,
+    VerificationResult,
+)
 from app.verify import (
     VerificationError,
     build_result,
+    check_document_media_type,
     check_media_type,
     check_size,
+    document_result,
+    resolve_application,
     verify_photos,
 )
 
@@ -79,6 +93,8 @@ def _envelope_limit(path: str) -> int | None:
     """
     if path == "/api/verify":
         return settings.effective_max_verify_bytes
+    if path == "/api/read-application":
+        return settings.max_upload_bytes
     if path == "/api/verify-batch":
         return settings.effective_max_batch_bytes
     return None
@@ -109,7 +125,9 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
 
     Content-Length covers the whole multipart envelope, and the single-label
     route now accepts up to TTB_MAX_LABEL_PHOTOS photographs of one label
-    (ADR 0007), so its envelope limit is that many times TTB_MAX_UPLOAD_BYTES.
+    (ADR 0007) plus one optional COLA document (ADR 0008), so its envelope limit
+    is one more than that many times TTB_MAX_UPLOAD_BYTES: 40 MB on the
+    defaults.
 
     **That loosens this guard, and the loosening is deliberate and bounded.**
     Before ADR 0007 a single-label body over TTB_MAX_UPLOAD_BYTES was refused
@@ -120,10 +138,11 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     every two-photograph submission, so there is no version of this that both
     accepts three photographs and refuses 25 MB from the header: the middleware
     cannot count the parts without reading the body it is trying not to read.
-    What is kept is that the body is still bounded before it is read, at 30 MB
-    on the defaults rather than 10 MB, and that every individual photograph is
-    still checked exactly against TTB_MAX_UPLOAD_BYTES. Lower
-    TTB_MAX_LABEL_PHOTOS or TTB_MAX_UPLOAD_BYTES to tighten it.
+    What is kept is that the body is still bounded before it is read, at 40 MB
+    on the defaults rather than 10 MB, and that every individual photograph and
+    the application document are each still checked exactly against
+    TTB_MAX_UPLOAD_BYTES. Lower TTB_MAX_LABEL_PHOTOS or TTB_MAX_UPLOAD_BYTES to
+    tighten it.
 
     The batch route is measured against its own envelope limit, which is
     TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default. That bounds the
@@ -166,6 +185,17 @@ async def verify(
             )
         ),
     ],
+    application_document: Annotated[
+        UploadFile | None,
+        File(
+            description=(
+                "The label application, as an alternative to typing the values: "
+                "a COLA document (PDF, or a scan or photograph of one). Read "
+                "locally, with no call to the COLA system (FR-11, ADR 0008, "
+                "OOS-1)."
+            )
+        ),
+    ] = None,
     brand_name: Annotated[str, Form()] = "",
     class_type: Annotated[str, Form()] = "",
     alcohol_content: Annotated[str, Form()] = "",
@@ -177,6 +207,13 @@ async def verify(
     One `image` part behaves exactly as it always did. More than one is ADR
     0007: a label wraps a round bottle, so no single photograph shows all of it
     flat, and the photographs are read independently and their fields merged.
+
+    The application values may be typed, or read from an uploaded COLA document
+    in the `application_document` part, or both: a typed value overrides the
+    parsed one field by field, and the response says which source each value
+    came from (FR-11, ADR 0008). Reading that document is document parsing, not
+    the COLA system integration OOS-1 excludes: it opens no socket and needs no
+    credentials.
 
     Nothing is persisted and nothing is logged about it.
     """
@@ -197,6 +234,7 @@ async def verify(
         )
 
     contents: list[bytes] = []
+    document_bytes = 0
     try:
         for part in image:
             # Checked before any byte is decoded (NFR-7, second criterion).
@@ -204,14 +242,42 @@ async def verify(
             content = await part.read()
             check_size(content)
             contents.append(content)
-        result = verify_photos(
-            contents,
+
+        parsed_application = None
+        if application_document is not None:
+            check_document_media_type(application_document.content_type)
+            document = await application_document.read()
+            check_size(document)
+            document_bytes = len(document)
+            try:
+                parsed_application = parse_application_document(
+                    document, application_document.content_type
+                )
+            except UnreadableDocumentError as exc:
+                # FR-9 applied to the second upload: the message names the
+                # problem and the response carries no field outcomes at all. The
+                # typed path is still open, and the message says so.
+                raise VerificationError(
+                    code="unreadable_application_document", message=str(exc)
+                ) from exc
+
+        application, sources = resolve_application(
             {
                 "brand_name": brand_name,
                 "class_type": class_type,
                 "alcohol_content": alcohol_content,
                 "net_contents": net_contents,
+                "beverage_type": beverage_type,
             },
+            parsed_application,
+        )
+        result = verify_photos(
+            contents,
+            application,
+            application_sources=sources,
+            application_document=(
+                document_result(parsed_application) if parsed_application else None
+            ),
         )
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
@@ -225,9 +291,68 @@ async def verify(
             "photos_received": len(contents),
             "ocr_ms": result.ocr_ms,
             "beverage_type_supplied": bool(beverage_type.strip()),
+            # Counts and a path name only. No item value, no filename, nothing
+            # the document said (NFR-6).
+            "application_document_bytes": document_bytes,
+            "application_document_path": (
+                result.application_document.extraction_path if result.application_document else None
+            ),
         },
     )
     return JSONResponse(status_code=200, content=result.model_dump())
+
+
+@router.post(
+    "/read-application",
+    response_model=ApplicationDocumentResult,
+    responses={
+        413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Read the application values off a COLA document, without verifying",
+)
+async def read_application(
+    application_document: Annotated[
+        UploadFile,
+        File(description="A COLA document: a PDF, or a scan or photograph of one."),
+    ],
+) -> JSONResponse:
+    """Parse a COLA document and return what it says, comparing nothing (FR-11).
+
+    **This exists because of what FR-11 requires of the interface, not to give
+    the API a second way in.** The parsed values have to reach the agent as
+    editable fields *before* a verification runs, so that the agent confirms or
+    corrects them and the check runs on what they confirmed (FR-3, ADR 0008).
+    Reaching that through `POST /api/verify` would mean submitting the label
+    photographs and running OCR over them once to read the form and again to
+    run the check the agent then asked for.
+
+    `POST /api/verify` still accepts the same part, for a caller that wants one
+    request, and the precedence rule is the same in both places: a typed value
+    overrides a parsed one.
+
+    Nothing is persisted (NFR-6) and no outbound call is made (NFR-3, OOS-1).
+    """
+    try:
+        check_document_media_type(application_document.content_type)
+        content = await application_document.read()
+        check_size(content)
+        parsed = parse_application_document(content, application_document.content_type)
+    except UnreadableDocumentError as exc:
+        return _error(422, "unreadable_application_document", str(exc))
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+
+    # NFR-6: a byte count and a path name. Nothing the document said.
+    logger.info(
+        "application document read",
+        extra={
+            "application_document_bytes": len(content),
+            "application_document_path": parsed.path,
+        },
+    )
+    return JSONResponse(status_code=200, content=document_result(parsed).model_dump())
 
 
 def _oversize_response(limit: int | None = None) -> JSONResponse:

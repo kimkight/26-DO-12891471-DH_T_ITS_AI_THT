@@ -43,6 +43,7 @@ gap register, not decoration.
 | 28 | "labels that are photographed at weird angles, or the lighting is bad, or there's glare... maybe out of scope for a prototype." | Jenny Park | SG-1, stretch | | | `backend/tests/test_ocr.py::TestExifOrientation`, `TestCardinalOrientation`, `TestWhyOrientationUsesOsd`; UAT rows 23, 24 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
 | 28a | First real-artwork test, 2026-08-26: a photograph of a real bottle returned none of the five fields. Sideways, EXIF-tagged, and a warning hyphenated across a narrow column. | Author's own test against the deployed URL | FR-1, FR-5; A-15 | US-1, US-4 | [#1](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/1), [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | `backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`, `backend/tests/test_verify_integration.py::TestASidewaysPhotograph`, `TestAHyphenatedWarningColumn`, `backend/tests/test_samples.py::TestTheHyphenatedColumnIsTheRegulationsText`; UAT rows 23, 24, 25 | [0003](adr/0003-local-ocr-default-bedrock-optional.md) |
 | 28b | "labels that are photographed at weird angles" plus 27 CFR 16.21 allowing the warning on "a back or side label": a label wraps a round bottle, so no one photograph shows it flat. | Jenny Park; eCFR; the author's first real-artwork test | FR-1, FR-9; A-16 | US-22 | [#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61) | `backend/tests/test_multi_photo.py` (all eight classes), `frontend/src/__tests__/multiPhoto.test.tsx`, `frontend/tests/a11y.spec.ts` (the photo controls by keyboard, and axe over a two-photo result); UAT rows 26, 27, 28, 29 | [0007](adr/0007-multi-photo-single-label.md) |
+| 28d | "Why do I have to enter in all this information?" The values the form asks an agent to type are the values the applicant already submitted on TTB F 5100.31. | The author's own use of the deployed prototype, 2026-08-27 | FR-11; A-17; OOS-1 (boundary recorded, not narrowed) | US-23 | [#65](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/65) | `backend/tests/test_application_form.py` (all six classes), `backend/tests/test_cola_document_api.py`, `frontend/src/__tests__/applicationUpload.test.tsx`, `frontend/tests/a11y.spec.ts` (the upload by keyboard and axe over a filled form); UAT rows 31 to 35 | [0008](adr/0008-cola-form-as-application-input.md) |
 | 29 | "I've seen a lot of these 'modernization' projects come and go." | Dave Morrison | Adoption risk; drives NFR-4 and FR-3 | US-12, US-2 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | UAT row 14 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
 
 ## 2. Requirement coverage
@@ -61,6 +62,7 @@ Every requirement maps to at least one story. No orphans.
 | FR-8 Batch verification, including the A-14 CSV contract | US-9, US-10 | #9, #10 | **Yes**: `app/batch.py`, `app/api.py` `verify_batch`. One photograph per row: ADR 0007 does not extend to the batch path this session, and the FR-8 notes say why | **Yes**: `test_batch.py`, 22 tests, plus `test_multi_photo.py::TestTheBatchPathIsUnaffected` |
 | FR-9 Error handling | US-7, US-10, US-22 | #7, #10, #61 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, per photograph in `app/verify.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py`, `test_multi_photo.py` |
 | FR-10 Result presentation | US-2, US-22 | #2, #61 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason, plus a per-photograph note and the photograph each value was read from | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx`, `multiPhoto.test.tsx` |
+| FR-11 The label application accepted as an input, including the A-17 field map | US-23 | #65 | **Yes**: `app/application_form.py`, `POST /api/read-application` and the optional `application_document` part on `POST /api/verify`, plus the upload and per-field marks in `frontend/src/components/ApplicationUpload.tsx` and `SingleLabelTab.tsx` | **Yes**: `test_application_form.py`, `test_cola_document_api.py`, `applicationUpload.test.tsx`, `a11y.spec.ts`. **Against documents generated at test time only**: no real filed application or Registry printout has been parsed (OQ-22) |
 | NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
 | NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store | Partial: `test_batch.py` covers per-row isolation and the progress fields. A 300-label run has not been executed; 12 and 100 were measured on a session runner. |
 | NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
@@ -77,14 +79,14 @@ Every requirement maps to at least one story. No orphans.
 
 | Measure | Count |
 | --- | --- |
-| Requirements defined | 21 (10 functional, 11 non-functional) |
-| Requirements traced to a story | 21 of 21 |
-| Requirements traced to a GitHub issue | 21 of 21 |
-| Requirements fully implemented | 20 of 21 |
-| Requirements with an automated test | 18 of 21 |
-| User stories | 22 |
-| Stories with acceptance criteria | 22 of 22 |
-| ADRs | 7 |
+| Requirements defined | 22 (11 functional, 11 non-functional) |
+| Requirements traced to a story | 22 of 22 |
+| Requirements traced to a GitHub issue | 22 of 22 |
+| Requirements fully implemented | 21 of 22 |
+| Requirements with an automated test | 19 of 22 |
+| User stories | 23 |
+| Stories with acceptance criteria | 23 of 23 |
+| ADRs | 8 |
 
 The two counts are read off the section 2 table by one rule each, so they can be
 checked rather than taken. "Fully implemented" counts rows whose Implemented
@@ -94,11 +96,11 @@ Tested column names a test or a CI job; the three that do not are NFR-2, which
 is covered only in part, and NFR-10 and NFR-11, which have none.
 
 The gap between "traced" and "tested" is the honest state of this repository.
-The verification engine, single label and batch (FR-1 through FR-9, NFR-1,
-NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 165 backend tests. The
-agent-facing interface (FR-10, NFR-4, NFR-5) is built and covered by 81
-component tests, a computed-contrast test, and an axe-core run with a keyboard
-walk against the built page in CI. It is deployed: ECS Fargate behind an
+The verification engine, single label and batch (FR-1 through FR-9 and FR-11,
+NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 231 backend tests.
+The agent-facing interface (FR-10, FR-11, NFR-4, NFR-5) is built and covered by
+131 component tests, a computed-contrast test, and an axe-core run with a
+keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
 Application Load Balancer in `us-east-1`, deployed by image digest.
 
 What deployment did not settle is accuracy on real artwork. The first
@@ -154,6 +156,16 @@ stated in the FR-7 acceptance criteria in
 [ADR 0001](adr/0001-cloud-platform-aws.md) as the author's decision, not as a
 stakeholder answer. Reasoning and sources for all three:
 [cloud_choice_and_abv_assumption.md](cloud_choice_and_abv_assumption.md).
+
+OQ-22 is opened by this session rather than closed by it. FR-11 reads the
+applicant's label application instead of asking an agent to retype it, and the
+item map it uses is read off the blank TTB F 5100.31 (04/2023) rather than
+recalled. What has not been done is running the parser over a real filed
+application or a real Public COLA Registry printout, because both are real
+applicants' records and the no-personal-data rule forbids committing one as a
+fixture. It blocks nothing: every parsed value is shown for confirmation in an
+editable field before a check runs, so an unrecognized caption costs an agent
+the typing they were already doing.
 
 ## 5. Maintenance
 

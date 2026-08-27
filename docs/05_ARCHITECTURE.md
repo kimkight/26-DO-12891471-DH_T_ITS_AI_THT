@@ -176,11 +176,12 @@ find out why it exists.
 | `ocr.py` | Decode honouring the EXIF orientation tag, preprocess (long edge to 1600 px, grayscale, adaptive threshold, cardinal turn from Tesseract OSD, then bounded deskew), run Tesseract, return text with word confidence, line geometry, the orientation applied and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
 | `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
+| `application_form.py` | Read the application values off an uploaded COLA document: AcroForm field values, then the text layer, then OCR over rendered pages. An explicit not found per value, with the reason where the form has no item for it | FR-11, FR-9, NFR-3, NFR-6, A-17 | `tests/test_application_form.py`, `tests/test_cola_document_api.py` |
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
 | `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
 | `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
 | `batch.py` | The A-14 CSV parser, reconciliation of images against rows, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, NFR-2, NFR-6 | `tests/test_batch.py` |
-| `api.py` | `POST /api/verify` and `POST /api/verify-batch`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_batch.py` |
+| `api.py` | `POST /api/verify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
 
 Two implementation notes that are not obvious from the table:
 
@@ -209,6 +210,51 @@ Two implementation notes that are not obvious from the table:
   `batch.py` converts every per-row exception into that row's error line. This
   is what FR-8 and NFR-2 require anyway: one unreadable image must not fail the
   batch.
+
+**An uploaded COLA document is read three ways, in order, and the order is the
+point.** FR-11 accepts the applicant's label application as an alternative to
+typing the same values, and the document reaches an agent in one of three
+shapes:
+
+1. **Form fields.** An applicant's filled-in copy of the downloadable
+   TTB F 5100.31 keeps its values in AcroForm fields. They are not in the page's
+   text layer at all, so reading the page finds the blank template's captions
+   and nothing else. This is also the only place a ticked checkbox can be read,
+   which is what makes item 5, the product type, legible.
+2. **Embedded text.** COLAs Online output and a Public COLA Registry printout
+   are digitally generated, so the characters are in the file. Extraction is
+   deterministic: no recognition step, no confidence figure, no misread.
+   `application_form.py` reads it through `pypdfium2` and hands the lines to the
+   same caption reader the OCR path uses.
+3. **OCR.** A scan or a photograph of a printed form carries pixels only. Its
+   pages are rendered to bitmaps and read through exactly the `ocr.py` pipeline
+   label artwork goes through, so it inherits that pipeline's accuracy and its
+   failure modes. Orientation correction is off for a rendered PDF page, which
+   is already upright, and on for an uploaded image, which may not be.
+
+The first two run on every PDF. OCR runs only when neither produced a single
+mapped value, because rendering and reading pages costs about what reading a
+label photograph costs. `TTB_MAX_DOCUMENT_PAGES` bounds it, defaulting to 3,
+which is one more page than either document needs and is a latency limit as much
+as a parsing one.
+
+**Three of the five compared values are not on the form.** That is a property of
+TTB F 5100.31 (04/2023), not of the parser: the class or type designation and
+the alcohol content are not numbered items, and the net contents is item 15 only
+when it is blown, branded or embossed on the container and does not appear on
+the affixed labels. The parser reports each as not found **with the reason**, so
+an agent is not sent looking for a box that does not exist. The full map is
+assumption A-17; the decision is
+[ADR 0008](adr/0008-cola-form-as-application-input.md).
+
+**`POST /api/read-application` exists for the interface, not for the API.** The
+parsed values have to reach an agent as editable fields before a verification
+runs, so the agent confirms or corrects them and the check runs on what they
+confirmed. Routing that through `POST /api/verify` would mean submitting the
+label photographs and running OCR over them once to read the form and again to
+run the check the agent then asked for. `POST /api/verify` still accepts an
+`application_document` part for a caller that wants one request, and applies the
+same precedence rule: a typed value overrides a parsed one, field by field.
 
 **Brand name and class or type are located by type size, and that is a
 heuristic.** Alcohol content, net contents and the warning carry patterns to
@@ -367,6 +413,8 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_BATCH_WORKERS` | `0` | How many images a batch reads at once. `0` derives it from the cores the process may use, because OCR is CPU bound and runs in-process. |
 | `TTB_MAX_BATCH_BYTES` | `0` | Largest batch request body accepted, checked from Content-Length before the body is read. `0` derives it as `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, about 3 GiB at the defaults. See the note below. |
 | `TTB_ALLOWED_MIME_TYPES` | `image/jpeg`, `image/png`, `image/webp`, `image/tiff` | Accepted upload types, checked before decoding. Set as a JSON array. |
+| `TTB_MAX_LABEL_PHOTOS` | `3` | How many photographs of one label the single-label path accepts (ADR 0007). Also sets the single-label envelope limit, as one more than this times `TTB_MAX_UPLOAD_BYTES`, the extra file being the optional COLA document. |
+| `TTB_MAX_DOCUMENT_PAGES` | `3` | How many pages of an uploaded COLA document are read (FR-11, ADR 0008). The application side of TTB F 5100.31 is page 1 and a Registry printout runs to one or two, so this is a bound on cost rather than a limit anyone should meet. |
 | `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
 | `TTB_REVIEW_THRESHOLD` | `80` | Between this and the match threshold, a field needs human review |

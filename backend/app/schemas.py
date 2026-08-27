@@ -12,6 +12,13 @@ field outcomes at all).
 field rather than a comment because NFR-3's third criterion requires it:
 "Enabling the fallback is visible in the response, so a user knows whether a
 result involved an external call."
+
+``application_document`` and ``application_value_source`` carry FR-11: an agent
+may upload the label application instead of typing the same values, and the
+response has to say what was read off it and which of the two supplied each
+value. The parsed block is reported separately from the comparison because a
+parsed value is a reading of a document, not a fact about an application, and
+the agent confirms it before a verification runs (ADR 0008).
 """
 
 from __future__ import annotations
@@ -28,8 +35,15 @@ FIELD_LABELS = {
     "class_type": "Class or type designation",
     "alcohol_content": "Alcohol content",
     "net_contents": "Net contents",
+    "beverage_type": "Beverage type",
     "government_warning": "Government warning statement",
 }
+
+# Where an application value came from (FR-11, ADR 0008). Reported per field
+# because a submission can mix the two: an agent uploads the application and
+# corrects one value by hand, and the result has to say which is which or the
+# agent cannot tell what they are checking.
+ApplicationSource = Literal["typed", "parsed_from_form", "absent"]
 
 
 class FieldResult(BaseModel):
@@ -64,6 +78,14 @@ class FieldResult(BaseModel):
             "found on any photograph."
         ),
     )
+    application_value_source: ApplicationSource = Field(
+        default="typed",
+        description=(
+            "Where the application value came from: typed by the agent, parsed "
+            "from an uploaded COLA document, or absent because neither supplied "
+            "it (FR-11, ADR 0008). A typed value always wins over a parsed one."
+        ),
+    )
 
 
 class WarningResult(BaseModel):
@@ -86,6 +108,69 @@ class WarningResult(BaseModel):
         description="Always false. This prototype does not check bold type (OOS-4).",
     )
     bold_type_note: str = BOLD_TYPE_NOTE
+
+
+class ParsedApplicationField(BaseModel):
+    """One value read off an uploaded COLA document (FR-11, ADR 0008)."""
+
+    name: str = Field(description="Machine name of the field, for example brand_name.")
+    display_name: str = Field(description="How the field is named to an agent.")
+    value: str | None = Field(
+        default=None, description="What the document said, or null if it did not say."
+    )
+    found_on_document: bool = Field(
+        description="False means the document did not carry this value (FR-1's rule, applied here)."
+    )
+
+
+class ApplicationDocumentResult(BaseModel):
+    """What an uploaded COLA document was read to say, as a distinct block.
+
+    **Surfaced for confirmation, never silently trusted.** FR-3's philosophy is
+    that the tool recommends and the agent judges, and a parsed value is a
+    reading of a document rather than a fact about an application. So it is
+    reported here in its own right, separately from the comparison, and the
+    interface puts it into editable fields before a verification runs. An
+    agent's correction always wins (ADR 0008).
+    """
+
+    extraction_path: Literal["form_fields", "embedded_text", "ocr"] = Field(
+        description=(
+            "How the values were read. 'form_fields' means the PDF's AcroForm "
+            "fields, which is where a filled-in copy of the downloadable form "
+            "keeps them; 'embedded_text' means the file's own text layer, which "
+            "is deterministic; 'ocr' means the pages were read as images, which "
+            "carries the same accuracy and failure modes as reading a label "
+            "photograph."
+        )
+    )
+    pages_read: int = Field(description="How many pages of the document were read.")
+    fields: list[ParsedApplicationField] = Field(
+        description="One entry per application value, whether or not it was found."
+    )
+    fanciful_name: str | None = Field(
+        default=None,
+        description=(
+            "Item 7 on TTB F 5100.31, carried because the document states it. It "
+            "is not compared: no source states a rule that reads it."
+        ),
+    )
+    class_type_code: str | None = Field(
+        default=None,
+        description=(
+            "The numeric class or type code, where a Public COLA Registry "
+            "printout carried one alongside the description. The description is "
+            "what is compared."
+        ),
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Why a value is missing, where the reason is a property of the form "
+            "rather than of this document. Three of the five values this tool "
+            "compares are not items on TTB F 5100.31 at all (A-17)."
+        ),
+    )
 
 
 class ErrorDetail(BaseModel):
@@ -195,6 +280,14 @@ class VerificationResult(BaseModel):
         description=(
             "False on the default path, which makes no outbound network call "
             "(NFR-3). True only when the optional Bedrock fallback ran."
+        ),
+    )
+    application_document: ApplicationDocumentResult | None = Field(
+        default=None,
+        description=(
+            "What an uploaded COLA document was read to say, or null when none "
+            "was uploaded (FR-11, ADR 0008). Parsing it involves no network "
+            "call and nothing is persisted."
         ),
     )
 

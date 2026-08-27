@@ -22,8 +22,18 @@
  * agent who needs a second or a third adds them one at a time. It is one label
  * throughout: one set of application values, one result, one set of five field
  * cards. The batch tab is still the place for many different labels.
+ *
+ * **The application, uploaded rather than typed (FR-11, ADR 0008).** The five
+ * values above are the values the applicant already submitted on TTB F 5100.31,
+ * so the form is accepted as an alternative to typing them. What comes back
+ * fills these same fields and is marked as read from the application form; the
+ * fields stay editable, and the check runs on whatever is in them when the
+ * button is pressed. Editing a filled field clears its mark, because it is the
+ * agent's value from that point on. Uploading is not the COLA integration OOS-1
+ * excludes: the document is read locally and nothing reaches TTB.
  */
 import { useEffect, useRef, useState } from 'react'
+import { ApplicationUpload } from './ApplicationUpload'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
@@ -32,7 +42,23 @@ import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import { announcement } from '../lib/outcomes'
 import { EMPTY_APPLICATION } from '../types'
-import type { ApplicationData } from '../types'
+import type { ApplicationData, ApplicationDocumentResult } from '../types'
+
+/**
+ * The mark on a field whose value was read off the uploaded application.
+ *
+ * Text rather than colour alone, and bound to the input through
+ * `aria-describedby`, so it reaches a screen reader and survives greyscale
+ * (NFR-5). It says "change it if it is wrong" because an agent who cannot tell
+ * whether they are allowed to edit a filled field will not edit it.
+ */
+function FromFormMark({ name }: { name: string }) {
+  return (
+    <p className="field__source" id={`${name}-from-form`}>
+      Read from the application form. Change it if it is wrong.
+    </p>
+  )
+}
 
 /** The three classes 27 CFR names. Kept in the words a label reviewer uses. */
 const BEVERAGE_TYPES = [
@@ -65,6 +91,9 @@ export function SingleLabelTab() {
   const [slots, setSlots] = useState<(File | null)[]>([null])
   const [slotNews, setSlotNews] = useState('')
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION)
+  // Which fields currently hold a value read off an uploaded application, so
+  // each one can say so. A field the agent then edits leaves this set.
+  const [fromForm, setFromForm] = useState<Set<keyof ApplicationData>>(new Set())
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
   const addRef = useRef<HTMLButtonElement>(null)
@@ -91,6 +120,42 @@ export function SingleLabelTab() {
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
+    // The agent has taken this field over. The mark goes, so the interface
+    // never tells them a value came off the form when it did not.
+    setFromForm((previous) => {
+      if (!previous.has(name)) return previous
+      const next = new Set(previous)
+      next.delete(name)
+      return next
+    })
+  }
+
+  /**
+   * Fill the fields from an uploaded application (FR-11).
+   *
+   * Every value the document supplied is written into its field, including over
+   * something already typed there: attaching the form is a deliberate act and
+   * the agent is asking for what it says. Nothing is lost that cannot be typed
+   * back, every field stays editable, and the live region in ApplicationUpload
+   * names what was filled.
+   */
+  function fillFromDocument(document: ApplicationDocumentResult) {
+    const filled = document.fields.filter((entry) => entry.found_on_document)
+    setApplication((previous) => {
+      const next = { ...previous }
+      for (const entry of filled) {
+        if (entry.name in next && entry.value) {
+          next[entry.name as keyof ApplicationData] = entry.value
+        }
+      }
+      return next
+    })
+    setFromForm(new Set(filled.map((entry) => entry.name as keyof ApplicationData)))
+  }
+
+  /** Taking the document back off the form clears only the marks, not the values. */
+  function clearFormMarks() {
+    setFromForm(new Set())
   }
 
   function setSlot(position: number, file: File | null) {
@@ -209,12 +274,18 @@ export function SingleLabelTab() {
             </div>
           </fieldset>
 
+          <ApplicationUpload onParsed={fillFromDocument} onCleared={clearFormMarks} />
+
           <div className="field">
             <label htmlFor="beverage_type">Beverage type</label>
+            {fromForm.has('beverage_type') ? <FromFormMark name="beverage_type" /> : null}
             <select
               id="beverage_type"
               name="beverage_type"
               value={application.beverage_type}
+              aria-describedby={
+                fromForm.has('beverage_type') ? 'beverage_type-from-form' : undefined
+              }
               onChange={(event) => update('beverage_type', event.target.value)}
             >
               {BEVERAGE_TYPES.map((option) => (
@@ -225,25 +296,35 @@ export function SingleLabelTab() {
             </select>
           </div>
 
-          {TEXT_FIELDS.map((field) => (
-            <div className="field" key={field.name}>
-              <label htmlFor={field.name}>{field.label}</label>
-              {field.hint ? (
-                <p className="field__hint" id={`${field.name}-hint`}>
-                  {field.hint}
-                </p>
-              ) : null}
-              <input
-                id={field.name}
-                name={field.name}
-                type="text"
-                autoComplete="off"
-                aria-describedby={field.hint ? `${field.name}-hint` : undefined}
-                value={application[field.name]}
-                onChange={(event) => update(field.name, event.target.value)}
-              />
-            </div>
-          ))}
+          {TEXT_FIELDS.map((field) => {
+            const marked = fromForm.has(field.name)
+            const describedBy = [
+              field.hint ? `${field.name}-hint` : null,
+              marked ? `${field.name}-from-form` : null,
+            ]
+              .filter(Boolean)
+              .join(' ')
+            return (
+              <div className="field" key={field.name}>
+                <label htmlFor={field.name}>{field.label}</label>
+                {marked ? <FromFormMark name={field.name} /> : null}
+                {field.hint ? (
+                  <p className="field__hint" id={`${field.name}-hint`}>
+                    {field.hint}
+                  </p>
+                ) : null}
+                <input
+                  id={field.name}
+                  name={field.name}
+                  type="text"
+                  autoComplete="off"
+                  aria-describedby={describedBy || undefined}
+                  value={application[field.name]}
+                  onChange={(event) => update(field.name, event.target.value)}
+                />
+              </div>
+            )
+          })}
 
           <button className="button button--primary" type="submit" disabled={!photos.length}>
             {checking ? 'Checking...' : 'Check this label'}

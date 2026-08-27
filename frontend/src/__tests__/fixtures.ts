@@ -1,8 +1,10 @@
 /** Response fixtures shaped exactly like backend/app/schemas.py returns. */
 import type {
+  ApplicationDocumentResult,
   BatchLine,
   FieldResult,
   Outcome,
+  ParsedApplicationField,
   PhotoResult,
   VerificationResult,
   WarningResult,
@@ -22,6 +24,7 @@ export function field(name: string, outcome: Outcome, overrides: Partial<FieldRe
     outcome,
     reason: `Reason for ${name}.`,
     source_photo: 1,
+    application_value_source: 'typed',
     ...overrides,
   } satisfies FieldResult
 }
@@ -71,6 +74,7 @@ export function verification(outcomes: Outcome[] = ['match', 'match', 'match', '
     elapsed_ms: 540,
     ocr_ms: 530,
     external_call_made: false,
+    application_document: null,
   } satisfies VerificationResult
 }
 
@@ -96,4 +100,50 @@ export function batchLine(
     }
   }
   return { filename, index, total, status: 'ok', result: verification(outcomes), error: null }
+}
+
+/** One value read off an uploaded COLA document (FR-11, ADR 0008). */
+export function parsedField(
+  name: string,
+  value: string | null,
+  overrides: Partial<ParsedApplicationField> = {},
+): ParsedApplicationField {
+  return {
+    name,
+    display_name: name.replace(/_/g, ' '),
+    value,
+    found_on_document: value !== null,
+    ...overrides,
+  }
+}
+
+/**
+ * A read of an uploaded application. The defaults are the honest ones for
+ * TTB F 5100.31 (04/2023): it carries a brand name and no class or type
+ * designation, alcohol content or net contents, because those are not items on
+ * the form (A-17).
+ */
+export function applicationDocument(
+  overrides: Partial<ApplicationDocumentResult> = {},
+): ApplicationDocumentResult {
+  return {
+    extraction_path: 'embedded_text',
+    pages_read: 1,
+    fields: [
+      parsedField('brand_name', "STONE'S THROW"),
+      parsedField('class_type', null),
+      parsedField('alcohol_content', null),
+      parsedField('net_contents', null),
+      parsedField('beverage_type', null),
+    ],
+    fanciful_name: 'Small Batch Reserve',
+    class_type_code: null,
+    notes: [
+      'The class or type designation is not an item on TTB F 5100.31 (04/2023).',
+      'The alcohol content is not an item on TTB F 5100.31 (04/2023).',
+      'The net contents is an item on TTB F 5100.31 (04/2023) only when it is blown, branded or embossed on the container.',
+      "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text.",
+    ],
+    ...overrides,
+  }
 }
