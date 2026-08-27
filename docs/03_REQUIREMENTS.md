@@ -215,6 +215,29 @@ strings.
 - Given a numeric field that cannot be parsed as a number, then the system falls
   back to text comparison and says so, rather than reporting a false mismatch.
 
+**Locating the alcohol content on the label.** A percent sign is not by itself
+an alcohol content. A candidate counts only where the OCR line carrying the
+number also carries an alcohol marker: `ALC`, `ALC.`, `VOL`, `VOLUME`, `ABV`,
+`ALCOHOL` or `PROOF`, matched case-insensitively.
+
+- Given a label whose only percent appears in marketing copy, for example
+  "reduce our environmental impact by 7%", then the alcohol content is reported
+  as not found rather than as `7%`.
+- Given `12.5% ALC. BY VOL.`, `ALCOHOL 45% BY VOLUME`, `ABV 45%` or `90 PROOF`,
+  then the alcohol content is extracted.
+- Given OCR noise in the words around an intact marker, for example
+  `12.5% AlC. 8Y VOL.`, then the line is still accepted; the marker has to
+  survive OCR, the words around it do not.
+- Given a marker on a line with no number, for example an `ALC./VOL.` that OCR
+  split away from its figure, then the field is reported as not found rather
+  than reported as `ALC./VOL.`.
+
+This was written after the fact. The deployed prototype reported `7%` for a real
+bottle on 2026-08-27, read from the back label's environmental copy, because any
+percent token qualified. The residual risk is a line that genuinely carries both
+an unrelated number and a marker word; it is narrower than the risk it replaces
+and it is not claimed to be zero.
+
 **Alcohol content (Assumption A-12).** The two declared values must be
 numerically identical. The regulatory tolerances in 27 CFR 5.65, 4.36, and 7.65
 govern actual against labeled alcohol content, which is a laboratory question,

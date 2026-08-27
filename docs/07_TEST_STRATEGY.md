@@ -326,6 +326,7 @@ reads records the application emitted rather than what CloudWatch received.
 | 27 | One unreadable photograph attached alongside a good one | The good photograph still produces a result, and the unreadable one is listed as unreadable rather than omitted | ADR 0007; FR-9 |
 | 28 | Attach photographs up to the limit, then look for the control that adds another | The control is no longer offered and the interface says why. **Reaching the API's refusal is a failure of this test.** | ADR 0007; NFR-4 |
 | 29 | Attach two photographs and check a label using only the keyboard | Every add and remove control is reachable, focus stays visible, and each change to the photo list is announced | ADR 0007; NFR-5 |
+| 30 | A bottle whose back label carries a percentage in marketing copy, for example "reduce our environmental impact by 7%", and whose alcohol statement is on the front | The alcohol content reports the front label's statement, or not found. **Reporting the marketing percentage is a failure of this test.** | Deployed-target test, 2026-08-27; FR-1; FR-7 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.
