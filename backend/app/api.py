@@ -519,9 +519,11 @@ def _name_duplicates(images: list[batch.SubmittedImage]) -> list[batch.Submitted
     name without the results becoming ambiguous, and a part with no filename at
     all cannot be reported against anything. Both are renamed to a positional
     label here, so that every line in the stream identifies exactly one
-    submitted part. The renamed part then matches no CSV row and is reported as
-    `missing_application_row`, which names the real problem: the agent has to
-    fix the filenames before the batch can be checked.
+    submitted part. Renaming does not change the pairing stem, which is taken
+    before the parenthetical suffix, so two parts under one filename still share
+    a stem and are both reported as `duplicate_label_stem` (ADR 0009). That
+    names the real problem: the agent has to fix the filenames before the batch
+    can be checked.
     """
     seen: set[str] = set()
     named: list[batch.SubmittedImage] = []

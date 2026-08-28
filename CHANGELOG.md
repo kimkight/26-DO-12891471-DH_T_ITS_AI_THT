@@ -40,6 +40,13 @@ the line, because the history of why the CSV existed is the reason the
 replacement is short. The alternatives rejected, one combined PDF of all the
 forms and pairing on an identifier inside each document, are recorded in
 ADR 0009 with what would make the second one right.
+- The batch's plain-language error lines follow the contract change: the
+CSV-row codes are gone and the five pairing codes ADR 0009 defines each have a
+sentence of their own, naming the file the agent has to do something about. A
+new test asserts that every batch code an agent can meet has a line rather than
+falling through to the generic one, because a code the server emits and the
+interface has never heard of reads as "we could not check this label" when the
+real problem is a filename.
 - Each batch row is verified against what its own document said. Every value on
 that path is parsed rather than typed, so each row's result carries the parsed
 block and says per field whether the document supplied the value or did not
