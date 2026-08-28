@@ -181,21 +181,53 @@ is in [02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) section 4.
 
 **Semantic Versioning.** `MAJOR.MINOR.PATCH`.
 
-While the prototype is pre-release it stays on `0.x`. Under SemVer, `0.x` makes
-no backward-compatibility promise, which is honest for something whose API does
-not exist yet.
+The prototype was on `0.x` for its whole build. Under SemVer, `0.x` makes no
+backward-compatibility promise, which was honest for something whose API did not
+exist yet. **v1.0.0 is the version submitted for review**, and the reason for
+leaving `0.x` is that a released build should identify itself as the thing that
+was reviewed: the health endpoint reports the version, and `0.1.0` on the
+deployed URL would name a build from before most of what is in it. The version
+is declared in `backend/app/__init__.py`, `backend/pyproject.toml` and
+`frontend/package.json`, and the health endpoint reads the first of those.
 
 **Release procedure**
 
-1. Cut `release/vX.Y.Z` from `develop`.
-2. Bump the version in `backend/pyproject.toml` and `frontend/package.json`.
-3. Move `CHANGELOG.md` entries from Unreleased into a dated version section.
-4. Stabilize: fixes only, no new features.
-5. Open a pull request to `main`. CI must be green.
-6. Merge and tag `vX.Y.Z` on `main`.
+1. Bump the version in `backend/app/__init__.py`, `backend/pyproject.toml` and
+   `frontend/package.json`, and regenerate `frontend/package-lock.json`. The
+   backend lock files carry no self-entry, so a version-only bump leaves them
+   byte-identical; regenerate them anyway and commit nothing if nothing changed.
+2. Give `CHANGELOG.md` a version section header collecting the Unreleased
+   entries, marked unreleased until tagged, and date it when the tag is cut.
+3. Steps 1 and 2 can be done on `develop`, which is what v1.0.0 did, or on a
+   `release/vX.Y.Z` branch cut from `develop` when the release needs a
+   stabilization period of fixes only and no new features. A release branch is
+   the exception rather than the default: it earns its keep only when `develop`
+   has to keep moving while the release settles.
+4. Open a pull request from `develop` (or from the release branch) to `main`.
+   CI must be green.
+5. Merge it.
+6. Create the `vX.Y.Z` tag through the GitHub Releases web interface with `main`
+   as the target, and **publish the release**. See below on why the tag is not
+   pushed from a session.
 7. Merge `main` back into `develop`.
-8. The `v*` tag is what the deployment workflow triggers on, once that workflow
-   is enabled.
+
+**Publishing the release is what deploys, not the tag.**
+`.github/workflows/deploy.yml` is enabled and triggers on exactly two things:
+`workflow_dispatch`, and `release` with `types: [published]`. It does **not**
+trigger on a pushed `v*` tag, so a tag created without publishing a release
+deploys nothing. Creating the tag through the Releases interface and publishing
+in the same action is what fires the event. The workflow reads
+`github.event.release.tag_name` and pushes the image under that tag, which is
+why a release deploys an image named for its version while a manual dispatch
+deploys one named for the commit.
+
+**Tags are created through GitHub Releases from `main`, not pushed from a
+session.** The session git proxy rejects pushes to `refs/tags/*` with HTTP 403
+while accepting pushes to `refs/heads/*` on the same remote with the same
+credentials, so `git push origin vX.Y.Z` is not a usable step. Release v0.1.0
+was created in the Releases interface, tagged at `79d5ac7` on `main`. This is
+the normal path for this repository, not a one-time workaround. Recorded as
+OQ-18 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
 Every commit on `main` is a release. That is the whole point of keeping it
 separate from `develop`.

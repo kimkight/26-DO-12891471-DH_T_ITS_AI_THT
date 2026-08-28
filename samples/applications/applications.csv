@@ -1,0 +1,13 @@
+filename,brand_name,class_type,alcohol_content,net_contents,beverage_type
+01-spirits-clean.png,Stone's Throw,Kentucky Straight Bourbon Whiskey,45,750 mL,distilled spirits
+02-spirits-case-difference.png,Stone's Throw,Kentucky Straight Bourbon Whiskey,45%,750ml,distilled spirits
+03-spirits-title-case-warning.png,Copper Kettle,Straight Rye Whiskey,50,750 mL,distilled spirits
+04-spirits-altered-warning.png,Salt Marsh,Blended Whiskey,40,750 mL,distilled spirits
+05-spirits-no-warning.png,Lantern Hill,London Dry Gin,47,750 mL,distilled spirits
+06-spirits-wrong-abv.png,Two Rivers,Silver Rum,40.5,750 mL,distilled spirits
+07-spirits-missing-net-contents.png,Old Sextant,Barrel Aged Rum,43,750 mL,distilled spirits
+08-spirits-proof-inconsistent.png,Five Fathoms,Straight Bourbon Whiskey,45,750 mL,distilled spirits
+09-wine-clean.png,Hollow Creek,Napa Valley Cabernet Sauvignon,13.5%,750 mL,wine
+10-wine-cross-unit-net-contents.png,Quiet Orchard,Willamette Valley Pinot Gris,12.5,25.4 fl oz,wine
+11-beer-rotated.png,North Spur,India Pale Ale,6.2,12 fl oz,malt beverage
+12-beer-low-contrast.png,Grey Harbor,Bohemian Style Pilsner,4.8,12 fl oz,malt beverage

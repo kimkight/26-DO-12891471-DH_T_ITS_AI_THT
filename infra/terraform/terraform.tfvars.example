@@ -1,0 +1,49 @@
+# Copy to terraform.tfvars and edit. terraform.tfvars is git-ignored.
+#
+# Every value in this file is optional: the defaults in variables.tf are the
+# ones the runbook assumes, and `terraform apply` with no tfvars file at all
+# produces the stack docs/09_DEPLOYMENT.md describes.
+#
+# What is NOT in this file, and must never be: an AWS account number, an access
+# key, a session token, or any ARN containing an account number. Terraform
+# reads your credentials from the environment, the same ones `aws sts
+# get-caller-identity` uses. The account the stack lands in is whichever
+# account those credentials belong to.
+
+# Region. us-east-1 per ADR 0001.
+# aws_region = "us-east-1"
+
+# Prefix for every resource name. Change it to run two copies side by side.
+# name_prefix = "ttb-verifier"
+
+# Set to false if this AWS account already has an OIDC provider for
+# token.actions.githubusercontent.com from earlier work. Creating a second one
+# for the same issuer fails with EntityAlreadyExists.
+# create_github_oidc_provider = true
+
+# Task size. Changing either of these means re-doing the arithmetic in
+# docs/09_DEPLOYMENT.md section 4, because the TTB_MAX_* values below are
+# derived from the memory figure.
+# task_cpu    = 1024
+# task_memory = 8192
+
+# Batch caps carried into the container environment.
+# max_batch_files  = 300
+# max_upload_bytes = 10485760
+# max_batch_bytes  = 3145728000
+# batch_workers    = 1
+
+# Narrow this to your own address while testing. The default is the whole
+# internet, which is the recorded decision for the evaluation window: the
+# deliverable is a URL an evaluator can open, and there is no authentication.
+# ingress_cidr_blocks = ["203.0.113.4/32"]
+
+# Seconds the load balancer holds an idle connection. A batch is one long
+# response; see docs/09_DEPLOYMENT.md section 4. AWS caps this at 4000.
+# alb_idle_timeout_seconds = 3600
+
+# CloudWatch Logs retention, days.
+# log_retention_days = 7
+
+# Let `terraform destroy` remove the ECR repository with images still in it.
+# ecr_force_delete = true

@@ -12,19 +12,33 @@ seconds, or agents go back to doing it manually.
 
 **Author:** Kimberly D. Kight
 
-> **Status: scaffold only.** The application logic is **not implemented**. Only
-> `GET /api/health` exists. See [Status](#status) below for exactly what works.
+> **Status: the prototype works, is deployed, and has been measured on the
+> deployed target. Accuracy on real label artwork is still the open question.**
+> Single-label and batch verification and the agent-facing interface are built,
+> tested, and running on ECS Fargate behind an Application Load Balancer in
+> `us-east-1`, deployed by image digest.
+>
+> The first measurements against the deployed URL were taken on 2026-08-28 and
+> are in [Measured performance and accuracy](#measured-performance-and-accuracy)
+> below. A single label comes back in 1.5 seconds and a batch of 300 finishes in
+> under seven minutes, both through the load balancer. What those runs did not
+> settle is accuracy on real label artwork: three phone photographs of a round
+> bottle still leave the brand and the class unreadable on curved glass, which is
+> the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
+> rather than solves. See [Status](#status) below for exactly what works and
+> [Known limitations](#known-limitations) for what the measurements do not cover.
 
 ## Repository map
 
 | Path | Contents |
 | --- | --- |
-| `backend/` | FastAPI application, Python 3.11. Health endpoint only. |
-| `frontend/` | React and TypeScript, built with Vite. Placeholder shell. |
+| `backend/` | FastAPI application, Python 3.11. The verification engine and both endpoints. |
+| `frontend/` | React and TypeScript, built with Vite. The agent-facing interface. |
 | `docs/` | Charter, scope, requirements, stories, architecture, security, test strategy, SDLC process, deployment outline. |
 | `docs/adr/` | Architecture decision records. |
-| `samples/` | Where labeled test images and ground truth will live. Empty today. |
-| `infra/` | Placeholder for Terraform. Not written. |
+| `samples/` | Twelve label specifications, the renderer that draws them, and the ground truth CSVs. Images are generated locally and git-ignored. |
+| `scripts/` | `measure.py`, which runs the engine over the sample set and reports per-field accuracy and latency. |
+| `infra/terraform/` | Terraform for the deployed stack: ECR, ECS on Fargate, ALB, CloudWatch Logs, IAM, and the GitHub OIDC deploy role. |
 | `.github/` | CI and deployment workflows, issue and pull request templates, CODEOWNERS, Dependabot. |
 | `Dockerfile` | Multi-stage build: frontend, then backend. Runs as a non-root user. |
 
@@ -42,11 +56,28 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"0.1.0","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.0.0","environment":"local"}
 ```
 
-The frontend shell is at <http://localhost:8000/> and shows the backend status.
-It does not verify labels, because that logic does not exist yet.
+The interface is at <http://localhost:8000/>. The first tab checks one label:
+choose a label image, attach the applicant's COLA document, and select **Check
+this label**. The document is the normal way the application values arrive, and
+the boxes for typing them yourself are behind **Or type the application
+values**, which opens on its own when the document leaves a gap or cannot be
+read. The second tab checks many at once,
+taking the label images plus one COLA document for each, **paired by filename
+stem**: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. The rule is
+stated on the page, and the page says how many pairs it found before you submit.
+
+To try it without artwork of your own, generate the sample set first:
+
+```bash
+python samples/generate_samples.py
+```
+
+That writes twelve labels into `samples/images/` and one COLA document per label
+into `samples/applications/documents/`, already named to pair with them, which
+is exactly what the batch tab expects.
 
 Stop with `docker compose down`.
 
@@ -55,7 +86,8 @@ Stop with `docker compose down`.
 ```bash
 cd backend
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,matching]"
+pip install --require-hashes -r requirements-dev.lock
+pip install --no-deps -e .
 pytest
 uvicorn app.main:app --reload
 ```
@@ -64,12 +96,16 @@ uvicorn app.main:app --reload
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
 The dev server proxies `/api` to `http://localhost:8000`, so run the backend
 alongside it.
+
+The frontend checks are `npm run lint`, `npm run test` (component tests) and
+`npm run test:a11y` (axe-core against the built page, which needs `npm run
+build` first and downloads Chromium on its first run).
 
 ## Approach
 
@@ -95,9 +131,54 @@ prefix is upper case. The reference text is quoted verbatim from 27 CFR 16.21,
 fetched from eCFR and cited in
 [docs/03_REQUIREMENTS.md](docs/03_REQUIREMENTS.md).
 
+**A batch is one streaming request, not a job queue.** Up to 300 label images
+and their 300 COLA documents go in a single submission; a bounded worker pool
+reads them and each result is written to the response as it finishes, so
+progress is visible while the batch runs and one unreadable image costs only its
+own row. There is no job store, because nothing is persisted. See
+[ADR 0006](docs/adr/0006-batch-execution-model.md).
+
+**A batch takes what an importer actually files.** It used to take a CSV of
+application data, keyed by image filename, assumed rather than stated by any
+source. Nothing produces such a file: what an importer files with TTB is, per
+application, a COLA form plus label images. So a batch is now the images plus
+one COLA document each, paired by filename stem, read by the same parser the
+single-label view uses. The CSV is gone rather than kept alongside. See
+[ADR 0009](docs/adr/0009-batch-cola-documents.md).
+
+**The interface is one screen, and it starts from the document.** The primary
+task is on the landing page with nothing to navigate, every outcome is carried by
+a word and a shape before it is carried by a colour, and the field needing a
+human's attention is the one that looks unfinished. The agent checking a label is
+normally holding the applicant's COLA document, so that document is the first
+application-side thing on the page and the five boxes for typing the same values
+sit behind a disclosure, opening when the agent asks or when the document leaves
+a gap or cannot be read. The batch tab has worked this way since ADR 0009; the
+single-label tab now does too. The requirement behind it is a stakeholder's, not a
+designer's: "clean, obvious, no hunting for buttons," for a team where technology
+comfort varies widely.
+
+**It uses the government palette, and it says plainly that it is not an official
+system.** Navy and a gold accent, because the tool is about federal label
+compliance and a prototype with a brand of its own would answer the wrong
+question about whether it belongs in this workflow. The surface around that
+palette is a soft, modern one: white cards with generous radii and layered
+shadows over a muted blue-grey field, a segmented pill control, soft-tinted
+inputs, and the chosen photograph previewed inside a scan frame.
+
+The line between reflecting a design language and impersonating an agency is
+drawn at the seal and at claims of officialdom, and it is drawn in tests rather
+than left to judgement. A banner is the first thing on every view: "Prototype
+built for an employment assessment. Not an official TTB or Treasury system.
+Nothing you upload is stored." The footer names the author and the assignment.
+There is no TTB seal, no Treasury seal, no eagle, and no "official website of
+the United States government" banner anywhere in the repository, and
+`frontend/src/__tests__/branding.test.tsx` fails if one is added.
+
 **The tool recommends; the agent decides.** Nothing here issues an approval or a
 rejection, and every result carries the label value, the application value, and
-the score so an agent can overrule it. See
+the score so an agent can overrule it. The interface says so on screen, beneath
+the results, rather than only in this file. See
 [docs/06_SECURITY_AND_COMPLIANCE.md](docs/06_SECURITY_AND_COMPLIANCE.md)
 section 6.
 
@@ -107,10 +188,12 @@ section 6.
 | --- | --- |
 | Backend | Python 3.11, FastAPI, uvicorn |
 | Frontend | React 19, TypeScript, Vite |
+| Typeface | Inter, under the SIL Open Font License 1.1. Bundled as a variable font and served from the application's own origin, never fetched from a CDN, because NFR-3 applies to the page as well as to the API |
 | OCR | Tesseract via pytesseract, OpenCV for preprocessing |
 | Matching | rapidfuzz |
 | Container | Docker, multi-stage, non-root |
-| CI | GitHub Actions: ruff, pytest, eslint, prettier, pip-audit, npm audit, Syft SBOM |
+| Frontend testing | Vitest, React Testing Library, axe-core run in Chromium by Playwright |
+| CI | GitHub Actions: ruff, pytest, eslint, prettier, vitest, axe-core, pip-audit, npm audit, Syft SBOM |
 | Target platform | AWS ECS on Fargate behind an ALB, image in ECR, `us-east-1` |
 
 ## Documentation
@@ -120,56 +203,173 @@ section 6.
 | [01 Project Charter](docs/01_PROJECT_CHARTER.md) | Purpose, background, stakeholders, success criteria, constraints, deliverables |
 | [02 Project Scope](docs/02_PROJECT_SCOPE.md) | In scope, out of scope, stretch goals, Definition of Done |
 | [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-10, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
-| [04 User Stories](docs/04_USER_STORIES.md) | 21 stories across 5 epics, with Given/When/Then criteria |
+| [04 User Stories](docs/04_USER_STORIES.md) | 24 stories across 6 epics, with Given/When/Then criteria |
 | [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, government-region portability |
 | [06 Security and Compliance](docs/06_SECURITY_AND_COMPLIANCE.md) | Threat model, controls, FedRAMP posture, ATO readiness, AI governance |
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
 | [08 SDLC Process](docs/08_SDLC_PROCESS.md) | Phases with entry and exit criteria, Git Flow, PR checklist, DoR and DoD, releases |
-| [09 Deployment](docs/09_DEPLOYMENT.md) | Outline only; infrastructure is a later task |
-| [Open Questions](docs/OPEN_QUESTIONS.md) | 16 unanswered questions, recorded rather than guessed |
-| [Assumptions](docs/ASSUMPTIONS.md) | 13 inferences, each with what would confirm or falsify it |
+| [09 Deployment](docs/09_DEPLOYMENT.md) | The author's runbook: commands, variables, task sizing, cost, post-deploy verification, teardown |
+| [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
+| [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
 
 ## Status
 
-**The application logic is not yet implemented.**
+**Every functional requirement is built and tested, the prototype is deployed,
+and the first figures measured on the deployed target are below.**
 
 | Capability | State |
 | --- | --- |
 | `GET /api/health` | Works |
-| Frontend shell showing backend status | Works |
+| `POST /api/verify` (one label against its application data) | Works |
+| `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
+| `POST /api/read-application` (read a COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
+| Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
+| Comparison against application data | Works: `backend/app/compare.py` |
+| Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
+| Verification interface, one label | Works: one screen, up to three photographs of the same label, then the label application upload as the primary application-side input, the five application fields behind a disclosure that opens when the agent opens it or when a document leaves a gap or fails to parse, five result cards, and a note saying what was done to each photograph |
+| Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
+| Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
+| Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
+| One bad image failing only its own row in a batch | Works; covered by tests |
 | Container build, non-root, health probe | Works; verified in CI |
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
-| Field extraction from label artwork | **Not implemented** |
-| Comparison against application data | **Not implemented** |
-| Government warning checks | **Not implemented** |
-| Batch verification | **Not implemented** |
-| Deployed URL | **Not deployed.** No AWS infrastructure exists. |
-| Accuracy and latency measurements | **Not measured.** No sample set exists. |
+| Infrastructure as code | Works: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI, and applied to an AWS account in `us-east-1`. |
+| Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
+| Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
+| Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
+| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
+| COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
+| Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
+
+Numbers are deliberately absent from this table and are in their own section
+below, because a figure without the hardware, the date and the sample it came
+from is not a measurement. The checklist that produced them is
+`docs/09_DEPLOYMENT.md` section 9. `scripts/measure.py` prints the current
+figures for whatever machine runs it, and each pull request that measured
+something records its numbers with the hardware they came from.
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
 one per user story.
 
+## Measured performance and accuracy
+
+**Where these came from.** Every figure below was measured by the author on
+2026-08-28 against the deployed URL, build `sha-f66a4e2`, running on ECS Fargate
+with 1 vCPU and 8 GiB of memory behind the Application Load Balancer in
+`us-east-1`, and exercised from the author's browser. They are measurements, not
+estimates or projections. Nothing here is scaled arithmetically from a smaller
+run, and nothing here was taken on a session container. The runs are the ones
+`docs/09_DEPLOYMENT.md` section 9 lists, and that section records the same
+values against its checklist.
+
+### Latency
+
+| Submission | End to end | Inside the checker | What came back |
+| --- | --- | --- | --- |
+| One label: the synthetic 1200x1600 fixture rotated 90 degrees, submitted with a Public COLA Registry printout attached | **1.5 s** | 1.4 s | All five fields matched. The rotation was detected and reported. |
+| One label: three real phone photographs of a round bottle, which is the hard case | **7.8 s** | Not recorded separately | Brand name and class or type stayed unreadable on that bottle's curved glass and were reported honestly as mismatch and not found. |
+| A batch at the configured cap: 300 label images with their 300 paired COLA documents in one submission | **Approximately 6.5 to 7 minutes**, roughly **1.3 s per label** | Not recorded separately | 300 of 300 rows returned. Results streamed progressively through the load balancer: 83 labels complete at the 109 second mark, observed live. |
+
+**NFR-1, about five seconds, is met with margin on the single-label path.** One
+photograph and its application document came back in 1.5 seconds end to end
+through the load balancer, against a target of roughly five seconds.
+
+**The three-photograph case is over that target, and that is a measurement
+rather than a failure to report.** 7.8 seconds for three photographs of one
+bottle is outside NFR-1's roughly five seconds. `docs/09_DEPLOYMENT.md`
+section 9 named this as the thinnest margin against NFR-1 anywhere in the
+prototype before it was run, and the run confirmed it. Both levers are task
+environment variables and neither needs a code change:
+`TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`.
+
+**NFR-2, batch throughput with visible progress, is met.** The full 300-label
+batch completed with no timeout and no lost work, and progress was visible
+throughout rather than arriving in one block at the end. The 83-of-300 reading
+at 109 seconds is the evidence that the load balancer did not buffer the stream,
+which was the specific risk ADR 0006 recorded and the reason the check exists.
+
+**Peak task memory for the batch window: memory utilization measurement
+pending.** The CloudWatch `MemoryUtilization` figure for that window is being
+retrieved and is not written here until it is in hand. It is the number that
+would replace the two estimates in `docs/09_DEPLOYMENT.md` section 4.3 with a
+measurement, and it is the one that says whether 8 GiB was the right size.
+
+### Accuracy
+
+**On the synthetic seeded set, 300 of 300 outcomes were correct.** The 300-label
+batch returned 270 fully matching rows and 30 not matching, with 0 needing review
+and 0 unreadable. The 30 mismatches were exactly the 30 seeded ABV defects in the
+fixture set: every seeded defect was caught, and there were no false alarms.
+
+**This is the self-built sample, not the real application population.** That
+distinction is the last bullet of section 5 of
+[docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md), and it is the whole
+qualification on the figure above. Rendered text is easier to read than a
+photographed bottle, so 300 of 300 is an upper bound on a synthetic set and says
+nothing about a real filing. The three-photograph run in the latency table is
+the counter-example measured on the same day: on real curved glass, two of the
+five fields did not come back at all.
+
 ### Known limitations
 
-- **No accuracy or latency numbers are published, because none have been
-  measured.** The labeled sample set does not exist yet. No target is claimed
+- **Accuracy has been measured against synthetic labels only.** `samples/`
+  renders twelve labels from text with Pillow; `scripts/measure.py` scores the
+  engine against them. Rendered text is far easier to read than a photographed
+  bottle, so those figures set an upper bound and nothing more. Per-field
+  accuracy against real label artwork is unmeasured and is the largest open
+  technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
+- **The latency and throughput figures are now from the deployed target, and
+  one number is still missing.** The checklist in
+  [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9 was run on
+  2026-08-28, including the question of whether the batch stream survives a load
+  balancer unbuffered, which it does. The one box still open is the CloudWatch
+  `MemoryUtilization` figure for the batch window, and the README says "memory
+  utilization measurement pending" rather than a number until it is in hand.
+- **Three photographs of one label is over the five-second target.** The
+  single-label path with one photograph measures 1.5 seconds against NFR-1's
+  roughly five; three photographs of a round bottle measured 7.8 seconds on the
+  same hardware on the same day. It is recorded rather than tuned away, and both
+  levers are task environment variables rather than code:
+  `TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`. No source states a batch
+  latency target at all (OQ-6), so the batch figure is reported without one.
 - **Capitalization is checked; boldness is not.** 27 CFR 16.22(a)(2) requires
   the warning prefix in "capital letters and in bold type." The prototype checks
-  only capitals and must not imply otherwise.
+  only capitals and must not imply otherwise. The API says so in every warning
+  result and the interface repeats it verbatim on the warning card, so the gap
+  is visible to the agent rather than only to a reader of this file.
+- **A clean accessibility run is not a conformance claim.** axe-core finds a
+  subset of WCAG failures, and no automated tool replaces testing with an actual
+  screen reader. What the CI run holds is the regressions that are cheap to
+  introduce and expensive to notice: an input that loses its label, a heading
+  level skipped, a contrast pair broken by a token change. Whether Section 508
+  applies to this prototype is unanswered (OQ-7), and that is what would turn
+  NFR-5 from a target into an obligation.
+- **The interface has one light palette and no dark mode.** Contrast is asserted
+  against that palette, token by token, in
+  `frontend/src/__tests__/contrast.test.ts`. A dark palette is a second palette
+  to verify, not a toggle.
+- **The visual design uses the government palette; it is not endorsed by,
+  affiliated with, or issued by TTB or the Department of the Treasury.** That is
+  stated on every view of the interface itself, not only here. Inter is used
+  under the SIL Open Font License, which is a licensing question with a clear
+  answer rather than a branding claim.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
-  no audit record that a verification occurred.
-- **No frontend lockfile**, so frontend builds are not yet reproducible (OQ-3).
+  no audit record that a verification occurred. For batch, the same decision
+  means a dropped connection loses the whole submission: there is no
+  server-side copy of the results, so the stream is the only one. This is the
+  strongest argument for the job model ADR 0006 records as its expected
+  successor.
 - **Container base images are pinned by tag, not digest.**
-- **The build session could not reach PyPI, npm, or the Ubuntu package archive**,
-  so tests, the frontend build, and the container build were not run locally.
-  They run in CI (OQ-15).
+- **The container build is verified in CI**, not in a session. The backend
+  suite, the frontend component tests and the accessibility run execute in
+  both.
 
 ## License
 

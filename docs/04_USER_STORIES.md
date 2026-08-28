@@ -334,22 +334,39 @@ going to use it. We learned that the hard way." [Source: Sarah Chen interview]
 | --- | --- |
 | Epic | Batch verification |
 | Priority | Must |
-| Requirements | FR-8 |
+| Requirements | FR-8, FR-11 |
 | Points | |
-| Issue | #9 |
-| Source | Sarah Chen interview |
+| Issue | #9, and [#70](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/70) for the change of contract |
+| Source | Sarah Chen interview; the author's question, 2026-08-28 |
 
 **As a** compliance agent handling a bulk importer submission,
-**I want** to upload many labels with their application data in one go,
-**so that** I am not processing a 300-application drop one at a time.
+**I want** to upload many labels together with the COLA document for each,
+**so that** I am not processing a 300-application drop one at a time, and I am
+not retyping 300 applications into a spreadsheet to do it.
 
 **Acceptance criteria**
 
 ```
-Given a batch of labels each with application data
+Given label images and one COLA document for each, named to match
 When  I submit the batch
 Then  the response contains a result set for every label in the batch
 And   each result identifies which label it belongs to
+And   each result's application values are the ones its document carried
+```
+
+```
+Given an image whose name matches no document, or a document matching no image
+When  I submit the batch
+Then  that item reports an error on its own result line
+And   every other label still returns results
+```
+
+```
+Given a document that cannot be read
+When  I submit the batch
+Then  that label reports an error naming the document
+And   no field reports a match for it
+And   every other label still returns results
 ```
 
 ```
@@ -358,6 +375,21 @@ When  I submit it
 Then  the request is rejected before any file is processed
 And   the message names the limit
 ```
+
+```
+Given I am on the batch view
+When  I look at it before choosing anything
+Then  the naming rule that pairs an image with a document is stated on screen
+```
+
+**What changed, and why.** This story asked for "many labels with their
+application data" from the beginning, and until 2026-08-28 that application data
+was one CSV keyed on image filename, assumed as A-14 and stated by no source.
+The author asked where such a CSV would come from. Nothing an importer files
+produces one; what they file is, per application, a COLA form plus label images,
+and FR-11 reads that form. The CSV is removed, not kept alongside. See
+[ADR 0009](adr/0009-batch-cola-documents.md), which also records the pairing
+rule: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`.
 
 Sarah: "during peak season, we get these big importers who dump 200, 300 label
 applications on us at once. Right now we literally have to process them one at a
@@ -493,6 +525,121 @@ Then  it is announced to assistive technology
 Sarah states "half our team is over 50" with a wide range of technology comfort.
 [Source: Sarah Chen interview] Section 508 applicability is unconfirmed; see
 OQ-7 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+
+---
+
+### US-24 Start from the application document, not from five empty boxes
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | FR-11, FR-2, FR-9, NFR-4, NFR-5 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's own use of the deployed prototype, 2026-08-28 |
+
+**As a** compliance agent who is holding the applicant's COLA document when I
+sit down to check a label,
+**I want** the tool to start from that document rather than from five empty text
+boxes,
+**so that** I spend my attention confirming what the application says instead of
+copying it.
+
+**Acceptance criteria**
+
+```
+Given the single-label view on load
+When  I look at it
+Then  the application document upload is the application-side input on screen
+And   it comes directly after the photo picker
+And   it is not worded as the alternative to typing
+And   the five typed fields are collapsed behind "Or type the application values"
+```
+
+```
+Given no application document at hand
+When  I open "Or type the application values"
+Then  the five fields appear and I can type them
+```
+
+```
+Given a document that was read and left gaps
+When  the read finishes
+Then  the fields open on their own
+And   the values it did carry are filled in and marked as read from the form
+And   the gaps are empty and waiting
+And   the expansion is announced
+```
+
+```
+Given a document that could not be read
+When  the read fails
+Then  the message names the problem
+And   the fields open as the fallback
+And   the expansion is announced
+```
+
+```
+Given a document that carried every value
+When  the read finishes
+Then  nothing opens, because there is nothing left for me to enter
+```
+
+```
+Given a value read off the document and the same value typed by me
+When  I run the check
+Then  my typed value is used, exactly as before
+```
+
+```
+Given the beverage type
+When  I look for it
+Then  it is inside the disclosure and not the first field I meet
+And   it says it is not compared against the label
+```
+
+```
+Given a keyboard alone
+When  I reach the disclosure
+Then  it is reachable with visible focus
+And   its expanded or collapsed state is announced correctly
+```
+
+The question this story exists for is the author's, from using the deployed
+prototype: when would the typed fields actually be used? Walked through from the
+agent's chair, the answer is almost never as a starting point. US-23 built the
+upload and left the layout saying the opposite of what US-23 had learned: five
+empty boxes first, and the document offered "instead". This story inverts that.
+The flow the empty state now describes is the flow the batch tab has told from
+the day ADR 0009 landed: photographs, then the application, then check.
+
+**Three expansion cases, and only three.** The agent opens the disclosure; a
+parsed document leaves gaps; a document fails to parse. A document that supplies
+everything opens nothing, because there is nothing left to enter and the upload's
+own summary already says what it read. Nothing ever closes the disclosure except
+the agent, and no expansion moves focus: the parse can return while the agent is
+reading something else, so it is announced to a live region instead.
+
+Gaps are the normal case rather than the exceptional one. TTB F 5100.31
+(04/2023) has no box for the class or type designation or the alcohol content at
+all, and carries the net contents only when it is blown, branded or embossed on
+the container (A-17). So the second expansion case is what an agent attaching the
+form proper will meet every time, and the fields appear with the parsed values in
+place and the gaps empty.
+
+**Nothing about precedence changes.** FR-11's rule stands: a value the agent
+typed wins over the same value read off the document, and the response says which
+it was. There is no API change in this story.
+
+**Beverage type is demoted rather than removed.** It is never compared. It says
+which numeric rule to expect, the A-12 proof cross-check for spirits or A-13
+range handling for wine, and nothing else. In the engine those rules key off the
+value rather than off this control: the proof cross-check fires when the label
+itself states a proof, and range handling fires when the value carries a range.
+The rule that actually ran is named in the field result's own reason, which is
+the honest place for it, so the control fills from the document when the document
+states it and otherwise sits at the bottom of the disclosure.
 
 ---
 
@@ -776,3 +923,159 @@ Then  the weakness is reported rather than omitted
 
 No accuracy target is stated in any source, so none is invented here; see OQ-8
 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
+
+## Epic F: Real label artwork
+
+### US-22 Check a label that one photograph cannot show
+
+| | |
+| --- | --- |
+| Epic | Real label artwork |
+| Priority | Should |
+| Requirements | FR-1, FR-9 |
+| Points | |
+| Issue | [#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61) |
+| Source | The author's first real-artwork test against the deployed prototype, 2026-08-26; Jenny Park interview (SG-1); 27 CFR 16.21 |
+
+Numbered #61 rather than #22 because GitHub draws issue and pull request numbers
+from one sequence, and this repository had reached 60 by the time this story was
+written. US-1 to US-21 map to issues #1 to #21; this one does not follow that
+pattern and the break is recorded here rather than left to look like an error.
+
+**As a** compliance agent checking a label on a round bottle,
+**I want** to attach more than one photograph of the same label,
+**so that** the fields that curve out of one frame can still be checked.
+
+**Acceptance criteria**
+
+```
+Given a label whose fields are split between two photographs of it
+When  I attach both and check the label
+Then  every field found on either photograph is reported as found
+And   the result names which photograph each value was read from
+```
+
+```
+Given one unreadable photograph among readable ones
+When  I check the label
+Then  the readable photographs still produce a result
+And   the unreadable one is reported rather than hidden
+```
+
+```
+Given a submission in which no photograph could be read
+When  I check the label
+Then  no field reports a match
+And   the message says that none of the photographs could be read
+```
+
+```
+Given I have attached the maximum number of photographs
+When  I look for the control that adds another
+Then  it is no longer offered, and the interface says why
+```
+
+```
+Given I attach only one photograph
+When  I check the label
+Then  the check behaves exactly as it did before this capability existed
+```
+
+The case this exists for, in the words of the test that found it: a photograph
+of a real wine bottle was submitted to the deployed prototype and none of the
+five fields came back. Two of the three causes were preprocessing and are fixed
+under A-15. The third is that the label wraps the bottle, so no single
+photograph shows it flat. Jenny Park raised exactly this and qualified it:
+"labels that are photographed at weird angles... this is maybe out of scope for
+a prototype." [Source: Jenny Park interview] 27 CFR 16.21 compounds it by
+allowing the government warning to be "on a back or side label", so the required
+elements need not all be on one face.
+
+The decision, the alternatives rejected, and what is deliberately left out is
+[ADR 0007](adr/0007-multi-photo-single-label.md). The number of photographs is
+assumption A-16. Cylinder dewarping is not attempted; see OQ-21.
+
+### US-23 Upload the label application instead of typing it
+
+| | |
+| --- | --- |
+| Epic | Real label artwork |
+| Priority | Should |
+| Requirements | FR-11, FR-2, FR-3, FR-9 |
+| Points | |
+| Issue | [#65](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/65) |
+| Source | The author's own use of the deployed prototype, 2026-08-27 |
+
+Numbered #65 rather than #23 for the reason given under US-22: GitHub draws
+issue and pull request numbers from one sequence, and this repository was past
+64 by the time this story was written.
+
+**As a** compliance agent who already has the applicant's label application in
+front of me,
+**I want** to attach that document instead of retyping what it says,
+**so that** I spend my attention on judging the label rather than on data entry.
+
+**Acceptance criteria**
+
+```
+Given a COLA document, a PDF or an image of one
+When  I attach it on the single-label view
+Then  the values it carries are put into the same fields I would have typed into
+And   each filled field is marked as read from the application form
+And   every filled field is still editable
+```
+
+```
+Given a value the document does not carry
+When  the document has been read
+Then  that field is left for me to fill in
+And   the interface says why the form does not carry it
+```
+
+```
+Given a field I have typed and a document that also carries it
+When  I run the check
+Then  my typed value is used
+And   the response says that value was typed rather than parsed
+```
+
+```
+Given a filled-in copy of the fillable form
+When  I attach it
+Then  the values are read from its form fields, which is where they are
+And   item 5's ticked box gives the beverage type
+```
+
+```
+Given a scan or a photograph of a printed form
+When  I attach it
+Then  it is read through the same local OCR the tool reads labels with
+And   the response says it was read that way
+```
+
+```
+Given an empty or unreadable document
+When  I attach it
+Then  the message names the problem
+And   no field reports a match
+And   I can still type the values in myself
+```
+
+```
+Given I attach nothing
+When  I run the check
+Then  it behaves exactly as it did before this capability existed
+```
+
+The question this story exists for is the author's own, while using the
+deployed prototype: why enter all this information, when the applicant already
+submitted it? The values the form asks for are on TTB Form 5100.31, the COLA
+application, and on the Public COLA Registry detail page for an approved one.
+
+**This is not the COLA system integration OOS-1 excludes.** Nothing here calls
+an API, holds a credential or looks anything up. It reads a file the agent
+already has. The note under OOS-1 in
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) records the distinction, and
+[ADR 0008](adr/0008-cola-form-as-application-input.md) records the decision, the
+alternatives rejected, and what the form does not carry. The field map is
+assumption A-17; what has not been verified against a real document is OQ-22.

@@ -1,4 +1,41 @@
 version: 2
+
+# Update policy, set 2026-08-22 after the triage in
+# docs/DEPENDENCY_TRIAGE_2026-08.md.
+#
+# The first Dependabot run opened twelve pull requests at once, ten of them
+# major bumps, against a repository with no lockfile and no application code.
+# Reviewing twelve pull requests to learn that eight of them are noise is not a
+# good use of anyone's time, and a wall of open pull requests trains a reviewer
+# to stop reading them. Two changes follow from that.
+#
+# 1. Minor and patch updates are grouped into one pull request per ecosystem
+#    per week. These are the updates that should be boring: they carry security
+#    and bug fixes, they are what the weekly cadence exists for, and reviewing
+#    them individually adds nothing because the decision is the same for all of
+#    them. One grouped pull request per ecosystem, one CI run, one review.
+#
+#    Major bumps are deliberately NOT grouped. A major bump is a decision, and
+#    a decision needs its own pull request, its own CI run, and its own place
+#    to record why it was taken or refused. Grouping them would hide a
+#    toolchain change behind a routine-looking title.
+#
+# 2. Major bumps of typescript, the react pair, and the vite pair are ignored,
+#    because each changes how the whole frontend is checked, rendered or built,
+#    and none should arrive unrequested. Two of those are pairs precisely
+#    because a major in one is unmergeable without the matching major in the
+#    other. See the ignore block for the specific evidence.
+#
+#    "Ignored" means Dependabot will not open the pull request on its own. It
+#    does not mean the upgrade is forbidden. To take one deliberately, remove
+#    or narrow the matching ignore entry in a pull request of its own, which
+#    puts the decision in the history where it belongs.
+#
+# 3. Runtime-line bumps of the python and node base images are ignored for the
+#    same reason, added 2026-08-23 after #47. Docker tags are not semver, so
+#    the grouping rule in point 1 cannot be trusted to keep a runtime change
+#    out of a "minor-and-patch" pull request. See the docker ignore block.
+
 updates:
   - package-ecosystem: "pip"
     directory: "/backend"
@@ -9,6 +46,13 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "npm"
     directory: "/frontend"
@@ -19,6 +63,75 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # TypeScript majors change what compiles. PR #36 (5.7.3 to 7.0.2) failed
+      # CI at `npm install`, before any file was type-checked: typescript-eslint
+      # 8.67.0 declares `peer typescript ">=4.8.4 <6.1.0"`, so npm could not
+      # resolve a tree at all. A TypeScript major is only adoptable once the
+      # lint toolchain has published a matching peer range, and adopting it
+      # then still means reading the compiler's new errors. That is a task, not
+      # a dependency update.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+      # React majors change rendering behaviour and, from 19 onward, what the
+      # hooks lint rules enforce.
+      #
+      # The original reason for this entry was that CI passing on a React major
+      # would be evidence of nothing, because the frontend was a scaffold with
+      # one component. **That is no longer true.** FR-10 landed a real interface
+      # with 61 component tests and an axe run against the built page, so a
+      # React major now has something to regression-test against. The entry
+      # stays because the upgrade is still a decision that wants its own pull
+      # request and its own reading of the test output, not because there is
+      # nothing to test. Removing it is a reasonable next task.
+      #
+      # react-dom is ignored on the same terms because the two are one unit:
+      # they ship as a matched pair and react-dom declares a peer dependency on
+      # the exact react version. A react-dom major proposed on its own cannot
+      # be merged alone, so leaving it out only produced pull requests that had
+      # to be closed. This closes the gap the triage recorded in
+      # docs/DEPENDENCY_TRIAGE_2026-08.md.
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+
+      # vite and @vitejs/plugin-react are ignored as a coupled pair, because
+      # the repository has now seen the deadlock from both sides and closed a
+      # pull request each time:
+      #
+      #   PR #28, vite 6.4.3 to 8.2.1, failed CI at `npm install` with
+      #   ERESOLVE. @vitejs/plugin-react@4.7.0 declares
+      #   `peer vite "^4.2.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"`, and Vite 8 is
+      #   outside it. The Vite major needs the plugin major first.
+      #
+      #   PR #41, @vitejs/plugin-react 4 to 6, was closed because plugin 6
+      #   requires a Vite major this repository has not taken. The plugin
+      #   major needs the Vite major first.
+      #
+      # Neither half is mergeable alone, so proposing either half separately
+      # can only generate a pull request that gets closed. The upgrade is a
+      # single change that raises both at once, taken deliberately in its own
+      # pull request with `tsc -b` and `vite build` read afterwards. Removing
+      # both entries together is what reopens it.
+      #
+      # The original entry said this belonged with "the frontend work that has
+      # not started". That work has now landed (FR-10), and the deadlock is
+      # unchanged: it is a property of the two packages' peer ranges, not of
+      # this repository's readiness. What has changed is that a Vite major now
+      # has a real bundle and a real accessibility run to be judged against.
+      - dependency-name: "vite"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vitejs/plugin-react"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -29,6 +142,13 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
 
   - package-ecosystem: "docker"
     directory: "/"
@@ -39,3 +159,46 @@ updates:
     labels: ["type:task", "dependencies"]
     commit-message:
       prefix: "chore(deps)"
+    groups:
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Base image runtime lines are pinned to what CI tests, and a bump that
+      # moves them is a decision, not a routine update. Three pull requests say
+      # so already: #25 (python 3.11-slim-bookworm to 3.14-slim-bookworm) and
+      # #26 (node 22-bookworm-slim to 26-bookworm-slim) were both closed because
+      # they split the tested runtime from the shipped one, ci.yml pinning
+      # python-version "3.11" and node-version "22"; #47 was closed because the
+      # "minor-and-patch" group had swept the same python 3.11 to 3.14 bump into
+      # a routine-looking grouped pull request.
+      #
+      # The two entries are not symmetric, and the asymmetry is the whole point
+      # of #47. Dependabot reads a Docker tag as if it were semver, but Docker
+      # tags are not semver:
+      #
+      #   node:22-bookworm-slim to node:26-bookworm-slim reads as major 22 to
+      #   major 26, so version-update:semver-major catches it.
+      #
+      #   python:3.11-slim-bookworm to python:3.14-slim-bookworm reads as minor
+      #   11 to minor 14 under major 3, so version-update:semver-major does NOT
+      #   catch it. That misreading is exactly what let #47 be filed as a minor.
+      #   Python's own release line is what changed, and CPython calls 3.14 a
+      #   major release, so semver-minor is ignored for python as well. Ignoring
+      #   semver-major alone here would have left #47 free to recur next week.
+      #
+      # Patch updates are still proposed for both, so a rebuilt base image
+      # carrying security fixes within the pinned line still arrives on its own.
+      # Ignored does not mean forbidden: taking a runtime line deliberately
+      # means narrowing or removing the matching entry in a pull request of its
+      # own, alongside the matching ci.yml pin, so the two move together.
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+      - dependency-name: "node"
+        update-types:
+          - "version-update:semver-major"

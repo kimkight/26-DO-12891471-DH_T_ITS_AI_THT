@@ -1,0 +1,540 @@
+"""The HTTP surface: POST /api/verify, /api/verify-batch and /api/read-application.
+
+Governing requirements: FR-1 and FR-2 (accept a label image plus application
+data for the same five fields), FR-3 (one outcome per field), FR-8 (many labels
+in one submission, results streaming back per label), FR-9 (an undecodable file,
+an image with no text, a disallowed type and an oversize file each return a
+clear message, and no error path returns a match), NFR-2 (a batch does not fail
+as a whole and its progress is observable), NFR-6 (nothing is persisted and no
+image content or field value reaches the logs), NFR-7 (size is checked before
+the body is read, MIME before anything is decoded, and the batch file count
+before anything is processed), NFR-3 (the default path makes no outbound call
+and says so in the response).
+
+There is a third route, ``POST /api/read-application``: it parses an uploaded
+COLA document and compares nothing (FR-11, ADR 0008). It exists so that the
+parsed values reach an agent as editable fields before a verification runs.
+
+US-1 through US-7 and US-9 through US-11 are implemented here at the API level,
+and US-23 is the COLA document path. The pipeline both verification routes run
+is in ``app.verify``; the batch reconciliation, worker pool and stream are in
+``app.batch``; the document parser is in ``app.application_form``. US-2 and
+FR-10 are presentation requirements and are not part of this module.
+
+The batch route takes label images and COLA documents, paired by filename stem
+(FR-8, [ADR 0009](../../docs/adr/0009-batch-cola-documents.md)). It took a CSV
+of application data until ADR 0009 superseded assumption A-14; the parser the
+documents go through is the FR-11 one the single-label route uses.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.formparsers import MultiPartParser
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+from app import batch
+from app.application_form import UnreadableDocumentError, parse_application_document
+from app.config import settings
+from app.schemas import (
+    ApplicationDocumentResult,
+    ErrorDetail,
+    ErrorResponse,
+    VerificationResult,
+)
+from app.verify import (
+    VerificationError,
+    build_result,
+    check_document_media_type,
+    check_media_type,
+    check_size,
+    document_result,
+    resolve_application,
+    verify_photos,
+)
+
+__all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
+
+logger = logging.getLogger(__name__)
+
+# Starlette spools any part over 1 MB to a temporary file on disk. NFR-6 says no
+# uploaded image is written to disk, so the spool threshold is raised to the
+# upload limit and nothing within the limit ever reaches the filesystem. This is
+# a class attribute the parser reads through `self`, with no constructor
+# override, so setting it here does reach every request.
+#
+# max_part_size is raised alongside it, but note what it does and does not do.
+# The parser applies it to non-file parts only; a file part streams into the
+# spooled file with no cap of its own. So this bounds the single-label form
+# fields, not the uploads. Images are bounded exactly, after
+# parsing, by verify.check_size. Note also that the parser takes max_part_size
+# as a constructor argument defaulted to 1 MB and assigns it to the instance, so
+# this class-level value is shadowed on every request; it is set for the case
+# where a future caller constructs a parser without passing one, not relied on.
+MultiPartParser.spool_max_size = settings.max_upload_bytes
+MultiPartParser.max_part_size = settings.max_upload_bytes
+
+router = APIRouter(prefix="/api", tags=["verification"])
+
+
+# What each upload route accepts as a whole request body, checked from
+# Content-Length before the body is read. The two differ by construction: a
+# batch envelope carries many images plus one COLA document each, so measuring
+# it against the per-image limit would reject every batch of more than one
+# label. Matching is
+# exact rather than by prefix for the same reason; a prefix match on
+# "/api/verify" would apply the single-file limit to "/api/verify-batch".
+def _envelope_limit(path: str) -> int | None:
+    """The whole-body limit for an upload route, or None if the path is not one.
+
+    Read per request rather than captured at import, so that an environment
+    that sets TTB_MAX_UPLOAD_BYTES or TTB_MAX_BATCH_FILES is reflected in both
+    the check and the message that names it (NFR-7, NFR-11).
+    """
+    if path == "/api/verify":
+        return settings.effective_max_verify_bytes
+    if path == "/api/read-application":
+        return settings.max_upload_bytes
+    if path == "/api/verify-batch":
+        return settings.effective_max_batch_bytes
+    return None
+
+
+def _error(status_code: int, code: str, message: str, limit: str | None = None) -> JSONResponse:
+    """Build an error response.
+
+    Errors are returned rather than raised as ``HTTPException`` so that the body
+    shape is the one in ``ErrorResponse`` every time. FR-9's last criterion is
+    the point: no error path returns a match outcome for any field, so no error
+    body carries a fields array at all.
+    """
+    payload = ErrorResponse(error=ErrorDetail(code=code, message=message, limit=limit))
+    return JSONResponse(status_code=status_code, content=payload.model_dump())
+
+
+class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
+    """Reject an oversize request from its Content-Length, before the body is read.
+
+    NFR-7's first criterion is that "file size is checked against
+    TTB_MAX_UPLOAD_BYTES **before the body is read into memory**". A route
+    dependency cannot satisfy that: FastAPI parses the multipart body while
+    resolving the endpoint's parameters, so by the time any handler code runs
+    the body has already been read. Middleware runs before routing, and
+    returning here without calling ``call_next`` means the body is never
+    consumed at all.
+
+    Content-Length covers the whole multipart envelope, and the single-label
+    route now accepts up to TTB_MAX_LABEL_PHOTOS photographs of one label
+    (ADR 0007) plus one optional COLA document (ADR 0008), so its envelope limit
+    is one more than that many times TTB_MAX_UPLOAD_BYTES: 40 MB on the
+    defaults.
+
+    **That loosens this guard, and the loosening is deliberate and bounded.**
+    Before ADR 0007 a single-label body over TTB_MAX_UPLOAD_BYTES was refused
+    here, without being read. It now takes a body up to three times that before
+    this guard fires, and a 25 MB single-photograph submission is read into
+    memory and then refused exactly by verify.check_size after parsing. The
+    alternative was to bound the envelope at one photograph, which would reject
+    every two-photograph submission, so there is no version of this that both
+    accepts three photographs and refuses 25 MB from the header: the middleware
+    cannot count the parts without reading the body it is trying not to read.
+    What is kept is that the body is still bounded before it is read, at 40 MB
+    on the defaults rather than 10 MB, and that every individual photograph and
+    the application document are each still checked exactly against
+    TTB_MAX_UPLOAD_BYTES. Lower TTB_MAX_LABEL_PHOTOS or TTB_MAX_UPLOAD_BYTES to
+    tighten it.
+
+    The batch route is measured against its own envelope limit, which is twice
+    TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default: a batch carries
+    one label image and one COLA document per label (ADR 0009), and each of the
+    two is an upload bounded by the same per-file limit. That bounds the
+    request, not any one file in it: each image and each document is still
+    checked exactly against TTB_MAX_UPLOAD_BYTES after parsing, and an oversize
+    one is that row's error rather than the batch's.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        limit = _envelope_limit(request.url.path)
+        declared = request.headers.get("content-length")
+        if (
+            request.method == "POST"
+            and limit is not None
+            and declared is not None
+            and declared.isdigit()
+            and int(declared) > limit
+        ):
+            return _oversize_response(limit)
+        return await call_next(request)
+
+
+@router.post(
+    "/verify",
+    response_model=VerificationResult,
+    responses={
+        413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Verify one label against its application data",
+)
+async def verify(
+    image: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "Label artwork. One part, or the same part repeated for up to "
+                "TTB_MAX_LABEL_PHOTOS photographs of the same label (ADR 0007)."
+            )
+        ),
+    ],
+    application_document: Annotated[
+        UploadFile | None,
+        File(
+            description=(
+                "The label application, as an alternative to typing the values: "
+                "a COLA document (PDF, or a scan or photograph of one). Read "
+                "locally, with no call to the COLA system (FR-11, ADR 0008, "
+                "OOS-1)."
+            )
+        ),
+    ] = None,
+    brand_name: Annotated[str, Form()] = "",
+    class_type: Annotated[str, Form()] = "",
+    alcohol_content: Annotated[str, Form()] = "",
+    net_contents: Annotated[str, Form()] = "",
+    beverage_type: Annotated[str, Form()] = "",
+) -> JSONResponse:
+    """Verify one label from one to three photographs of it.
+
+    One `image` part behaves exactly as it always did. More than one is ADR
+    0007: a label wraps a round bottle, so no single photograph shows all of it
+    flat, and the photographs are read independently and their fields merged.
+
+    The application values may be typed, or read from an uploaded COLA document
+    in the `application_document` part, or both: a typed value overrides the
+    parsed one field by field, and the response says which source each value
+    came from (FR-11, ADR 0008). Reading that document is document parsing, not
+    the COLA system integration OOS-1 excludes: it opens no socket and needs no
+    credentials.
+
+    Nothing is persisted and nothing is logged about it.
+    """
+    # Counted before anything is read, decoded or compared, and named in the
+    # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
+    # parses the multipart form while resolving these parameters; the guarantee
+    # kept here is that no photograph is processed.
+    if len(image) > settings.max_label_photos:
+        return _error(
+            413,
+            "too_many_photos",
+            (
+                f"{len(image)} photographs were submitted for one label. Send at "
+                f"most {settings.max_label_photos} photographs of the same label, "
+                "or use the batch tab for many different labels."
+            ),
+            limit=f"maximum photographs of one label: {settings.max_label_photos}",
+        )
+
+    contents: list[bytes] = []
+    document_bytes = 0
+    try:
+        for part in image:
+            # Checked before any byte is decoded (NFR-7, second criterion).
+            check_media_type(part.content_type)
+            content = await part.read()
+            check_size(content)
+            contents.append(content)
+
+        parsed_application = None
+        if application_document is not None:
+            check_document_media_type(application_document.content_type)
+            document = await application_document.read()
+            check_size(document)
+            document_bytes = len(document)
+            try:
+                parsed_application = parse_application_document(
+                    document, application_document.content_type
+                )
+            except UnreadableDocumentError as exc:
+                # FR-9 applied to the second upload: the message names the
+                # problem and the response carries no field outcomes at all. The
+                # typed path is still open, and the message says so.
+                raise VerificationError(
+                    code="unreadable_application_document", message=str(exc)
+                ) from exc
+
+        application, sources = resolve_application(
+            {
+                "brand_name": brand_name,
+                "class_type": class_type,
+                "alcohol_content": alcohol_content,
+                "net_contents": net_contents,
+                "beverage_type": beverage_type,
+            },
+            parsed_application,
+        )
+        result = verify_photos(
+            contents,
+            application,
+            application_sources=sources,
+            application_document=(
+                document_result(parsed_application) if parsed_application else None
+            ),
+        )
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+
+    # NFR-6: counts and timings only. No image content, no extracted value, no
+    # application value, no filename.
+    logger.info(
+        "verification completed",
+        extra={
+            "bytes_received": sum(len(content) for content in contents),
+            "photos_received": len(contents),
+            "ocr_ms": result.ocr_ms,
+            "beverage_type_supplied": bool(beverage_type.strip()),
+            # Counts and a path name only. No item value, no filename, nothing
+            # the document said (NFR-6).
+            "application_document_bytes": document_bytes,
+            "application_document_path": (
+                result.application_document.extraction_path if result.application_document else None
+            ),
+        },
+    )
+    return JSONResponse(status_code=200, content=result.model_dump())
+
+
+@router.post(
+    "/read-application",
+    response_model=ApplicationDocumentResult,
+    responses={
+        413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Read the application values off a COLA document, without verifying",
+)
+async def read_application(
+    application_document: Annotated[
+        UploadFile,
+        File(description="A COLA document: a PDF, or a scan or photograph of one."),
+    ],
+) -> JSONResponse:
+    """Parse a COLA document and return what it says, comparing nothing (FR-11).
+
+    **This exists because of what FR-11 requires of the interface, not to give
+    the API a second way in.** The parsed values have to reach the agent as
+    editable fields *before* a verification runs, so that the agent confirms or
+    corrects them and the check runs on what they confirmed (FR-3, ADR 0008).
+    Reaching that through `POST /api/verify` would mean submitting the label
+    photographs and running OCR over them once to read the form and again to
+    run the check the agent then asked for.
+
+    `POST /api/verify` still accepts the same part, for a caller that wants one
+    request, and the precedence rule is the same in both places: a typed value
+    overrides a parsed one.
+
+    Nothing is persisted (NFR-6) and no outbound call is made (NFR-3, OOS-1).
+    """
+    try:
+        check_document_media_type(application_document.content_type)
+        content = await application_document.read()
+        check_size(content)
+        parsed = parse_application_document(content, application_document.content_type)
+    except UnreadableDocumentError as exc:
+        return _error(422, "unreadable_application_document", str(exc))
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+
+    # NFR-6: a byte count and a path name. Nothing the document said.
+    logger.info(
+        "application document read",
+        extra={
+            "application_document_bytes": len(content),
+            "application_document_path": parsed.path,
+        },
+    )
+    return JSONResponse(status_code=200, content=document_result(parsed).model_dump())
+
+
+def _oversize_response(limit: int | None = None) -> JSONResponse:
+    """FR-9's fourth criterion: rejected before reading, with the limit named."""
+    enforced = settings.max_upload_bytes if limit is None else limit
+    if enforced == settings.max_upload_bytes:
+        message = "The uploaded file is larger than this service accepts. Send a smaller image."
+    elif enforced == settings.effective_max_verify_bytes:
+        message = (
+            "This submission is larger than this service accepts in one request. "
+            "Send fewer photographs of the label, or smaller ones."
+        )
+    else:
+        message = (
+            "This submission is larger than this service accepts in one request. "
+            "Split it into smaller batches and send them one after another."
+        )
+    return _error(413, "file_too_large", message, limit=f"maximum upload size: {enforced} bytes")
+
+
+@router.post(
+    "/verify-batch",
+    responses={
+        200: {
+            "content": {"application/x-ndjson": {}},
+            "description": (
+                "One JSON object per line, one line per item, emitted as each "
+                "item finishes. See the BatchLine schema."
+            ),
+        },
+        413: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Verify many labels against their COLA documents, paired by filename",
+)
+async def verify_batch(
+    images: Annotated[
+        list[UploadFile],
+        # Defaulted rather than required so that a submission with no images at
+        # all reaches the route and gets the message below, which says what to
+        # do about it, instead of the generic missing-part rejection. The
+        # default is never mutated; FastAPI reads it and builds a new list.
+        File(description="Label artwork, one part per image, repeated."),
+    ] = [],  # noqa: B006
+    application_documents: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "The COLA documents, one part per document, repeated. Each pairs "
+                "with the image of the same name before its file extension "
+                "(ADR 0009)."
+            )
+        ),
+    ] = [],  # noqa: B006
+) -> Response:
+    """Verify a batch of labels and stream the results (FR-8, NFR-2, ADR 0006).
+
+    **A batch is label images plus COLA documents, paired by filename stem**
+    (ADR 0009). `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`: the
+    stem is the filename with its final extension removed, compared without
+    regard to case. Each document is read by the FR-11 parser and what it says
+    is the application side for that label. There is no CSV: A-14 invented that
+    format and ADR 0009 supersedes it.
+
+    The response is `application/x-ndjson`: one JSON object per line, each
+    naming the image it belongs to, emitted as each label finishes rather than
+    in submission order. Nothing is persisted; the stream is the only copy of
+    the results (D-9, NFR-6).
+
+    Four rejections happen before any image is read, and each names what was
+    exceeded (FR-9, NFR-7):
+
+    * more images than `TTB_MAX_BATCH_FILES`, which is FR-8's third criterion,
+      "the request is rejected with a message naming the limit, before any file
+      is processed";
+    * more documents than the same limit, for the same reason;
+    * a request body over the batch envelope limit, caught in middleware from
+      Content-Length before the body is read at all;
+    * a submission carrying no images, or no documents at all.
+
+    Everything else is a per-row error on its own line, which is what keeps one
+    bad image from costing an agent the other 299 results (FR-8, US-10).
+    """
+    # FR-8, third criterion. Counted before anything is read, decoded or
+    # compared. The bodies are in memory by now, because FastAPI parses the
+    # multipart form while resolving these parameters; "before any file is
+    # processed" is the guarantee the requirement states and the one kept here.
+    #
+    # Both sides are counted against the same limit, because the limit is on
+    # labels and a batch carries one document per label (A-1, ADR 0009).
+    for count, part in ((len(images), "images"), (len(application_documents), "documents")):
+        if count > settings.max_batch_files:
+            detail = batch.over_count_error(count, part=part)
+            return _error(413, detail.code, detail.message, limit=detail.limit)
+
+    if not images:
+        return _error(
+            422,
+            "empty_batch",
+            "No images were submitted. Attach the label images and one COLA "
+            "document for each, named to match.",
+        )
+
+    if not application_documents:
+        # Batch level rather than per row, for the reason the CSV refusal it
+        # replaces was batch level: with no documents at all there is nothing to
+        # compare any label against, and repeating one message 300 times down
+        # the stream would tell an agent nothing the first line did not.
+        return _error(
+            422,
+            "missing_application_documents",
+            "No application documents were submitted. Attach one COLA document "
+            "for each label image, named to match the image before its file "
+            "extension: 0001-stones-throw.png pairs with 0001-stones-throw.pdf.",
+        )
+
+    submitted = [
+        batch.SubmittedImage(
+            filename=image.filename or f"image-{position + 1}",
+            content_type=image.content_type,
+            content=await image.read(),
+        )
+        for position, image in enumerate(images)
+    ]
+    submitted = _name_duplicates(submitted)
+    table = batch.collect_documents(
+        [
+            batch.SubmittedDocument(
+                filename=document.filename or f"document-{position + 1}",
+                content_type=document.content_type,
+                content=await document.read(),
+            )
+            for position, document in enumerate(application_documents)
+        ]
+    )
+
+    return StreamingResponse(
+        batch.stream(submitted, table),
+        media_type="application/x-ndjson",
+        headers={
+            # Without this a proxy may buffer the whole response and hand it
+            # over in one block at the end, which reinstates exactly the frozen
+            # page NFR-2 forbids. It is a hint to intermediaries, not a
+            # guarantee, and it is worth verifying against the load balancer at
+            # deployment time (OQ-13).
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _name_duplicates(images: list[batch.SubmittedImage]) -> list[batch.SubmittedImage]:
+    """Make every image part identifiable, which FR-8's fourth criterion needs.
+
+    Two parts submitted under one filename cannot both be reported against that
+    name without the results becoming ambiguous, and a part with no filename at
+    all cannot be reported against anything. Both are renamed to a positional
+    label here, so that every line in the stream identifies exactly one
+    submitted part. Renaming does not change the pairing stem, which is taken
+    before the parenthetical suffix, so two parts under one filename still share
+    a stem and are both reported as `duplicate_label_stem` (ADR 0009). That
+    names the real problem: the agent has to fix the filenames before the batch
+    can be checked.
+    """
+    seen: set[str] = set()
+    named: list[batch.SubmittedImage] = []
+    for position, image in enumerate(images):
+        name = image.filename
+        if name in seen:
+            name = f"{image.filename} (duplicate, part {position + 1})"
+        seen.add(name)
+        named.append(
+            batch.SubmittedImage(
+                filename=name, content_type=image.content_type, content=image.content
+            )
+        )
+    return named

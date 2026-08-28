@@ -1,6 +1,6 @@
 [project]
 name = "ttb-label-verifier-backend"
-version = "0.1.0"
+version = "1.0.0"
 description = "Backend API for the TTB alcohol label verification prototype."
 requires-python = ">=3.11"
 authors = [{ name = "Kimberly D. Kight" }]
@@ -30,6 +30,13 @@ ocr = [
     "pytesseract>=0.3.13",
     "opencv-python-headless>=4.11.0.86",
     "Pillow>=11.1.0",
+    # Reads an uploaded COLA document: its AcroForm field values, its text
+    # layer, and, where it has neither, its pages rendered to bitmaps for the
+    # OCR fallback (FR-11, ADR 0008). One library rather than three because it
+    # does all three, and it carries PDFium as a wheel, so nothing else has to
+    # be installed in the image. Licensed BSD-3-Clause and Apache-2.0, which
+    # matters here: the obvious alternative, PyMuPDF, is AGPL.
+    "pypdfium2>=5.13.0",
 ]
 matching = [
     "rapidfuzz>=3.11.0",

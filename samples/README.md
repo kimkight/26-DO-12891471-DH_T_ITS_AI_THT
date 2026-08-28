@@ -1,25 +1,106 @@
 # Sample labels and ground truth
 
-This directory will hold the labeled sample set used by the accuracy tests
+This directory holds the labeled sample set used by the accuracy tests
 described in [docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md).
 
 ## Current status
 
-**No sample labels and no `expected.csv` exist yet.** Nothing in this directory
-is wired into the test suite. The accuracy and performance test tiers are
-blocked until the sample set is built.
+**The sample set exists.** Twelve synthetic labels are described in
+`specs.py` and rendered by `generate_samples.py`. `scripts/measure.py` runs the
+verification engine over them and reports per-field accuracy and latency.
 
-## What will go here
+Regenerate the images and both CSVs from the repository root:
 
-| Path | Purpose |
+```
+python samples/generate_samples.py
+```
+
+| Path | Purpose | Committed |
+| --- | --- | --- |
+| `labelmaker.py` | Renders one label from a specification, with Pillow | Yes |
+| `formmaker.py` | Writes a synthetic COLA application document from a specification: a PDF with a real text layer, a fillable PDF whose values live in AcroForm fields, and a PNG with no text layer at all (FR-11, ADR 0008) | Yes |
+| `specs.py` | The twelve label specifications and the application data submitted against each | Yes |
+| `generate_samples.py` | Renders the images, writes both CSVs, and writes one COLA document per label | Yes |
+| `warning_text.py` | The 27 CFR 16.21 statement, kept separate from the application's copy | Yes |
+| `images/` | Rendered label artwork used as test input | No, git-ignored; see below |
+| `expected.csv` | Ground truth: one row per image | Yes |
+| `applications/applications.csv` | The application side of each case. No longer an API input; see below | Yes |
+| `applications/documents/*.pdf` | One synthetic Registry printout per label, named to pair with its image (ADR 0009) | No, git-ignored; regenerated like the artwork |
+
+### COLA application documents
+
+`formmaker.py` is the same idea as `labelmaker.py`, applied to the application
+rather than to the label. It writes three shapes of one invented application so
+that each of the parser's three ways in is exercised on a document it did not
+also produce: a digitally generated PDF, a filled-in fillable PDF, and a
+rasterized copy with no text layer.
+
+Nothing it produces is committed and nothing real is used. A filed
+TTB F 5100.31 carries a permit number, a signature and a named person on every
+copy, and the test data policy in
+[docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md) section 8 forbids real
+application data and personal data in any fixture. Every value in `formmaker.py`
+is invented, and the permit and serial numbers are deliberately not in a format
+TTB issues. The consequence is recorded honestly as OQ-22: the parser has never
+been run against a real application.
+
+### `expected.csv` columns
+
+| Column | Meaning |
 | --- | --- |
-| `images/` | Label artwork used as test input. Git-ignored; see below. |
-| `expected.csv` | Ground truth: one row per image, one column per extracted field. |
-| `applications/` | Matching application data used as the comparison side of a test case. |
+| `image_filename` | The rendered file in `images/` |
+| `brand_name` | The brand name as printed on the artwork |
+| `class_type` | The class or type designation as printed |
+| `alcohol_content` | The alcohol content as printed, including any proof statement |
+| `net_contents` | The net contents as printed, empty where the label omits it |
+| `government_warning_present` | Whether any warning statement appears at all |
+| `government_warning` | The warning statement as printed, empty where absent |
+| `notes` | What this sample is for, and which defect it carries |
 
-`expected.csv` is the ground truth referenced by the accuracy tier. Its planned
-columns are `image_filename`, `brand_name`, `class_type`, `alcohol_content`,
-`net_contents`, `government_warning_present`, and `notes`.
+The first six columns and `notes` are the set this file originally planned.
+`government_warning` was added because a boolean cannot serve as ground truth
+for FR-5: scoring a warning comparison needs the statement as printed, not just
+whether one is present.
+
+**`warning_text.py` deliberately duplicates the application's constant.** The
+sample set is input to the application, so taking its ground truth from
+`backend/app/warning.py` would copy any typo there onto the artwork and score it
+as correct. Both copies are checked against `docs/03_REQUIREMENTS.md` section 1
+by `backend/tests/test_samples.py`.
+
+## The application side of a batch
+
+`applications/` holds the comparison side of a test case, in two forms.
+
+**`applications/documents/*.pdf` is what a batch submission carries.** Per
+[ADR 0009](../docs/adr/0009-batch-cola-documents.md), a batch is label images
+plus one COLA document each, paired by filename stem:
+`01-spirits-clean.png` goes with `01-spirits-clean.pdf`.
+`generate_samples.py` writes one synthetic Public COLA Registry printout per
+label, carrying that label's declared values.
+
+A Registry printout rather than a blank TTB F 5100.31, because the form has no
+item for the class or type designation, the alcohol content or the net contents
+(A-17). A batch of forms would leave four of five fields with nothing to compare
+against, which would make the sample batch useless as a measurement.
+
+The documents are git-ignored, for the reason the artwork is: they are
+regenerated from a fixed specification rather than committed. Every value in
+them is invented; see the COLA application documents section above.
+
+**`applications/applications.csv` is no longer an input to any API.** It was the
+batch contract under assumption A-14, which
+[ADR 0009](../docs/adr/0009-batch-cola-documents.md) supersedes: no source ever
+stated that format, and nothing an importer files with TTB produces such a file.
+The file stays because it is the application side of the accuracy tier, which
+runs the engine in process, and because it is what the documents above are
+written from.
+
+**Two files, two purposes.** `expected.csv` is ground truth: what the tool
+should extract from the artwork, used to score accuracy. `applications.csv` is
+the other side: what the applicant claims, which the tool compares the artwork
+against. They overlap in columns and must not be conflated. `expected.csv` keys
+on `image_filename`; `applications.csv` keys on `filename`.
 
 ## Why images are git-ignored
 
@@ -31,10 +112,15 @@ The assignment states: "We encourage you to create or source additional test
 labels; AI image generation tools work well for this."
 [Source: Technical Requirements, Sample Label section]
 
-## Cases the set must cover
+## Cases the set covers
 
 Derived from the interviews, these are the cases the accuracy and UAT tiers
-exercise. See `docs/07_TEST_STRATEGY.md` for the assertions.
+exercise. See `docs/07_TEST_STRATEGY.md` for the assertions. Every case below is
+present in `specs.py`. Case 7, batch submission, is exercised by
+`backend/tests/test_batch.py`, which submits the whole set through
+`POST /api/verify-batch`, each label paired with its own COLA document, and
+asserts that every label returns a line; it needs no spec of its own because a
+batch is the existing twelve labels sent together with their applications.
 
 1. A clean, correct label matching its application data on every field.
 2. A brand name differing only in letter case, for example `STONE'S THROW` on

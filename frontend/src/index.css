@@ -1,33 +1,1532 @@
 /*
- * Deliberately minimal. Interface styling is deferred until the verification UI
- * is designed against the accessibility and simplicity requirements in
- * docs/03_REQUIREMENTS.md (NFR-4, NFR-5).
+ * One stylesheet, plain CSS, no framework.
+ *
+ * Governing requirements: NFR-4 (usable by an agent with low technology
+ * comfort: "clean, obvious, no hunting for buttons"), NFR-5 (WCAG 2.1 Level AA;
+ * visible focus, 4.5:1 body text contrast, outcomes not conveyed by colour
+ * alone).
+ *
+ * ## The visual direction
+ *
+ * A calm, soft product surface: white cards with generous radii and layered,
+ * low-opacity shadows, floating over a muted blue-grey field. Segmented pill
+ * controls instead of underlined tabs. Inputs with a soft tinted fill rather
+ * than a hard outline. Pill buttons. Small-caps kicker labels over card titles.
+ * There are no hard black borders anywhere.
+ *
+ * This replaced a stricter reading of the U.S. Web Design System, on the
+ * author's review of the deployed page: the tool is a working instrument rather
+ * than a published form, and it should look like one. **The palette did not
+ * change with it.** Navy and gold stay, because they are what makes the page
+ * read as belonging to this domain, and because the alternative was inventing a
+ * brand for a prototype that must not appear to have one.
+ *
+ * **It is not, and must never look like, an official TTB or Treasury system.**
+ * That line is drawn at the seal and at claims of officialdom, and it is drawn
+ * in code rather than left to judgement:
+ *
+ * - No TTB seal, no Treasury seal, no eagle, no "An official website of the
+ *   United States government" banner. None of those marks appears anywhere in
+ *   this repository, and `src/__tests__/branding.test.tsx` fails if one is
+ *   added.
+ * - A prototype banner is the first thing on every view, before the masthead,
+ *   saying what this is and what it is not. Softening it into a tinted panel
+ *   changed how it looks and nothing about what it says or whether it can be
+ *   dismissed, which it cannot.
+ * - The footer names the author and the assignment.
+ *
+ * ## Typography
+ *
+ * Inter, bundled, not fetched. A clean geometric sans at the weights this
+ * interface needs, published under the SIL Open Font License. It ships in the
+ * bundle as a variable font served from this origin: NFR-3 forbids outbound
+ * calls on the default path, and a stylesheet that fetches from a font CDN
+ * would make the page itself violate that on a network like the one Marcus
+ * Williams describes. `system-ui` follows it in the stack, so a build where the
+ * font file fails still renders in something sensible.
+ *
+ * ## Two decisions worth stating because they are visible and deliberate
+ *
+ * 1. **One light palette, no dark mode.** Declaring `color-scheme: light dark`
+ *    would hand the background colour to the browser and make the contrast
+ *    ratio a property of the visitor's settings rather than of this file.
+ *    NFR-5 asks for 4.5:1, so every colour here is explicit and every pair is
+ *    checked by src/__tests__/contrast.test.ts. A dark palette is a good
+ *    addition later; it is a second palette to verify, not a toggle.
+ *
+ * 2. **Every token is a colour that passed the check.** The restyle moved the
+ *    greys onto a blue axis and darkened the gold text a further step to hold
+ *    4.5:1 against the new tints. The thresholds were not touched: the tokens
+ *    were changed until they passed. The ratios live in the test, not in
+ *    comments here, because a comment cannot fail.
  */
+
+@import '@fontsource-variable/inter/wght.css';
+
 :root {
+  /*
+   * Surfaces, on a blue axis rather than a neutral one. --shell is the muted
+   * blue-grey field the white cards float over; --surface is the soft tint
+   * inside inputs, key-value rows and quiet panels.
+   */
+  --page: #ffffff;
+  --shell: #e8edf5;
+  --surface: #f1f4fa;
+  --border: #dbe2ee;
+  --border-strong: #5c6a7f;
+
+  /* Text. Both pass 4.5:1 on --page, --surface and --shell. */
+  --text: #131c29;
+  --text-muted: #4d5a6d;
+
+  /*
+   * Navy. --accent is the working primary and carries text, pills and buttons;
+   * --accent-dark is the masthead band, which only ever holds white text and
+   * the gold accent.
+   */
+  --accent: #1a4480;
+  --accent-dark: #112e51;
+  /* Navy at low opacity, for tinted tiles and the pill track. */
+  --accent-wash: #e3e9f4;
+
+  /*
+   * Gold, in three roles, because one gold cannot do all three and pass.
+   *
+   * --gold is the rule, the bracket and the edge: non-text, so WCAG's 3:1
+   * applies and #c05600 clears it on every surface here.
+   * --gold-text is the same hue darkened until it clears 4.5:1 on all three
+   * light surfaces. The blue-tinted surfaces are lighter than the greys they
+   * replaced in one channel and darker in another, so this was re-derived
+   * rather than carried over.
+   * --gold-bright is for the navy band only. It is brilliant against navy and
+   * illegible on white, so it is never used on a light surface, and the test
+   * checks it where it is used rather than where it is not.
+   */
+  --gold: #c05600;
+  --gold-text: #9a4a08;
+  --gold-bright: #ffbe2e;
+  --gold-wash: #fdf4e2;
+
+  /* Outcome tones. Each has a foreground, a tint, and an edge. */
+  --match: #136c3a;
+  --match-tint: #e7f3ec;
+  --review: #7a4b00;
+  --review-tint: #fbf1e0;
+  --mismatch: #a5231b;
+  --mismatch-tint: #fdecea;
+  --neutral: #4d5a6d;
+  --neutral-tint: #edf0f5;
+
+  /* The prototype banner, which is neither an outcome nor chrome. */
+  --notice: #fdf4e2;
+
+  --focus: #1a4480;
+  --focus-on-dark: #ffbe2e;
+
+  /*
+   * Radii. Cards are the large one, controls the medium, chips and buttons are
+   * fully round. Three values rather than one, because a pill button inside a
+   * card inside a page needs the sizes to step down or everything reads as the
+   * same object.
+   */
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-tile: 14px;
+  --radius-pill: 999px;
+
+  /*
+   * Layered, low-opacity shadows. Two layers: a tight one that seats the card
+   * on the field, and a wide soft one that gives it height. Both are navy
+   * rather than black, which is what keeps the page soft: a black shadow on a
+   * blue-grey field reads as dirt.
+   */
+  --shadow-card: 0 1px 2px rgba(17, 46, 81, 0.06), 0 8px 24px -12px rgba(17, 46, 81, 0.18);
+  --shadow-raised: 0 1px 2px rgba(17, 46, 81, 0.08), 0 16px 36px -18px rgba(17, 46, 81, 0.28);
+
+  --gap: 1rem;
+  --measure: 84rem;
+
   font-family:
+    'Inter Variable',
     system-ui,
     -apple-system,
     'Segoe UI',
-    Roboto,
     sans-serif;
+  /* 1.5 body line height and 16px base: WCAG 1.4.12 and plain readability. */
   line-height: 1.5;
-  color-scheme: light dark;
+  font-size: 100%;
+  color: var(--text);
+  background: var(--shell);
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  padding: 2rem;
+  padding: 0;
+  color: var(--text);
+  background: var(--shell);
 }
 
-main {
-  max-width: 48rem;
+/*
+ * NFR-5, second criterion: visible focus on every interactive control. Set once
+ * on :focus-visible for everything rather than per component, so a control
+ * added later cannot be added without it. The 3:1 minimum for a focus indicator
+ * is met by --focus against every light surface, and by --focus-on-dark against
+ * the navy band, which is the one place --focus itself would vanish.
+ *
+ * The ring is on the navy scale, as the restyle asks, and it is a ring rather
+ * than a border change: a soft-filled input has no outline to thicken, so the
+ * focus state has to arrive as something that was not there before.
+ */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.masthead :focus-visible,
+.prototype-banner :focus-visible {
+  outline-color: var(--focus-on-dark);
+}
+
+/* Content hidden visually but kept for assistive technology. Not display:none,
+   which would remove it from the accessibility tree along with the screen. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: 0.75rem 1.25rem;
+  background: var(--accent-dark);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 0 0 var(--radius-control) 0;
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
+/* ------------------------------------------------------- prototype banner */
+
+/*
+ * The first thing on every view, above the masthead, and the reason the rest of
+ * the page is allowed to look like federal work at all. It says what this is
+ * and, more importantly, what it is not.
+ *
+ * It is deliberately not styled as an alert: no icon, no red, nothing that
+ * reads as an error the agent should clear. It is a standing statement of fact,
+ * so it is quiet, permanent, and never dismissible. The restyle turned it from
+ * a ruled strip into a soft gold-tinted panel and changed nothing else about
+ * it: same wording, same position, same absence of a close button.
+ */
+.prototype-banner {
+  background: var(--notice);
+  border-bottom: 1px solid rgba(192, 86, 0, 0.25);
+}
+
+.prototype-banner__text {
+  max-width: var(--measure);
   margin: 0 auto;
+  padding: 0.75rem 2rem;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text);
 }
 
-dt {
+.prototype-banner__lead {
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------- masthead */
+
+/*
+ * The deep navy band, over the light content area. One accent-highlighted
+ * phrase in it, in gold, and only one: emphasis stops meaning anything the
+ * second time it is used.
+ */
+.masthead {
+  background: var(--accent-dark);
+  color: #ffffff;
+}
+
+.masthead__inner {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2.5rem 2rem;
+}
+
+/*
+ * The agency name, as plain text styling only. Small, letterspaced, upper case:
+ * the typographic treatment a subject line gets, not the treatment a seal or a
+ * wordmark gets. It says what domain this tool is about. The banner directly
+ * above it has already said who built it and that it is not an official system.
+ */
+.masthead__agency {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+}
+
+.masthead h1 {
+  margin: 0.5rem 0 0;
+  font-size: clamp(2rem, 1.4rem + 2vw, 2.75rem);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.masthead__subtitle {
+  margin: 0.875rem 0 0;
+  color: #ffffff;
+  opacity: 0.88;
+  max-width: 58ch;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+}
+
+/* The one accent-highlighted phrase. Gold on navy, which is the pair that
+   clears 4.5:1; on any light surface this colour is illegible and is never
+   used there. */
+.masthead__accent {
+  color: var(--gold-bright);
+  font-weight: 600;
+  opacity: 1;
+}
+
+/*
+ * The content area, on the light field below the navy band. It is not pulled up
+ * over the band: an earlier version overlapped them, and the segmented pill
+ * control is the first thing in here, so the overlap put the pill track astride
+ * the boundary with half of it on navy and half on the field. That read as a
+ * mistake rather than as depth.
+ */
+main {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+  position: relative;
+}
+
+.site-footer {
+  background: var(--page);
+  border-top: 1px solid var(--border);
+}
+
+.site-footer__inner {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 2rem;
+  color: var(--text-muted);
+  font-size: 0.9375rem;
+}
+
+.site-footer p {
+  margin: 0 0 0.5rem;
+  max-width: 78ch;
+}
+
+.site-footer p:last-child {
+  margin-bottom: 0;
+}
+
+.site-footer__attribution {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ------------------------------------------------- segmented pill controls */
+
+/*
+ * A light track with a white pill riding in it, instead of a strip of
+ * underlined tabs. The ARIA tabs pattern underneath is unchanged: this is
+ * presentation, and `role="tablist"`, `aria-selected` and the arrow keys are in
+ * App.tsx exactly as they were.
+ *
+ * The active segment is carried by three things at once, because a white pill
+ * on a pale track is a weak signal on its own: the fill, a real shadow, and a
+ * weight change. `aria-selected` is what a screen reader reads, and it is set
+ * regardless.
+ */
+.tabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.3125rem;
+  margin: 0 0 1.75rem;
+  background: var(--accent-wash);
+  border-radius: var(--radius-pill);
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--accent);
+  padding: 0.5625rem 1.25rem;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.tab:hover:not(.tab--active) {
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.tab--active {
+  background: var(--page);
+  color: var(--accent-dark);
+  font-weight: 600;
+  box-shadow: var(--shadow-card);
+}
+
+/* ------------------------------------------------------------------ layout */
+
+/*
+ * Left: the form. Right: the results. One screen, side by side on a desktop
+ * and stacked below it, with the form first in both the DOM and the reading
+ * order so the primary task never sits below results that do not exist yet.
+ */
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 26rem) minmax(0, 1fr);
+  gap: 1.5rem;
+  align-items: start;
+}
+
+@media (max-width: 62rem) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  main {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+
+  .masthead__inner,
+  .site-footer__inner,
+  .prototype-banner__text {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+  }
+}
+
+/*
+ * A white card floating on the field: large radius, layered shadow, a hairline
+ * border so the edge survives on a display that flattens the shadow. No hard
+ * border anywhere, and no coloured rule across the top: the card is a card, and
+ * what it is about is said by the kicker inside it.
+ */
+.panel {
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  padding: 1.75rem;
+  min-width: 0;
+}
+
+.panel > h2 {
+  margin: 0 0 1.5rem;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+/* ------------------------------------------------------------- the kicker */
+
+/*
+ * A small-caps, letter-spaced label with a leading icon, sitting above a card
+ * title. It says what kind of thing the card is before the title says what it
+ * does. Gold by default, which is the accent; the navy variant is for a second
+ * kicker on the same screen, so the accent keeps its scarcity.
+ */
+.kicker {
+  display: flex;
+  align-items: center;
+  gap: 0.4375rem;
+  margin: 0 0 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-text);
+}
+
+.kicker--navy {
+  color: var(--accent);
+}
+
+.kicker__icon {
+  flex: none;
+}
+
+/* The title that follows a kicker. A short declarative sentence, set larger
+   and tighter than a section heading, because it is the line a reader lands
+   on. */
+.kicker + h2,
+.kicker + h3 {
+  margin-top: 0;
+}
+
+/* --------------------------------------------------------------- icon tile */
+
+/*
+ * A rounded square in an accent wash, heading a feature area. Decorative: the
+ * heading beside it carries the meaning, so the tile's own glyph is
+ * aria-hidden wherever one is drawn.
+ */
+.tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  flex: none;
+  border-radius: var(--radius-tile);
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.tile--gold {
+  background: var(--gold-wash);
+  color: var(--gold-text);
+}
+
+.tile-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.875rem;
+  margin-bottom: 1rem;
+}
+
+.tile-heading__body {
+  min-width: 0;
+}
+
+/* -------------------------------------------------------------- status chip */
+
+/*
+ * A small rounded chip for a count or a state: "2 of 3 photos", "Read from the
+ * application form", "12 of 300 checked". Text first, always: a chip that says
+ * something only through its colour would fail NFR-5, so every one of these
+ * reads correctly in greyscale.
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.chip--navy {
+  background: var(--accent-wash);
+  color: var(--accent);
+}
+
+.chip--gold {
+  background: var(--gold-wash);
+  color: var(--gold-text);
+}
+
+.chip__dot {
+  width: 0.4375rem;
+  height: 0.4375rem;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+/* ------------------------------------------------------------------- forms */
+
+.field {
+  margin-bottom: 1.25rem;
+}
+
+.field label,
+.dropzone__label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  margin-bottom: 0.375rem;
+}
+
+.field__hint {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/*
+ * Soft-filled inputs: a very light blue-grey fill, a large radius, and a
+ * border that is present but almost invisible rather than a heavy outline. The
+ * border is not decoration: without it the field's edge disappears entirely at
+ * high display brightness, and an input an agent cannot find is worse than one
+ * that looks slightly heavier than the reference.
+ */
+.field input,
+.field select {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9375rem;
+  color: var(--text);
+  background: var(--surface);
+  padding: 0.6875rem 0.875rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.field input:hover,
+.field select:hover {
+  border-color: #c6d1e2;
+}
+
+.field input:focus,
+.field select:focus {
+  background: var(--page);
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+/*
+ * Generous rounded pills. The primary action is navy filled with white text
+ * and is the only filled control on the page, so "the thing to press" needs no
+ * hunting (NFR-4). Secondary actions are bordered white pills.
+ */
+.button {
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  padding: 0.6875rem 1.5rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  background: var(--page);
+  color: var(--accent);
+  cursor: pointer;
+  margin-right: 0.5rem;
+  transition:
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--surface);
+}
+
+.button--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+  padding: 0.75rem 1.75rem;
+  box-shadow: var(--shadow-card);
+}
+
+.button--primary:hover:not(:disabled) {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+  box-shadow: var(--shadow-raised);
+}
+
+/*
+ * A quieter secondary. Lower weight than the primary action so that "Check this
+ * label" stays the obvious thing to press (NFR-4), and still a real bordered
+ * button, because a control that looks like text is a control an agent has to
+ * hunt for.
+ */
+.button--quiet {
+  font-size: 0.875rem;
+  padding: 0.4375rem 1rem;
+  background: var(--surface);
+  border-color: var(--border);
+}
+
+.button--quiet:hover:not(:disabled) {
+  background: var(--accent-wash);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  box-shadow: none;
+  /*
+   * Disabled controls are exempt from the contrast minimum, but an agent still
+   * has to read this one to know why the check has not started. The opacity is
+   * kept high enough that the label stays legible, and the reason is also given
+   * as text underneath rather than left to the greying-out alone.
+   */
+  opacity: 0.55;
+}
+
+/* Motion is a nicety. Anyone who has asked for less of it gets none. */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* -------------------------------------------------------- photos fieldset */
+
+/*
+ * The photo slots (ADR 0007). A fieldset because the slots are one group with
+ * one question behind them, "which photos of this label", and a legend is how
+ * that question is announced once rather than repeated into every slot's label.
+ * The default fieldset border and padding are removed: the group is already
+ * legible from the legend and the slots, and a box around it would suggest a
+ * second card inside the card.
+ */
+.photos {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  min-width: 0;
+}
+
+.photos__legend {
+  padding: 0;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  margin-bottom: 0.375rem;
+}
+
+.photos__count {
+  font-weight: 500;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.photos__slot {
+  margin-bottom: 0.75rem;
+}
+
+/* ------------------------------------------------------------- scan frame */
+
+/*
+ * The chosen photograph, previewed inside a rounded panel with gold corner
+ * brackets: a scan frame. It is the centrepiece of the single-label view and it
+ * exists for a reason beyond looking like one. Before it, an agent choosing a
+ * file got the filename back and nothing else, and a photograph of the wrong
+ * bottle looked exactly like a photograph of the right one until the results
+ * came back five seconds later.
+ *
+ * The brackets are drawn in CSS, from the same gold as the rest of the accent.
+ * They are decoration, and the image beside them carries an alt attribute
+ * naming the file, so nothing here is load-bearing for a screen reader.
+ */
+.scan {
+  position: relative;
+  margin: 0 0 0.75rem;
+  padding: 0.875rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.scan__viewport {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 8rem;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--page);
+}
+
+.scan__image {
+  display: block;
+  max-width: 100%;
+  max-height: 14rem;
+  object-fit: contain;
+}
+
+/* Shown where the browser cannot make an object URL, and in the test
+   environment, which has no such API. The frame still reads as a frame. */
+.scan__fallback {
+  margin: 0;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.scan__bracket {
+  position: absolute;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid var(--gold);
+  pointer-events: none;
+}
+
+.scan__bracket--tl {
+  top: 0.375rem;
+  left: 0.375rem;
+  border-right: 0;
+  border-bottom: 0;
+  border-top-left-radius: 6px;
+}
+
+.scan__bracket--tr {
+  top: 0.375rem;
+  right: 0.375rem;
+  border-left: 0;
+  border-bottom: 0;
+  border-top-right-radius: 6px;
+}
+
+.scan__bracket--bl {
+  bottom: 0.375rem;
+  left: 0.375rem;
+  border-right: 0;
+  border-top: 0;
+  border-bottom-left-radius: 6px;
+}
+
+.scan__bracket--br {
+  bottom: 0.375rem;
+  right: 0.375rem;
+  border-left: 0;
+  border-top: 0;
+  border-bottom-right-radius: 6px;
+}
+
+.scan__caption {
+  margin: 0.625rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------- the application upload */
+
+/*
+ * The COLA form upload (FR-11, ADR 0008). Set off from the typed fields by a
+ * soft tinted panel rather than by colour, so it reads as an alternative to
+ * typing rather than as a further required step, and reads that way in
+ * greyscale too (NFR-5).
+ */
+.application-upload {
+  margin: 0 0 1.5rem;
+  padding: 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.application-upload__heading {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.application-upload__result {
+  margin-top: 0.875rem;
+}
+
+.application-upload__summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+
+.application-upload__notes {
+  margin: 0.375rem 0 0;
+  padding-left: 1.125rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.application-upload__notes li {
+  margin-bottom: 0.375rem;
+}
+
+/*
+ * The disclosure over the typed application values (US-24).
+ *
+ * The document above it is the primary input, so this control has to read as a
+ * way in rather than as a skipped step: a quiet button with a rotating marker,
+ * not a link and not a heading. The marker is a triangle drawn in CSS and is
+ * `aria-hidden` in the markup, because the button's own aria-expanded already
+ * says which way it points. Its rotation is a transition, so anyone who has
+ * asked for reduced motion gets the same two positions without the movement,
+ * through the global rule earlier in this file.
+ */
+.disclosure {
+  margin: 0 0 1.5rem;
+}
+
+.disclosure__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: 0;
   font-weight: 600;
 }
 
-dd {
-  margin: 0 0 0.5rem 0;
+.disclosure__marker {
+  width: 0;
+  height: 0;
+  border-top: 0.3125rem solid transparent;
+  border-bottom: 0.3125rem solid transparent;
+  border-left: 0.375rem solid currentColor;
+  transition: transform 120ms ease;
+}
+
+.disclosure__toggle[aria-expanded='true'] .disclosure__marker {
+  transform: rotate(90deg);
+}
+
+/*
+ * The panel is padded and ruled on its leading edge so that, once open, the
+ * fields read as belonging to the control that opened them rather than as a
+ * second form. `hidden` in the markup does the hiding; nothing here fights it.
+ */
+.disclosure__panel {
+  margin-top: 1rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border);
+}
+
+/*
+ * The per-field mark, as a chip. Text, not a colour swatch: NFR-5's greyscale
+ * rule means every state the interface reports has to survive having its colour
+ * removed, and this one is bound to its input through aria-describedby so it is
+ * read out as well as seen.
+ */
+.field__source {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0 0 0.5rem;
+  padding: 0.1875rem 0.625rem;
+  border-radius: var(--radius-pill);
+  background: var(--gold-wash);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--gold-text);
+}
+
+/* -------------------------------------------------------------- photo notes */
+
+.photo-notes {
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.125rem;
+  background: var(--surface);
+  border-radius: var(--radius-control);
+}
+
+.photo-notes__list {
+  margin: 0.5rem 0 0;
+  padding-left: 1.125rem;
+  font-size: 0.875rem;
+}
+
+.photo-notes__list li + li {
+  margin-top: 0.375rem;
+}
+
+/*
+ * A photograph that could not be read. Colour is not carrying this on its own:
+ * the sentence next to it says the photo could not be read, which is the text
+ * half NFR-5 requires.
+ */
+.photo-notes__item--failed {
+  color: var(--mismatch);
+}
+
+/* --------------------------------------------------------------- drop zone */
+
+.dropzone {
+  border: 1px dashed #b9c6da;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 1.125rem;
+  margin-bottom: 1rem;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.dropzone--dragging {
+  border-color: var(--accent);
+  border-style: solid;
+  background: var(--accent-wash);
+}
+
+.dropzone:focus-within {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.dropzone__hint {
+  margin: 0 0 0.625rem;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.dropzone__input {
+  font: inherit;
+  font-size: 0.875rem;
+  max-width: 100%;
+}
+
+.dropzone__chosen {
+  margin: 0.625rem 0 0;
+  font-weight: 600;
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+/* ------------------------------------------------------------ result rows */
+
+/*
+ * Each field's result as a key-value row: the outcome chip leads, the field
+ * name is next, and underneath sit the two values with the label muted on the
+ * left and the value bold on the right.
+ *
+ * The chip leading the row is the point of the layout. An agent scanning five
+ * results is looking for the one that needs them, and the thing they are
+ * looking for should be at the start of the line rather than at the end of it.
+ */
+.cards {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 1.125rem 1.25rem;
+  background: var(--page);
+}
+
+.card--match {
+  border-color: rgba(19, 108, 58, 0.28);
+}
+
+.card--mismatch {
+  border-color: rgba(165, 35, 27, 0.32);
+}
+
+/*
+ * FR-10's third criterion: needs-review is visually distinct from BOTH match
+ * and mismatch. It is the only card with a tinted body and a ring around it, so
+ * it differs from the other two by shape as well as by hue. It is also the only
+ * one an agent has to do something about, so it should read as unfinished.
+ */
+.card--review {
+  background: var(--review-tint);
+  border-color: rgba(122, 75, 0, 0.35);
+  box-shadow: 0 0 0 3px rgba(122, 75, 0, 0.1);
+}
+
+.card__header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  align-items: center;
+  margin-bottom: 0.875rem;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/*
+ * The key-value rows. Label left and muted, value right and bold, on a soft
+ * tint, one row per value. On a narrow screen they stack, because a label and a
+ * long class or type designation on one line at 20rem wide is two words per
+ * line of value.
+ */
+.card__values {
+  margin: 0 0 0.875rem;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.card__value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface);
+  border-radius: 8px;
+}
+
+.card--review .card__value {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.card__value dt {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.card__value dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.card__value--empty {
+  font-weight: 500;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.card__reason {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.card__detail {
+  margin-top: 0.875rem;
+  padding-top: 0.875rem;
+  border-top: 1px solid var(--border);
+}
+
+.card__subtitle {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.card__detail--note {
+  margin: 0;
+  color: var(--text);
+  font-size: 0.9375rem;
+}
+
+.card__detail--fail {
+  margin: 0;
+  color: var(--mismatch);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+/* ------------------------------------------------------------------ badges */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: var(--radius-pill);
+  border: 1px solid currentColor;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge--match {
+  color: var(--match);
+  background: var(--match-tint);
+}
+
+.badge--review {
+  color: var(--review);
+  background: var(--review-tint);
+}
+
+.badge--mismatch {
+  color: var(--mismatch);
+  background: var(--mismatch-tint);
+}
+
+.badge--neutral {
+  color: var(--neutral);
+  background: var(--neutral-tint);
+}
+
+.badge__icon {
+  flex: none;
+}
+
+.badge__icon--text {
+  font-weight: 900;
+  width: 16px;
+  text-align: center;
+}
+
+/* --------------------------------------------------------- scanning widget */
+
+/*
+ * The batch run, as a live scanning panel: a status line while the NDJSON
+ * stream is open, rows arriving one at a time, and a running total pinned under
+ * them. Presentation only. The stream, the progress element and the live-region
+ * announcements are unchanged; this is what they look like.
+ */
+.scanning {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--accent-wash);
+  border-radius: var(--radius-control);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+/*
+ * Three dots that pulse while the stream is open. `aria-hidden` in the markup:
+ * the sentence beside it says the same thing, and the polite live region says
+ * it again to a screen reader. Anyone who has asked for reduced motion gets
+ * three static dots, which still reads as a state.
+ */
+.scanning__pulse {
+  display: inline-flex;
+  gap: 0.25rem;
+  flex: none;
+}
+
+.scanning__pulse span {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 50%;
+  background: currentColor;
+  animation: scanning-pulse 1.1s ease-in-out infinite;
+}
+
+.scanning__pulse span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.scanning__pulse span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes scanning-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+/*
+ * A real <progress> element, styled rather than replaced, so its value and
+ * maximum stay exposed without any ARIA of our own. `accent-color` alone leaves
+ * Chromium drawing its default green bar, which is the one colour on the page
+ * that belongs to no part of this palette, so the track and the value are set
+ * explicitly for both engines.
+ */
+.progress progress {
+  flex: 1 1 12rem;
+  height: 0.5rem;
+  border: 0;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  appearance: none;
+  accent-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.progress progress::-webkit-progress-bar {
+  background: var(--accent-wash);
+  border-radius: var(--radius-pill);
+}
+
+.progress progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+.progress progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+
+.progress label {
+  font-weight: 600;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The running total, pinned under the results. It is the one line an agent
+ * reads while a 300-label batch runs, so it is set apart from the four
+ * per-outcome counts above it rather than being the fifth of them.
+ */
+.total-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 1rem 0 0;
+  padding: 0.875rem 1.125rem;
+  background: var(--accent-dark);
+  color: #ffffff;
+  border-radius: var(--radius-control);
+  font-weight: 600;
+}
+
+.total-row__label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold-bright);
+}
+
+.total-row__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.summary {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0;
+  margin: 0 0 0.5rem;
+}
+
+.summary li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.375rem;
+  padding: 0.4375rem 0.875rem;
+  background: var(--surface);
+  border-radius: var(--radius-pill);
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.summary strong {
+  font-size: 1rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.timing {
+  margin: 0 0 1.25rem;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timing__detail {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/* ------------------------------------------------------------------ tables */
+
+/* Wide content scrolls inside its own box so the page never scrolls sideways. */
+.table-scroll {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.results-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.875rem;
+}
+
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.results-table tbody tr:last-child th,
+.results-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+/*
+ * The header cells carry their own padding, and the sort button fills the cell
+ * rather than supplying the padding itself. The two were the other way round
+ * before, which left the one header with no sort button, "Detail", sitting hard
+ * against the top of the row while its neighbours were centred.
+ */
+.results-table thead th {
+  background: var(--surface);
+  padding: 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.results-table .numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.results-table .filename {
+  font-weight: 600;
+  /* break-word, not anywhere: a filename should break at its hyphens before it
+     breaks mid-extension. `anywhere` puts "png" on a line of its own. */
+  overflow-wrap: break-word;
+  min-width: 12rem;
+  max-width: 20rem;
+}
+
+.results-table .detail {
+  color: var(--text-muted);
+  min-width: 16rem;
+}
+
+.sort {
+  appearance: none;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  /* A button does not inherit these from its cell in every engine, and a header
+     row where one label is upper case and the rest are not looks broken. */
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 0;
+  width: 100%;
+  text-align: inherit;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sort__arrow {
+  color: var(--accent);
+}
+
+/* ----------------------------------------------------------------- notices */
+
+/* Soft-tinted rounded panels, not ruled strips. */
+.notice {
+  border-radius: var(--radius-control);
+  padding: 1rem 1.125rem;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.notice--error {
+  color: var(--mismatch);
+  background: var(--mismatch-tint);
+  border-color: rgba(165, 35, 27, 0.3);
+}
+
+.notice__headline {
+  margin: 0;
+  font-weight: 600;
+  font-size: 1.0625rem;
+  letter-spacing: -0.01em;
+}
+
+.notice__detail {
+  margin: 0.375rem 0 0;
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+.placeholder {
+  color: var(--text-muted);
+  background: var(--surface);
+  border-radius: var(--radius-control);
+  padding: 1.25rem;
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.footnote {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 1.25rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.details {
+  margin-top: 1.25rem;
+  font-size: 0.875rem;
+}
+
+.details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0.25rem 0;
+  border-radius: 6px;
+}
+
+.details p {
+  color: var(--text-muted);
+}
+
+.details code {
+  background: var(--surface);
+  padding: 0.0625rem 0.3125rem;
+  border-radius: 5px;
+  font-size: 0.9em;
 }

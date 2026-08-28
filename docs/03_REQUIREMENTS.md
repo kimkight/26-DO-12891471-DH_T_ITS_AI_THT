@@ -68,7 +68,10 @@ supplies none and inventing them is prohibited by the ground rules. See OOS-7.
 **Source:** Technical Requirements, Sample Label section
 
 Extract brand name, class/type designation, alcohol content, net contents, and
-the government warning statement from an uploaded label image.
+the government warning statement from uploaded label artwork. One label may be
+submitted as more than one photograph of itself, because a label wraps a round
+bottle and no single photograph shows all of it flat. See
+[ADR 0007](adr/0007-multi-photo-single-label.md).
 
 **Acceptance criteria**
 - Given the sample distilled spirits label, when it is submitted, then the
@@ -76,6 +79,25 @@ the government warning statement from an uploaded label image.
 - Given a field that cannot be located, then the field is reported as not found
   rather than reported as empty or silently omitted.
 - Extraction adds no outbound network call on the default path (see NFR-6).
+- Given a photograph taken sideways, or one whose orientation is recorded only
+  in its EXIF tag, then it is turned upright before it is read, and the result
+  states what was turned and on what confidence. `(Assumption)` A-15.
+- Given a warning set in a narrow column with printer's hyphens across line
+  breaks, then the split words are rejoined before the body is compared, so the
+  line breaking does not read as altered wording. `(Assumption)` A-15.
+- Given between one and `TTB_MAX_LABEL_PHOTOS` photographs of one label, then
+  each is read independently and a field is reported as found if any of them
+  shows it, and the result names which photograph each value was read from.
+  `(Assumption)` A-16.
+- Given two photographs that both show one field, then the reading from the
+  photograph that read it best is reported, judged by the same signal the field
+  was located by. See [ADR 0007](adr/0007-multi-photo-single-label.md).
+- Given one unreadable photograph among readable ones, then the readable ones
+  still produce a result and the unreadable one is reported rather than hidden.
+- Given more photographs than the configured limit, then the request is rejected
+  with a message naming the limit, before any photograph is processed.
+- Given a submission in which no photograph could be read, then no field reports
+  a match and the message says that none of them could be read (see FR-9).
 
 ### FR-2 Comparison against application data
 
@@ -85,11 +107,20 @@ the government warning statement from an uploaded label image.
 Accept application data for the same five fields and compare it against what was
 extracted from the label.
 
+**How the data arrives is FR-11's question, not this one.** The API takes the
+five values and does not care whether they were read off an uploaded COLA
+document or typed by the agent. On the interface the document is the primary
+input and the typed fields sit behind a disclosure (US-24); on the batch path
+nothing is typed at all (ADR 0009). This requirement is unchanged by either: it
+is about what happens to the five values once they are here.
+
 **Acceptance criteria**
 - Given a label and its application data, when verification runs, then each of
   the five fields carries exactly one outcome.
 - Given application data missing a field, then that field is reported as not
-  compared, and this is distinguished from a mismatch.
+  compared, and this is distinguished from a mismatch. A field the agent never
+  opened is such a field, so a collapsed disclosure is a legitimate submission
+  rather than an incomplete one.
 
 Sarah's description of the manual process this replaces: "Brand name matches?
 Check. ABV is correct? Check. Government warning is there? Check."
@@ -193,6 +224,29 @@ strings.
 - Given a numeric field that cannot be parsed as a number, then the system falls
   back to text comparison and says so, rather than reporting a false mismatch.
 
+**Locating the alcohol content on the label.** A percent sign is not by itself
+an alcohol content. A candidate counts only where the OCR line carrying the
+number also carries an alcohol marker: `ALC`, `ALC.`, `VOL`, `VOLUME`, `ABV`,
+`ALCOHOL` or `PROOF`, matched case-insensitively.
+
+- Given a label whose only percent appears in marketing copy, for example
+  "reduce our environmental impact by 7%", then the alcohol content is reported
+  as not found rather than as `7%`.
+- Given `12.5% ALC. BY VOL.`, `ALCOHOL 45% BY VOLUME`, `ABV 45%` or `90 PROOF`,
+  then the alcohol content is extracted.
+- Given OCR noise in the words around an intact marker, for example
+  `12.5% AlC. 8Y VOL.`, then the line is still accepted; the marker has to
+  survive OCR, the words around it do not.
+- Given a marker on a line with no number, for example an `ALC./VOL.` that OCR
+  split away from its figure, then the field is reported as not found rather
+  than reported as `ALC./VOL.`.
+
+This was written after the fact. The deployed prototype reported `7%` for a real
+bottle on 2026-08-27, read from the back label's environmental copy, because any
+percent token qualified. The residual risk is a line that genuinely carries both
+an unrelated number and a marker word; it is narrower than the risk it replaces
+and it is not claimed to be zero.
+
 **Alcohol content (Assumption A-12).** The two declared values must be
 numerically identical. The regulatory tolerances in 27 CFR 5.65, 4.36, and 7.65
 govern actual against labeled alcohol content, which is a laboratory question,
@@ -249,11 +303,67 @@ return per-label, per-field results.
 - Given a batch exceeding the configured file-count limit, then the request is
   rejected with a message naming the limit, before any file is processed.
 - The result identifies which label each result belongs to.
+- Given a batch submission, then it is one multipart request to
+  `POST /api/verify-batch` carrying the label images plus one COLA document for
+  each, and results stream back as newline-delimited JSON so progress is visible
+  while the batch runs. See [ADR 0006](adr/0006-batch-execution-model.md) for
+  the stream and [ADR 0009](adr/0009-batch-cola-documents.md) for what a batch
+  is made of.
+- Given an image whose stem matches no submitted document, or a document whose
+  stem matches no submitted image, then that item reports an error on its own
+  result line and the rest of the batch still returns results.
+- Given a document that cannot be read, then that label reports an error naming
+  the document, no field reports a match for it, and the rest of the batch still
+  returns results.
+
+**Batch submission contract.** [ADR 0009](adr/0009-batch-cola-documents.md).
+Repeated `images` parts and repeated `application_documents` parts in one
+request, **paired by filename stem**: `0001-stones-throw.png` pairs with
+`0001-stones-throw.pdf`. The stem is the filename with its final extension
+removed, compared without regard to case; only the final extension is removed,
+so `0001-stones-throw.front.png` pairs with `0001-stones-throw.front.pdf`.
+
+Each document is read by the FR-11 parser, and what it says is the application
+side for that label. Every value on this path is parsed rather than typed, so
+each row's result carries the parsed block and says per field whether the
+document supplied the value or did not carry it. A value the document does not
+carry is not compared, per FR-2, rather than guessed.
+
+The beverage type for a row comes from its document, and where the document does
+not state it the row says so. No comparison currently reads it: A-12's proof
+cross-check keys off a proof statement the label carries and A-13's range
+handling keys off a range in the value, so an unstated beverage type costs the
+comparison nothing. It is carried because A-12 and A-13 name it as the class
+that would decide which rule applies if a rule ever needed deciding.
+
+**This replaces a CSV of application data.** `(Superseded)` A-14 assumed the
+batch arrived as one CSV keyed by image filename, and recorded that no source
+stated that format. Nothing an importer files with TTB produces such a file:
+what they file is, per application, a COLA form plus label images, and FR-11 can
+now read that form. The CSV path is removed rather than kept alongside; the
+reasoning, including the alternatives rejected, is in
+[ADR 0009](adr/0009-batch-cola-documents.md).
 
 Sarah's case: "we get these big importers who dump 200, 300 label applications
 on us at once. Right now we literally have to process them one at a time."
-[Source: Sarah Chen interview] The default configured batch limit is 300 files,
-which is the top of the range she names. `(Assumption)`
+[Source: Sarah Chen interview] The default configured batch limit is 300 labels,
+which is the top of the range she names, and it is enforced on the images and on
+the documents alike, before anything is processed. `(Assumption)` A-1
+
+**One photograph per label, and that is a stated limit rather than an oversight.**
+FR-1 accepts up to `TTB_MAX_LABEL_PHOTOS` photographs of one label on the
+single-label path ([ADR 0007](adr/0007-multi-photo-single-label.md)). The batch
+path does not: a stem pairing several images to one document would need a rule
+for a group only partly readable and an answer for what a per-row error means
+when one photograph of three failed. None of that is difficult and none of it is
+asked for by any source, so it is not invented here. Two images on one stem are
+an error, not a multi-photograph label. An agent with a bulk submission of round
+bottles has to check those labels one at a time on the single-label tab. The
+limitation is asserted in
+`backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected` and
+`backend/tests/test_batch.py::TestPairing` so it cannot change without being
+noticed, and it is recorded in ADR 0007 under "Deliberately out of scope this
+session".
 
 ### FR-9 Error handling for unreadable images
 
@@ -271,6 +381,10 @@ An image that cannot be processed returns a clear message naming the problem.
   before decoding, with a message naming the accepted types.
 - Given a file larger than the configured size limit, then it is rejected before
   reading, with a message naming the limit.
+- Given a single-label submission in which no photograph could be read, then the
+  message says that none of them could be read, which is distinct from one
+  photograph being unreadable, and no field reports a match
+  ([ADR 0007](adr/0007-multi-photo-single-label.md)).
 - No error path returns a match outcome for any field.
 
 Today's fallback behaviour sets the bar: "Right now if an agent can't read the
@@ -293,6 +407,87 @@ Present per-field outcomes so an agent can act without re-reading the label.
 
 This replaces Jenny's "printed checklist on my desk that I go through for every
 label." [Source: Jenny Park interview]
+
+### FR-11 The label application as the input, with typing as the fallback
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-27:
+"Why do I have to enter in all this information?"
+
+Accept an uploaded copy of the applicant's label application, TTB Form 5100.31,
+or of the Public COLA Registry detail page for an application, as **the** way
+the application values arrive. Read it locally and offer what it says for the
+agent's confirmation. Typing the same values stays available and is the
+fallback rather than the default. See
+[ADR 0008](adr/0008-cola-form-as-application-input.md) and assumption A-17.
+
+**Which one is the default is a requirement, not a layout preference.** Written
+first as "instead of typed", which framed typing as the normal path and the
+document as the alternative. Walked through from the agent's chair the normal
+case is the opposite: the agent is holding the COLA document, and then the five
+values are something to confirm rather than something to enter. The single-label
+view puts the document directly after the photographs and the typed fields
+behind a disclosure that opens in exactly three cases (US-24); the batch path
+takes documents only (ADR 0009). What each value means, and which one wins, is
+unchanged.
+
+**This is not the COLA system integration OOS-1 excludes.** OOS-1 rules out API
+calls, COLAs Online authorization and registry lookups from the application.
+Accepting a document the agent already holds is document parsing: it needs no
+credential and opens no socket, and NFR-3 and NFR-6 apply to it exactly as they
+apply to a label image. The note under OOS-1 in
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) records the same distinction.
+
+**Acceptance criteria**
+- Given a COLA document uploaded on the single-label path, then the values it
+  carries are extracted and reported as a block distinct from the comparison,
+  each value marked found or not found.
+- Given a digitally generated document, for example COLAs Online output or a
+  Registry printout, then extraction reads the file's own content rather than
+  recognizing pixels, and reports which path was used.
+- Given a filled-in copy of the fillable form, then the values are read from its
+  form fields, which is where they are, rather than from the blank template's
+  text.
+- Given a scan or a photograph of a printed form, then it is read through the
+  same local OCR pipeline label artwork is read through, and the response says
+  so.
+- Given a value that is not an item on the form, then it is reported as not
+  found **with the reason**, rather than reported as a bare absence. On
+  TTB F 5100.31 (04/2023) the class or type designation and the alcohol content
+  are not items at all, and the net contents is item 15 only when it is blown,
+  branded or embossed on the container and does not appear on the labels.
+- Given a document that names all three of item 5's product types, then the
+  beverage type is reported as not found, because a ticked box cannot be read
+  from a document's text.
+- Given a field the agent typed and a document that also carries it, then the
+  typed value is used and the response says the value was typed. A blank field
+  is not a correction and the parsed value stands.
+- Given any parsed value, then it is presented in an editable field before a
+  verification runs, marked as read from the application form, and the
+  verification uses what is in the field.
+- Given the single-label view on load, then the application document upload is
+  the application-side input on screen and the typed fields are collapsed. They
+  open when the agent opens them, when a parsed document leaves any value not
+  found, or when a document fails to parse; a document that supplies every
+  value opens nothing, because there is nothing left to enter (US-24, NFR-4).
+- Given the beverage type, then it is never compared against the label. It
+  states which numeric rule to expect and nothing else, it is filled from the
+  document where the document states it, and the rule that actually ran is named
+  in the field result's own reason (A-12, A-13).
+- Given an empty or unreadable document, then the response names the problem,
+  carries no field outcomes at all, and the typed path remains available (FR-9).
+- Given a document of a type that is not accepted, then it is refused before
+  anything is decoded, with the accepted types named (NFR-7).
+- No outbound network call is made to read the document (NFR-3), and nothing
+  about it is persisted or logged beyond a byte count and the path used (NFR-6).
+
+**On the batch path, this is how every value arrives.** Written when it was not:
+the batch kept the CSV contract in A-14, and per-row COLA documents were called
+a possible future extension. [ADR 0009](adr/0009-batch-cola-documents.md) built
+them on 2026-08-28 and removed the CSV. A batch row is one label image paired
+with one COLA document by filename stem, nothing is typed, and each row's result
+carries the parsed block and the per-field source exactly as a single-label
+submission with an attached document does.
 
 ## 4. Non-functional requirements
 
@@ -358,9 +553,20 @@ The interface is usable by an agent with low technology comfort.
 **Acceptance criteria**
 - The primary task, verify one label, is reachable from the landing page with no
   navigation.
+- The path to it carries the fewest inputs that can complete it: photographs,
+  the application document, the check. Values the document supplies are not
+  asked for again, and the boxes for typing them are behind a disclosure rather
+  than in the way (US-24).
 - No step requires terminology not already used in label review.
 - Sarah's benchmark: something a 73-year-old first-time user "could figure out."
   "Clean, obvious, no hunting for buttons."
+
+**A disclosure is not navigation.** The first criterion is about reaching the
+task, and the task is still on the landing page with nothing to click through:
+the photograph picker, the application upload and the check button are all on
+screen on load. What moved behind the disclosure is a fallback for the case
+where the agent does not have the document, and NFR-4 is better served by five
+fewer boxes in front of the primary path than it was by having them there.
 
 ### NFR-5 Accessibility
 

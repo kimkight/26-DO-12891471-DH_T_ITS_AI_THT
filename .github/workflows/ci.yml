@@ -22,45 +22,84 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
-          cache-dependency-path: backend/pyproject.toml
+          cache-dependency-path: backend/requirements-dev.lock
 
-      - name: Install backend with development extras
+      # Tesseract is a system package, not a Python one, so it is not in either
+      # lock file. Without it the integration tier skips itself rather than
+      # failing, which would leave the OCR path untested while CI stayed green.
+      # fonts-dejavu-core is installed for the same reason: samples/labelmaker.py
+      # renders label artwork at test time and skips when no TrueType font is
+      # present.
+      - name: Install Tesseract and a TrueType font
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd fonts-dejavu-core
+          tesseract --version
+
+      # This job lints and tests, so it needs the dev lock file:
+      # requirements.lock carries the ocr and matching extras only, and has no
+      # pytest or ruff in it. requirements-dev.lock is the same resolution plus
+      # the dev extra, so the tools are the ones the runtime set resolved
+      # against rather than whatever pip would pick alongside them.
+      #
+      # --require-hashes is explicit rather than left to pip's automatic
+      # detection, so a lock file that lost its hashes fails here instead of
+      # silently installing unverified wheels. The project itself follows with
+      # --no-deps, which registers `app` on the path without letting pip
+      # re-resolve anything the lock file already decided.
+      #
+      # Paths are relative to backend/ (the job's working directory).
+      - name: Install backend from the dev lock file
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev,matching]"
+          pip install --require-hashes -r requirements-dev.lock
+          pip install --no-deps -e .
 
+      # samples/ and scripts/ are linted with the same configuration as the
+      # application. They hold real Python that the accuracy and performance
+      # tiers depend on; leaving them outside the lint would create a corner of
+      # the repository that CI never reads. The config is named explicitly
+      # because neither directory has a pyproject.toml of its own.
       - name: Lint (ruff)
-        run: ruff check .
+        run: ruff check --config pyproject.toml . ../samples ../scripts
 
       - name: Format check (ruff)
-        run: ruff format --check --diff .
+        run: ruff format --check --diff --config pyproject.toml . ../samples ../scripts
 
       - name: Test (pytest)
         run: pytest --cov=app --cov-report=term-missing
 
   frontend:
-    name: frontend lint and build
+    name: frontend lint, test and build
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend
+    env:
+      # @playwright/test downloads browsers from its own postinstall script.
+      # That would fetch every browser on `npm ci`, and then the explicit
+      # install step below would fetch Chromium again. Skipping the postinstall
+      # makes that step the single place a browser is downloaded, and makes it
+      # visible in the log which one.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      # No package-lock.json is committed yet (docs/OPEN_QUESTIONS.md, OQ-3),
-      # so `npm ci` cannot be used. Switch to `npm ci` once a lockfile exists.
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Lint (eslint)
         run: npm run lint
@@ -78,54 +117,125 @@ jobs:
       - name: Build (tsc and vite)
         run: npm run build
 
+      - name: Test (vitest)
+        run: npm run test
+
+      # The accessibility run needs a real browser. axe-core's colour-contrast
+      # rule cannot be evaluated without a layout engine: under jsdom it
+      # reports "incomplete" rather than "pass", so a jsdom run would go green
+      # while never having checked the one NFR-5 criterion that is a number.
+      # Chromium only, and --with-deps because the runner does not carry the
+      # shared libraries it needs.
+      - name: Install Chromium for the accessibility run
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: ""
+        run: npx playwright install --with-deps chromium
+
+      # Runs against `vite preview` serving dist/, started by
+      # playwright.config.ts, so what is checked is the built page an agent
+      # loads rather than a component rendered in isolation. Requires the
+      # build step above.
+      - name: Accessibility (axe-core against the built page)
+        run: npm run test:a11y
+
+      - name: Upload the accessibility report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-${{ github.sha }}
+          path: frontend/playwright-report/
+          retention-days: 7
+
+  infra:
+    name: infrastructure format and validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.13.3"
+          # The wrapper rewrites stdout to capture step outputs, which nothing
+          # here consumes and which makes a validate failure harder to read.
+          terraform_wrapper: false
+
+      - name: Format check (terraform fmt)
+        run: terraform fmt -check -recursive -diff
+
+      # -backend=false is what makes this job possible without AWS
+      # credentials. It downloads the provider plugins, which is all
+      # `validate` needs, and skips initialising a state backend, which is
+      # the only step that would try to authenticate. Nothing in this job
+      # reads or writes AWS.
+      - name: Initialise without a backend
+        run: terraform init -backend=false -input=false
+
+      # Checks that every resource type, argument, and reference resolves
+      # against the provider schema. It does not contact AWS and it does not
+      # know what exists in any account: a green validate means the
+      # configuration is well formed, not that an apply would succeed.
+      - name: Validate
+        run: terraform validate -no-color
+
   audit:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
-      - name: Audit Python dependencies (pip-audit)
-        working-directory: backend
+      # Both lock files are audited directly rather than by scanning an
+      # installed environment. --no-deps is what makes that sound: it tells
+      # pip-audit to audit exactly the versions written in the file and to
+      # refuse to resolve anything further, which is only valid because both
+      # files are fully pinned. Nothing is installed, so nothing outside the
+      # lock files can dilute or mask the result.
+      #
+      # Both are audited, not just one. requirements.lock is what ships in the
+      # image, so it is the one that matters for the product; but an advisory
+      # against a dev-only tool is still an advisory against something a
+      # contributor runs, and requirements-dev.lock is a superset, so auditing
+      # only the runtime file would leave the dev tools unchecked. Each step
+      # gates independently: a finding in either fails the job.
+      - name: Audit Python runtime dependencies (pip-audit)
         run: |
-          # setuptools is upgraded because the version shipped by
-          # actions/setup-python is affected by PYSEC-2026-3447, fixed in
-          # 83.0.0. It is part of the audited environment even though it is
-          # not a declared project dependency.
-          python -m pip install --upgrade pip "setuptools>=83.0.0"
+          python -m pip install --upgrade pip
           pip install pip-audit
-          pip install -e ".[matching]"
-          # --skip-editable excludes this repository's own package, which is
-          # installed editable and is not published to PyPI.
-          # --strict is deliberately not used: it fails on *any* skipped
-          # distribution, including the one skipped just above. Without it,
-          # pip-audit still exits non-zero when a real vulnerability is found,
-          # which is the gate this job exists to enforce.
-          pip-audit --skip-editable --progress-spinner off
+          pip-audit -r backend/requirements.lock --no-deps --progress-spinner off
 
+      - name: Audit Python development dependencies (pip-audit)
+        run: pip-audit -r backend/requirements-dev.lock --no-deps --progress-spinner off
+
+      # Skips the Playwright postinstall browser download: this job audits the
+      # dependency tree and never opens a browser.
       - name: Audit Node dependencies (npm audit)
         working-directory: frontend
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm audit --audit-level=high
 
   container:
     name: container build and SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
@@ -183,7 +293,7 @@ jobs:
           upload-artifact: false
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sbom-${{ github.sha }}
           path: sbom.spdx.json
@@ -194,13 +304,14 @@ jobs:
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [backend, frontend, audit, container]
+    needs: [backend, frontend, infra, audit, container]
     if: always()
     steps:
       - name: Fail if any upstream job did not succeed
         run: |
           echo "backend:   ${{ needs.backend.result }}"
           echo "frontend:  ${{ needs.frontend.result }}"
+          echo "infra:     ${{ needs.infra.result }}"
           echo "audit:     ${{ needs.audit.result }}"
           echo "container: ${{ needs.container.result }}"
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
