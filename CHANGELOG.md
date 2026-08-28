@@ -514,13 +514,23 @@ and rate limiting, then access logs and an audit trail).
 
 ### Changed
 
-- The batch envelope limit doubled, from `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`
-to twice that: about 6 GiB on the defaults rather than 3 GiB. A batch carries one
-label image and one COLA document per label now (ADR 0009), and each of the two
-is an upload bounded by the same per-file limit. FastAPI parses the whole
-envelope before the route runs, so this is a task sizing input and it is twice
-the input it was; `docs/09_DEPLOYMENT.md` section 9 says to read the real figure
-off CloudWatch `MemoryUtilization` rather than estimate it.
+- The batch envelope limit the application *derives* doubled, from
+`TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES` to twice that: about 6 GiB on the
+defaults rather than 3 GiB. A batch carries one label image and one COLA
+document per label now (ADR 0009), and each of the two is an upload bounded by
+the same per-file limit.
+
+**The deployed task does not follow that, deliberately.**
+`infra/terraform/ecs.tf` pins `TTB_MAX_BATCH_BYTES` at 3 000 MiB, a figure
+chosen from the memory budget of an 8 GiB task rather than from the file count,
+and an 8 GiB task cannot hold a 6 GiB payload. So the deployed envelope is
+unchanged and the effect of ADR 0009 there is a refusal rather than more memory:
+a batch whose files total more than 3 000 MiB is rejected from its
+Content-Length before the body is read, with the limit named. That is the safe
+failure, and in the ordinary case it costs nothing, because the document is the
+small half of each pair. `docs/09_DEPLOYMENT.md` section 4.4 writes out the
+reasoning, and section 9 says to read the real figure off CloudWatch
+`MemoryUtilization` rather than estimate it.
 
 - **The batch path stays at one photograph per row.** ADR 0007 does not extend
 to it this session: the A-14 CSV keys application data on one image filename, so
