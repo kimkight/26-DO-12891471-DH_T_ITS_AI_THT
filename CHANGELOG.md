@@ -519,6 +519,63 @@ of compute, unencrypted transit, no attribution), and the production fix in
 order (ACM certificate and HTTPS listener, an auth layer at the edge, then WAF
 and rate limiting, then access logs and an audit trail).
 
+- **The first measurements taken on the deployed target, written into the
+README as measurements** (NFR-1, NFR-2, DoD items 7 and 9,
+[docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9). Until now every
+figure in this repository named a session container as the hardware it came
+from, and the README said so in place of a number. These name the deployed
+target instead: 2026-08-28, build `sha-f66a4e2`, ECS Fargate with 1 vCPU and
+8 GiB behind the Application Load Balancer in `us-east-1`, exercised from the
+author's browser.
+
+**One label, one photograph: 1.5 s end to end, 1.4 s of it inside the
+checker.** The synthetic 1200x1600 fixture rotated 90 degrees, submitted with a
+Public COLA Registry printout attached. All five fields matched and the rotation
+was detected and reported. NFR-1's roughly five seconds is met with margin.
+
+**One label, three real phone photographs of a round bottle: 7.8 s end to
+end**, which is over NFR-1's target and is recorded rather than tuned away.
+Brand name and class or type stayed unreadable on that bottle's curved glass and
+came back as mismatch and not found. That is the SG-1 dewarping residual
+[ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around rather than
+solves, reported honestly by the tool, not a defect in it. Both levers against
+the latency are task environment variables and neither needs a code change:
+`TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`.
+
+**A batch at the configured cap: 300 label images with their 300 paired COLA
+documents in one submission, approximately 6.5 to 7 minutes, roughly 1.3 s per
+label.** 300 of 300 rows returned, no timeout and no lost work. Results streamed
+progressively through the load balancer, with 83 labels complete at the 109
+second mark observed live, which is the direct answer to the ADR 0006 question
+of whether an intermediary would buffer the stream. NFR-2 is met. The prior
+claim scaled 12 and 100 labels to 300 arithmetically; that arithmetic is now
+replaced by a run.
+
+**Accuracy on the synthetic seeded set: 300 of 300 outcomes correct.** 270 fully
+matching, 30 not matching, 0 needing review, 0 unreadable, and the 30 were
+exactly the 30 seeded ABV defects in the fixture set. Every seeded defect caught,
+zero false alarms. The README publishes it with the qualification section 5 of
+[docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) already states: accuracy on
+a self-built sample is not accuracy on the real application population, and the
+three-photograph run above is the counter-example measured on the same day.
+
+**One figure is missing and is written as missing.** The CloudWatch
+`MemoryUtilization` peak for the batch window is being retrieved. The README
+says "memory utilization measurement pending" and section 9 leaves that box
+unchecked, rather than carrying an estimate dressed as a measurement. It is the
+number that would replace the two estimates in `09_DEPLOYMENT.md` section 4.3.
+- The deployment runbook records the evaluation window. `terraform destroy`
+remains the resting state of the stack and the posture is unchanged; the one
+standing exception, now written down in
+[docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 10, is that the stack
+stays up from submission until the author confirms the assignment has been
+reviewed, and the destroy runs once that confirmation is in.
+- Dependabot [#67](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/67)
+and [#68](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/68)
+are closed out in [docs/DEPENDENCY_TRIAGE_2026-08.md](docs/DEPENDENCY_TRIAGE_2026-08.md).
+Both were merged by the author on 2026-08-28, in the order the sixth triage
+recommended, and each subsection now ends with the merge commit that closed it.
+
 ### Changed
 
 - **The interface is modern, and the palette is not.** The author reviewed the

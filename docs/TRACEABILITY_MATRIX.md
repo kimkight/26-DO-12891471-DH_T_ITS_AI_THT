@@ -67,8 +67,8 @@ Every requirement maps to at least one story. No orphans.
 | FR-9 Error handling | US-7, US-10, US-22 | #7, #10, #61 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, per photograph in `app/verify.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py`, `test_multi_photo.py` |
 | FR-10 Result presentation | US-2, US-22 | #2, #61 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason, plus a per-photograph note and the photograph each value was read from | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx`, `multiPhoto.test.tsx` |
 | FR-11 The label application accepted as an input, including the A-17 field map | US-23, US-9 | #65, #70 | **Yes**: `app/application_form.py`, `POST /api/read-application` and the optional `application_document` part on `POST /api/verify`, plus the upload and per-field marks in `frontend/src/components/ApplicationUpload.tsx` and `SingleLabelTab.tsx`. **And on the batch path**, where every row's application values are read off that row's paired COLA document (ADR 0009) | **Yes**: `test_application_form.py` (including `TestARegistryPrintoutWithDescriptiveCaptions` and `TestCaptionResidueInGeneral`), `test_cola_document_api.py`, `test_batch.py::TestWhatTheDocumentSupplied` (the batch path, ADR 0009), `applicationUpload.test.tsx`, `a11y.spec.ts`. **Against documents generated at test time only**: no real filed application or Registry printout has been parsed (OQ-22) |
-| NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
-| NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store | Partial: `test_batch.py` covers per-row isolation and the progress fields. A 300-label run has not been executed; 12 and 100 were measured on a session runner. |
+| NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response. **Measured on the deployed target 2026-08-28**, build `sha-f66a4e2`, 1 vCPU and 8 GiB on Fargate behind the ALB: one label with its COLA document, 1.5 s end to end and 1.4 s inside the checker, which meets the roughly five second target with margin. Three photographs of one round bottle measured 7.8 s on the same day, which is over it; recorded rather than tuned away, `docs/09_DEPLOYMENT.md` section 9 | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
+| NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store. **Measured at the cap on the deployed target 2026-08-28**: 300 labels with 300 paired COLA documents in one submission finished in approximately 6.5 to 7 minutes, roughly 1.3 s per label, 300 of 300 rows returned, no timeout and no lost work. Progress was visible throughout, 83 rows complete at the 109 second mark observed live, so the ALB did not buffer the stream | Partial: `test_batch.py` covers per-row isolation and the progress fields. The 300-label run is a measurement recorded in `docs/09_DEPLOYMENT.md` section 9, not an automated test. |
 | NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
 | NFR-4 Simplicity | US-12 | #12 | **Yes**: one screen, primary task on the landing page, plain-language errors | **Yes**: `a11y.spec.ts`, `liveRegion.test.tsx` |
 | NFR-5 Accessibility | US-13 | #13 | **Yes**: labelled inputs, keyboard reachable, visible focus, verified contrast, live region | **Yes**: axe-core against the built page in CI, plus `contrast.test.ts` and a keyboard walk |
@@ -116,18 +116,34 @@ in one photograph, is not corrected, and is recorded as OQ-21.
 to three photographs of one label rather than modelling the geometry of one, and
 that distinction is stated there rather than blurred.
 
-Two limits on the NFR-2 claim, stated rather than left to be discovered. No
-300-label batch has been run; 12 and 100 were, on a session runner rather than
-on the deployed target, and the scaling to 300 is arithmetic. And the second
-NFR-2 criterion, that progress is observable rather than presenting as a frozen
-page, is now met end to end: the stream carries the position and the total on
-every line, and the batch tab renders them as a progress indicator driven by
-the stream rather than by an animation.
+**Both limits on the NFR-2 claim are closed by measurement.** A 300-label
+batch has now been run at the configured cap, on the deployed target rather than
+on a session runner, so the scaling to 300 is a measurement rather than
+arithmetic. And the second NFR-2 criterion, that progress is observable rather
+than presenting as a frozen page, is met end to end and was watched end to end:
+the stream carries the position and the total on every line, the batch tab
+renders them as a progress indicator driven by the stream rather than by an
+animation, and 83 of 300 rows were complete at the 109 second mark of the live
+run.
 
-Accuracy and latency have been measured over a twelve-label synthetic sample set
-by `scripts/measure.py`, not over real label artwork. Per-field accuracy against
+Accuracy and latency have been measured over the synthetic sample set, now on
+the deployed target, not over real label artwork. Per-field accuracy against
 real artwork remains unmeasured and is the largest open technical risk in the
-prototype (ADR 0003).
+prototype (ADR 0003). The one real-artwork submission on 2026-08-28 is the
+evidence for that rather than against it: three phone photographs of a round
+bottle left the brand name and the class or type unreadable.
+
+### Definition of Done, the two items that are measurements
+
+The prototype-level Definition of Done is section 4 of
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md). Two of its items are satisfied by a
+measurement rather than by code, so they are traced here with the run that
+satisfied them.
+
+| DoD item | State | Evidence |
+| --- | --- | --- |
+| 7. Single-label end-to-end latency is measured and reported against the 5-second target, on stated hardware with a stated sample | **Met.** 1.5 s end to end and 1.4 s inside the checker for one label with its COLA document | Measured 2026-08-28 on the deployed target, build `sha-f66a4e2`, 1 vCPU and 8 GiB on Fargate behind the ALB in `us-east-1`, over the synthetic 1200x1600 fixture rotated 90 degrees. Reported in the README under Measured performance and accuracy and recorded in [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9. The three-photograph case, 7.8 s, is reported alongside it because it is over the target |
+| 9. Accuracy is measured per field against the labeled sample set with ground truth, and the numbers are published in the README. Measured, not asserted | **Met on the self-built sample, and the README says so in those words.** 300 of 300 outcomes correct: 270 matching, 30 not matching, 0 needing review, 0 unreadable, where the 30 were exactly the 30 seeded ABV defects. Every seeded defect caught, no false alarms | Measured 2026-08-28 on the deployed target in the 300-label batch run. Published in the README under Measured performance and accuracy, with the qualification that a self-built sample is not the real application population, per section 5 of [02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) |
 
 ## 4. Open questions blocking requirements
 
