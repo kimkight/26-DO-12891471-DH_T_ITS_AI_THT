@@ -117,16 +117,29 @@ def paper_form_lines(spec: ApplicationSpec) -> list[str]:
     return lines
 
 
-def registry_printout_lines(spec: ApplicationSpec) -> list[str]:
+def registry_printout_lines(spec: ApplicationSpec, *, captions: str = "compact") -> list[str]:
     """A Public COLA Registry detail page, as text lines.
 
     Key and value on one line, which is the shape a printed detail page has and
     the shape the paper form does not. It is the only one of the three that
     states a class or type designation, an alcohol content or a net contents,
     because those are not items on the form.
+
+    Two caption styles, because printouts differ and the difference matters to
+    the reader:
+
+    * ``compact`` writes one ``CLASS/TYPE:`` line, with the code joined to the
+      description by a dash where there is one.
+    * ``descriptive`` writes the pair a real printout carries,
+      ``Class/Type Code:`` and ``Class/Type Description:``. Those two lines are
+      given in the capitalization the author read off a deployed-target printout
+      on 2026-08-28; the rest of the page keeps this fixture's upper case.
     """
+    if captions not in ("compact", "descriptive"):
+        raise ValueError(f"unknown caption style: {captions}")
+
     class_type = spec.class_type
-    if spec.class_type_code and class_type:
+    if captions == "compact" and spec.class_type_code and class_type:
         class_type = f"{spec.class_type_code} - {class_type}"
     lines = [
         "TTB Public COLA Registry",
@@ -136,7 +149,12 @@ def registry_printout_lines(spec: ApplicationSpec) -> list[str]:
         f"BRAND NAME: {spec.brand_name}",
         f"FANCIFUL NAME: {spec.fanciful_name}",
     ]
-    if class_type:
+    if captions == "descriptive":
+        if spec.class_type_code:
+            lines.append(f"Class/Type Code: {spec.class_type_code}")
+        if class_type:
+            lines.append(f"Class/Type Description: {class_type}")
+    elif class_type:
         lines.append(f"CLASS/TYPE: {class_type}")
     if spec.alcohol_content:
         lines.append(f"ALCOHOL CONTENT: {spec.alcohol_content}")

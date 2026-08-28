@@ -332,6 +332,7 @@ reads records the application emitted rather than what CloudWatch received.
 | 33 | Attach a document, correct one filled field by hand, then run the check | The corrected value is what is compared, and the result says that value was typed. The parsed block still shows what the document said. | FR-11; ADR 0008 |
 | 34 | Attach a photograph or scan of a printed form | It is read through the same local OCR the tool reads labels with, and the interface says so. **Values OCR could not read are reported as not found rather than approximated.** | FR-11; FR-1 |
 | 35 | Attach a file that is not a readable application, for example an empty PDF | The message names the problem, no field reports a match, and the typed fields are still usable | FR-11; FR-9 |
+| 36 | Attach a Public COLA Registry printout whose class or type is captioned `Class/Type Description:` | The class or type field holds the designation alone, for example `Kentucky Straight Bourbon Whiskey`. **A value beginning `Description:` is a failure of this test.** Where the printout also carries a `Class/Type Code:` line, the code is still reported beside the designation | Deployed-target test, 2026-08-28; FR-11; A-17 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.
