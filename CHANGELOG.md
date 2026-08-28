@@ -564,6 +564,16 @@ blue axis and the gold text darkened a step to hold 4.5:1 against the new tints.
 axe is green over the landing page, the batch view and a rendered result set;
 the keyboard walk passes; outcomes keep their text-plus-shape encoding; the
 live-region announcements are unchanged.
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` gains the sixth Dependabot run:
+[#67](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/67), `@types/react-dom` 19.2.4 to 19.2.5, and
+[#68](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/68), `hashicorp/setup-terraform` 3 to 4. **Both recommended for
+merge, and neither merged or closed by the triage**, which is the standing rule
+in that document. #67 is a types-only patch verified on this session's tree
+rather than only on the one it was opened against, because two branches here
+change the files it touches and it will need a rebase. #68 is a CI action major
+whose one upstream breaking change is a Node 24 runner requirement, and the
+green job on its own pull request is the job that uses the action, which is the
+same evidence that carried the action bumps in the first triage.
 - The batch results table's header row was misaligned: the sortable headers
 supplied their own padding through their buttons and the one header without a
 button, "Detail", had none, so it sat hard against the top of the row. The cells
