@@ -83,10 +83,15 @@ resource "aws_ecs_task_definition" "app" {
 
         # The batch caps, set to what var.task_memory holds rather than left to
         # the application's derivation. The application derives
-        # TTB_MAX_BATCH_BYTES as files times per-file bytes, which is an upper
-        # bound implied by two other limits and not a sizing recommendation;
-        # writing the number here makes the deployed ceiling readable in the
-        # task definition. docs/09_DEPLOYMENT.md section 4 shows the working.
+        # TTB_MAX_BATCH_BYTES as twice the file count times the per-file bytes,
+        # one label image and one COLA document per label since ADR 0009, which
+        # is an upper bound implied by other limits and not a sizing
+        # recommendation; writing the number here makes the deployed ceiling
+        # readable in the task definition. It is deliberately tighter than the
+        # derivation, because an 8 GiB task cannot hold the 6 GiB the derivation
+        # permits, and the effect is that an oversize batch is refused with the
+        # limit named rather than killing the task.
+        # docs/09_DEPLOYMENT.md section 4 shows the working.
         { name = "TTB_MAX_BATCH_FILES", value = tostring(var.max_batch_files) },
         { name = "TTB_MAX_UPLOAD_BYTES", value = tostring(var.max_upload_bytes) },
         { name = "TTB_MAX_BATCH_BYTES", value = tostring(var.max_batch_bytes) },

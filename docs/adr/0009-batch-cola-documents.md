@@ -178,12 +178,24 @@ is a real cost and it is not nothing, but it is a rename rather than a
 transcription, it is visible before the batch runs, and a mismatch names the
 file it is about.
 
-**What gets bigger.** A batch envelope now carries a document per image, so
-`effective_max_batch_bytes` is twice what it was: 600 files at 10 MB, about
-6 GiB on the defaults, and FastAPI parses the whole envelope before the route
-runs. That is a task sizing input rather than a memory guarantee, it is twice
-the input it was, and it belongs in the section 9 measurement against
-CloudWatch `MemoryUtilization` rather than in an estimate here (OQ-13 item 6).
+**What gets bigger, on the defaults, and deliberately not on the deployed
+task.** A batch envelope now carries a document per image, so the application's
+derived `effective_max_batch_bytes` is twice what it was: 600 files at 10 MB,
+about 6 GiB, and FastAPI parses the whole envelope before the route runs.
+
+**The deployed configuration does not follow that.**
+`infra/terraform/ecs.tf` pins `TTB_MAX_BATCH_BYTES` at 3 000 MiB, chosen from
+the memory budget of an 8 GiB task rather than from the file count, and an 8 GiB
+task cannot hold a 6 GiB payload. So on the deployed target the envelope is
+unchanged, and the consequence of this ADR there is a refusal rather than more
+memory: a batch whose files total more than 3 000 MiB is rejected from its
+Content-Length before the body is read, with the limit named. That is the safe
+failure. In the ordinary case it costs nothing, because the document is the
+small half of each pair, kilobytes of Registry printout beside megabytes of
+photograph. The reasoning is written out in
+[09_DEPLOYMENT.md](../09_DEPLOYMENT.md) section 4.4, and the figure that would
+justify raising it is the section 9 CloudWatch `MemoryUtilization` measurement
+(OQ-13 item 6).
 
 **A concurrency bug this change surfaced.** PDFium is not thread-safe, and the
 batch path reads documents in a worker pool. Reading two at once segfaults the
