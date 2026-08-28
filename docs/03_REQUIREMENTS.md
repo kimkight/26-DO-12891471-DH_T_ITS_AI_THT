@@ -107,11 +107,20 @@ bottle and no single photograph shows all of it flat. See
 Accept application data for the same five fields and compare it against what was
 extracted from the label.
 
+**How the data arrives is FR-11's question, not this one.** The API takes the
+five values and does not care whether they were read off an uploaded COLA
+document or typed by the agent. On the interface the document is the primary
+input and the typed fields sit behind a disclosure (US-24); on the batch path
+nothing is typed at all (ADR 0009). This requirement is unchanged by either: it
+is about what happens to the five values once they are here.
+
 **Acceptance criteria**
 - Given a label and its application data, when verification runs, then each of
   the five fields carries exactly one outcome.
 - Given application data missing a field, then that field is reported as not
-  compared, and this is distinguished from a mismatch.
+  compared, and this is distinguished from a mismatch. A field the agent never
+  opened is such a field, so a collapsed disclosure is a legitimate submission
+  rather than an incomplete one.
 
 Sarah's description of the manual process this replaces: "Brand name matches?
 Check. ABV is correct? Check. Government warning is there? Check."
@@ -399,17 +408,28 @@ Present per-field outcomes so an agent can act without re-reading the label.
 This replaces Jenny's "printed checklist on my desk that I go through for every
 label." [Source: Jenny Park interview]
 
-### FR-11 The label application accepted as an input, instead of typed
+### FR-11 The label application as the input, with typing as the fallback
 
 **Priority:** Should
 **Source:** The author's own use of the deployed prototype, 2026-08-27:
 "Why do I have to enter in all this information?"
 
 Accept an uploaded copy of the applicant's label application, TTB Form 5100.31,
-or of the Public COLA Registry detail page for an application, as an alternative
-to typing the same values. Read it locally and offer what it says for the
-agent's confirmation. See
+or of the Public COLA Registry detail page for an application, as **the** way
+the application values arrive. Read it locally and offer what it says for the
+agent's confirmation. Typing the same values stays available and is the
+fallback rather than the default. See
 [ADR 0008](adr/0008-cola-form-as-application-input.md) and assumption A-17.
+
+**Which one is the default is a requirement, not a layout preference.** Written
+first as "instead of typed", which framed typing as the normal path and the
+document as the alternative. Walked through from the agent's chair the normal
+case is the opposite: the agent is holding the COLA document, and then the five
+values are something to confirm rather than something to enter. The single-label
+view puts the document directly after the photographs and the typed fields
+behind a disclosure that opens in exactly three cases (US-24); the batch path
+takes documents only (ADR 0009). What each value means, and which one wins, is
+unchanged.
 
 **This is not the COLA system integration OOS-1 excludes.** OOS-1 rules out API
 calls, COLAs Online authorization and registry lookups from the application.
@@ -445,6 +465,15 @@ apply to a label image. The note under OOS-1 in
 - Given any parsed value, then it is presented in an editable field before a
   verification runs, marked as read from the application form, and the
   verification uses what is in the field.
+- Given the single-label view on load, then the application document upload is
+  the application-side input on screen and the typed fields are collapsed. They
+  open when the agent opens them, when a parsed document leaves any value not
+  found, or when a document fails to parse; a document that supplies every
+  value opens nothing, because there is nothing left to enter (US-24, NFR-4).
+- Given the beverage type, then it is never compared against the label. It
+  states which numeric rule to expect and nothing else, it is filled from the
+  document where the document states it, and the rule that actually ran is named
+  in the field result's own reason (A-12, A-13).
 - Given an empty or unreadable document, then the response names the problem,
   carries no field outcomes at all, and the typed path remains available (FR-9).
 - Given a document of a type that is not accepted, then it is refused before
@@ -524,9 +553,20 @@ The interface is usable by an agent with low technology comfort.
 **Acceptance criteria**
 - The primary task, verify one label, is reachable from the landing page with no
   navigation.
+- The path to it carries the fewest inputs that can complete it: photographs,
+  the application document, the check. Values the document supplies are not
+  asked for again, and the boxes for typing them are behind a disclosure rather
+  than in the way (US-24).
 - No step requires terminology not already used in label review.
 - Sarah's benchmark: something a 73-year-old first-time user "could figure out."
   "Clean, obvious, no hunting for buttons."
+
+**A disclosure is not navigation.** The first criterion is about reaching the
+task, and the task is still on the landing page with nothing to click through:
+the photograph picker, the application upload and the check button are all on
+screen on load. What moved behind the disclosure is a fallback for the case
+where the agent does not have the document, and NFR-4 is better served by five
+fewer boxes in front of the primary path than it was by having them there.
 
 ### NFR-5 Accessibility
 

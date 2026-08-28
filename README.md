@@ -56,12 +56,15 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"0.1.0","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.0.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
-choose a label image, attach the COLA document or type what the application
-says, and select **Check this label**. The second tab checks many at once,
+choose a label image, attach the applicant's COLA document, and select **Check
+this label**. The document is the normal way the application values arrive, and
+the boxes for typing them yourself are behind **Or type the application
+values**, which opens on its own when the document leaves a gap or cannot be
+read. The second tab checks many at once,
 taking the label images plus one COLA document for each, **paired by filename
 stem**: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. The rule is
 stated on the page, and the page says how many pairs it found before you submit.
@@ -143,10 +146,15 @@ one COLA document each, paired by filename stem, read by the same parser the
 single-label view uses. The CSV is gone rather than kept alongside. See
 [ADR 0009](docs/adr/0009-batch-cola-documents.md).
 
-**The interface is one screen.** The primary task is on the landing page with
-nothing to navigate, every outcome is carried by a word and a shape before it is
-carried by a colour, and the field needing a human's attention is the one that
-looks unfinished. The requirement behind it is a stakeholder's, not a
+**The interface is one screen, and it starts from the document.** The primary
+task is on the landing page with nothing to navigate, every outcome is carried by
+a word and a shape before it is carried by a colour, and the field needing a
+human's attention is the one that looks unfinished. The agent checking a label is
+normally holding the applicant's COLA document, so that document is the first
+application-side thing on the page and the five boxes for typing the same values
+sit behind a disclosure, opening when the agent asks or when the document leaves
+a gap or cannot be read. The batch tab has worked this way since ADR 0009; the
+single-label tab now does too. The requirement behind it is a stakeholder's, not a
 designer's: "clean, obvious, no hunting for buttons," for a team where technology
 comfort varies widely.
 
@@ -195,7 +203,7 @@ section 6.
 | [01 Project Charter](docs/01_PROJECT_CHARTER.md) | Purpose, background, stakeholders, success criteria, constraints, deliverables |
 | [02 Project Scope](docs/02_PROJECT_SCOPE.md) | In scope, out of scope, stretch goals, Definition of Done |
 | [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-10, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
-| [04 User Stories](docs/04_USER_STORIES.md) | 22 stories across 6 epics, with Given/When/Then criteria |
+| [04 User Stories](docs/04_USER_STORIES.md) | 24 stories across 6 epics, with Given/When/Then criteria |
 | [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, government-region portability |
 | [06 Security and Compliance](docs/06_SECURITY_AND_COMPLIANCE.md) | Threat model, controls, FedRAMP posture, ATO readiness, AI governance |
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
@@ -223,7 +231,7 @@ and the first figures measured on the deployed target are below.**
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Verification interface, one label | Works: one screen, up to three photographs of the same label, the five application fields, an optional upload of the label application that fills those fields for confirmation, five result cards, and a note saying what was done to each photograph |
+| Verification interface, one label | Works: one screen, up to three photographs of the same label, then the label application upload as the primary application-side input, the five application fields behind a disclosure that opens when the agent opens it or when a document leaves a gap or fails to parse, five result cards, and a note saying what was done to each photograph |
 | Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |

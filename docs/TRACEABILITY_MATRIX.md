@@ -66,12 +66,12 @@ Every requirement maps to at least one story. No orphans.
 | FR-8 Batch verification, label images paired with COLA documents by filename stem (ADR 0009) | US-9, US-10 | #9, #10, #70 | **Yes**: `app/batch.py` (`pairing_stem`, `collect_documents`, the per-row pairing errors), `app/api.py` `verify_batch`, and the pairing rule stated and counted in `frontend/src/lib/pairing.ts` and `BatchTab.tsx`. One photograph per label: ADR 0007 does not extend to the batch path, and the FR-8 notes say why | **Yes**: `test_batch.py`, 34 tests, plus `test_multi_photo.py::TestTheBatchPathIsUnaffected` and the batch assertions in `frontend/tests/a11y.spec.ts` |
 | FR-9 Error handling | US-7, US-10, US-22 | #7, #10, #61 | **Yes**: single label in `app/api.py`, per row in `app/batch.py`, per photograph in `app/verify.py`, and every rejection in one shape via the handlers in `app/main.py` | **Yes**: `test_api_validation.py`, `test_batch.py`, `test_multi_photo.py` |
 | FR-10 Result presentation | US-2, US-22 | #2, #61 | **Yes**: `frontend/src/components/`, five result cards with value, value, outcome and reason, plus a per-photograph note and the photograph each value was read from | **Yes**: `outcomes.test.tsx`, `batchTable.test.tsx`, `multiPhoto.test.tsx` |
-| FR-11 The label application accepted as an input, including the A-17 field map | US-23, US-9 | #65, #70 | **Yes**: `app/application_form.py`, `POST /api/read-application` and the optional `application_document` part on `POST /api/verify`, plus the upload and per-field marks in `frontend/src/components/ApplicationUpload.tsx` and `SingleLabelTab.tsx`. **And on the batch path**, where every row's application values are read off that row's paired COLA document (ADR 0009) | **Yes**: `test_application_form.py` (including `TestARegistryPrintoutWithDescriptiveCaptions` and `TestCaptionResidueInGeneral`), `test_cola_document_api.py`, `test_batch.py::TestWhatTheDocumentSupplied` (the batch path, ADR 0009), `applicationUpload.test.tsx`, `a11y.spec.ts`. **Against documents generated at test time only**: no real filed application or Registry printout has been parsed (OQ-22) |
+| FR-11 The label application as the input, with typing as the fallback, including the A-17 field map | US-23, US-24, US-9 | #65, #74, #70 | **Yes**: `app/application_form.py`, `POST /api/read-application` and the optional `application_document` part on `POST /api/verify`, plus the upload and per-field marks in `frontend/src/components/ApplicationUpload.tsx` and `SingleLabelTab.tsx`. **And on the batch path**, where every row's application values are read off that row's paired COLA document (ADR 0009) | **Yes**: `test_application_form.py` (including `TestARegistryPrintoutWithDescriptiveCaptions` and `TestCaptionResidueInGeneral`), `test_cola_document_api.py`, `test_batch.py::TestWhatTheDocumentSupplied` (the batch path, ADR 0009), `applicationUpload.test.tsx`, `applicationFirst.test.tsx` (the collapsed default and the three expansion cases), `a11y.spec.ts`. **Against documents generated at test time only**: no real filed application or Registry printout has been parsed (OQ-22) |
 | NFR-1 About 5 seconds | US-8, US-21 | #8, #21 | **Yes**: measured end to end and reported in the response. **Measured on the deployed target 2026-08-28**, build `sha-f66a4e2`, 1 vCPU and 8 GiB on Fargate behind the ALB: one label with its COLA document, 1.5 s end to end and 1.4 s inside the checker, which meets the roughly five second target with margin. Three photographs of one round bottle measured 7.8 s on the same day, which is over it; recorded rather than tuned away, `docs/09_DEPLOYMENT.md` section 9 | **Yes**: `test_verify_integration.py`, `scripts/measure.py` |
 | NFR-2 Batch throughput | US-11 | #11 | **Yes**: bounded pool, NDJSON stream, per-row errors, no job store. **Measured at the cap on the deployed target 2026-08-28**: 300 labels with 300 paired COLA documents in one submission finished in approximately 6.5 to 7 minutes, roughly 1.3 s per label, 300 of 300 rows returned, no timeout and no lost work. Progress was visible throughout, 83 rows complete at the 109 second mark observed live, so the ALB did not buffer the stream | Partial: `test_batch.py` covers per-row isolation and the progress fields. The 300-label run is a measurement recorded in `docs/09_DEPLOYMENT.md` section 9, not an automated test. |
 | NFR-3 No outbound calls | US-14 | #14 | **Yes**: local OCR only; `external_call_made` on every response | **Yes**: `test_verify_integration.py` |
-| NFR-4 Simplicity | US-12 | #12 | **Yes**: one screen, primary task on the landing page, plain-language errors | **Yes**: `a11y.spec.ts`, `liveRegion.test.tsx` |
-| NFR-5 Accessibility | US-13 | #13 | **Yes**: labelled inputs, keyboard reachable, visible focus, verified contrast, live region | **Yes**: axe-core against the built page in CI, plus `contrast.test.ts` and a keyboard walk |
+| NFR-4 Simplicity | US-12, US-24 | #12, #74 | **Yes**: one screen, primary task on the landing page, plain-language errors, and the application document rather than five empty boxes as the first application-side input, with the typed fields behind a disclosure | **Yes**: `a11y.spec.ts`, `liveRegion.test.tsx`, `applicationFirst.test.tsx` |
+| NFR-5 Accessibility | US-13, US-24 | #13, #74 | **Yes**: labelled inputs, keyboard reachable, visible focus, verified contrast, live region; the disclosure reports its expanded state and its auto-expansion is announced | **Yes**: axe-core against the built page in CI, collapsed and expanded, plus `contrast.test.ts`, a keyboard walk and `applicationFirst.test.tsx` |
 | NFR-6 No persistence | US-15 | #15 | **Yes**: in-memory only, multipart spool threshold raised so no upload reaches disk | **Yes**: `test_verify_integration.py::TestNothingIsPersisted` |
 | NFR-7 Input validation | US-16 | #16 | **Yes**: size in middleware before the body is read, MIME before decoding | **Yes**: `test_api_validation.py` |
 | NFR-8 Code quality gates | US-18 | #18 | **Yes** | CI |
@@ -88,9 +88,9 @@ Every requirement maps to at least one story. No orphans.
 | Requirements traced to a GitHub issue | 22 of 22 |
 | Requirements fully implemented | 21 of 22 |
 | Requirements with an automated test | 19 of 22 |
-| User stories | 23 |
-| Stories with acceptance criteria | 23 of 23 |
-| ADRs | 8 |
+| User stories | 24 |
+| Stories with acceptance criteria | 24 of 24 |
+| ADRs | 9 |
 
 The two counts are read off the section 2 table by one rule each, so they can be
 checked rather than taken. "Fully implemented" counts rows whose Implemented
@@ -103,7 +103,7 @@ The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9 and FR-11,
 NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 264 backend tests.
 The agent-facing interface (FR-10, FR-11, NFR-4, NFR-5) is built and covered by
-155 component tests, a computed-contrast test over the palette, and an axe-core
+174 component tests, a computed-contrast test over the palette, and an axe-core
 run with a keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
 Application Load Balancer in `us-east-1`, deployed by image digest.
 

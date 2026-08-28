@@ -1,7 +1,15 @@
 /**
- * "Upload the label application instead of typing it" (FR-11, ADR 0008, US-23).
+ * The application, attached rather than typed (FR-11, ADR 0008, US-23, US-24).
  *
- * The values an agent is asked to type are the values the applicant already
+ * **This is the primary application-side input on the single-label view**, and
+ * it is no longer framed as the alternative to typing. The author's question
+ * from using the deployed prototype was when the typed fields would actually be
+ * used, and walked through from the agent's chair the answer is: almost never as
+ * a starting point. The normal case is an agent holding the COLA document. So
+ * the document comes first and the five boxes are a confirmation surface behind
+ * a disclosure, which is what `SingleLabelTab` now renders.
+ *
+ * The values an agent would otherwise type are the values the applicant already
  * submitted to TTB on the label application, TTB F 5100.31. This accepts a copy
  * of that document, or of the Public COLA Registry printout of an approved one,
  * and reads it locally.
@@ -40,9 +48,19 @@ interface Props {
   onParsed: (document: ApplicationDocumentResult) => void
   /** Called when the agent takes the document back off the form. */
   onCleared: () => void
+  /**
+   * Called when a document was attached and could not be read (FR-9).
+   *
+   * Distinct from `onCleared`, which is the agent's own deliberate removal.
+   * A failed parse is the third case that opens the typed fields: the agent
+   * meant to attach the application, the attachment did not work, and the boxes
+   * are the fallback. Removing the document is not that, and must not open
+   * anything.
+   */
+  onUnreadable: () => void
 }
 
-export function ApplicationUpload({ onParsed, onCleared }: Props) {
+export function ApplicationUpload({ onParsed, onCleared, onUnreadable }: Props) {
   const headingId = useId()
   const [file, setFile] = useState<File | null>(null)
   const [reading, setReading] = useState(false)
@@ -70,7 +88,7 @@ export function ApplicationUpload({ onParsed, onCleared }: Props) {
       // path is still open, so it is announced as it stands rather than
       // restated in different words (FR-9, NFR-5).
       setSpoken(outcome.error?.message ?? '')
-      onCleared()
+      onUnreadable()
       return
     }
     setDocument(outcome.document)
@@ -96,13 +114,14 @@ export function ApplicationUpload({ onParsed, onCleared }: Props) {
     <section className="application-upload" aria-labelledby={headingId}>
       <TileHeading glyph="document" tone="gold">
         <h3 className="application-upload__heading" id={headingId}>
-          Upload the label application (COLA form) instead
+          Upload the label application (COLA form)
         </h3>
       </TileHeading>
       <p className="field__hint" id={`${headingId}-hint`}>
-        If you have the applicant&apos;s TTB F 5100.31, or the Public COLA Registry printout for it,
-        attach it here and we will fill in what it says. You can change anything we get wrong. The
-        file is read here and is not sent to TTB or kept.
+        This is what the label is checked against. Attach the applicant&apos;s TTB F 5100.31, or the
+        Public COLA Registry printout for it, and we will read what it says. You can change anything
+        we get wrong, and you can type the values yourself instead. The file is read here and is not
+        sent to TTB or kept.
       </p>
 
       <DropZone
@@ -127,8 +146,9 @@ export function ApplicationUpload({ onParsed, onCleared }: Props) {
           <p className="application-upload__summary">
             {found.length} of {document.fields.length} values were filled in from this form,{' '}
             {PATHS[document.extraction_path]}
-            {document.pages_read > 1 ? ` over ${document.pages_read} pages` : ''}. Check each one
-            below before you run the check.
+            {document.pages_read > 1 ? ` over ${document.pages_read} pages` : ''}. Open{' '}
+            <strong>Or type the application values</strong> below to see them, or to change any of
+            them before you run the check.
           </p>
           {document.class_type_code ? (
             <p className="field__hint">
