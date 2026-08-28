@@ -580,13 +580,23 @@ button, "Detail", had none, so it sat hard against the top of the row. The cells
 carry the padding now and the buttons fill them. The progress element was
 drawing Chromium's default green bar, which belonged to no part of this palette;
 its track and value are set explicitly for both engines.
-- The batch envelope limit doubled, from `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`
-to twice that: about 6 GiB on the defaults rather than 3 GiB. A batch carries one
-label image and one COLA document per label now (ADR 0009), and each of the two
-is an upload bounded by the same per-file limit. FastAPI parses the whole
-envelope before the route runs, so this is a task sizing input and it is twice
-the input it was; `docs/09_DEPLOYMENT.md` section 9 says to read the real figure
-off CloudWatch `MemoryUtilization` rather than estimate it.
+- The batch envelope limit the application *derives* doubled, from
+`TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES` to twice that: about 6 GiB on the
+defaults rather than 3 GiB. A batch carries one label image and one COLA
+document per label now (ADR 0009), and each of the two is an upload bounded by
+the same per-file limit.
+
+**The deployed task does not follow that, deliberately.**
+`infra/terraform/ecs.tf` pins `TTB_MAX_BATCH_BYTES` at 3 000 MiB, a figure
+chosen from the memory budget of an 8 GiB task rather than from the file count,
+and an 8 GiB task cannot hold a 6 GiB payload. So the deployed envelope is
+unchanged and the effect of ADR 0009 there is a refusal rather than more memory:
+a batch whose files total more than 3 000 MiB is rejected from its
+Content-Length before the body is read, with the limit named. That is the safe
+failure, and in the ordinary case it costs nothing, because the document is the
+small half of each pair. `docs/09_DEPLOYMENT.md` section 4.4 writes out the
+reasoning, and section 9 says to read the real figure off CloudWatch
+`MemoryUtilization` rather than estimate it.
 
 - **The batch path stays at one photograph per row.** ADR 0007 does not extend
 to it this session: the A-14 CSV keys application data on one image filename, so
@@ -595,7 +605,9 @@ reconciliation rule for a partly matched group, and an answer for what a per-row
 error means when one photograph of three failed. None of that is difficult and
 none is asked for by any source. It is stated in the FR-8 notes and in ADR 0007,
 and asserted in `test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
-change unnoticed.
+change unnoticed. (The reasoning is now stated against the pairing contract
+rather than the CSV, since ADR 0009 replaced it later in this same unreleased
+block. The limit itself did not change: two images on one stem are an error.)
 
 - OQ-15 closed. The preflight it named as its own closing condition returned
 `200` from PyPI and from the npm registry in a new session, with Tesseract
