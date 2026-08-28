@@ -9,9 +9,15 @@
  *
  * The needs-review card is visually distinct from both of the others, which is
  * FR-10's third criterion, and it is distinct by more than colour: it is the
- * only card with a heavier left edge and the only one whose icon is a triangle.
- * It is the one an agent has to act on, so it is the one that reads as
- * unfinished.
+ * only card with a tinted body and a ring around it, and the only one whose
+ * icon is a triangle. It is the one an agent has to act on, so it is the one
+ * that reads as unfinished.
+ *
+ * **The outcome chip leads the row.** An agent scanning five results is looking
+ * for the one that needs them, and the thing they are looking for belongs at
+ * the start of the line rather than at the end of it. The two values under it
+ * are key-value rows: the label muted on the left, the value in bold on the
+ * right, which is the shape a reader compares two things in.
  */
 import { OutcomeBadge } from './OutcomeBadge'
 import { presentation } from '../lib/outcomes'
@@ -72,10 +78,10 @@ export function ResultCard({
   return (
     <article className={`card card--${tone}`} aria-labelledby={`card-${field.name}`}>
       <header className="card__header">
+        <OutcomeBadge outcome={field.outcome} />
         <h3 className="card__title" id={`card-${field.name}`}>
           {field.display_name}
         </h3>
-        <OutcomeBadge outcome={field.outcome} />
       </header>
 
       <dl className="card__values">

@@ -20,6 +20,7 @@
 import { useId, useState } from 'react'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
+import { TileHeading } from './Ui'
 import { readApplication } from '../lib/api'
 import type { UiError } from '../lib/api'
 import type { ApplicationDocumentResult } from '../types'
@@ -93,9 +94,11 @@ export function ApplicationUpload({ onParsed, onCleared }: Props) {
 
   return (
     <section className="application-upload" aria-labelledby={headingId}>
-      <h3 className="application-upload__heading" id={headingId}>
-        Upload the label application (COLA form) instead
-      </h3>
+      <TileHeading glyph="document" tone="gold">
+        <h3 className="application-upload__heading" id={headingId}>
+          Upload the label application (COLA form) instead
+        </h3>
+      </TileHeading>
       <p className="field__hint" id={`${headingId}-hint`}>
         If you have the applicant&apos;s TTB F 5100.31, or the Public COLA Registry printout for it,
         attach it here and we will fill in what it says. You can change anything we get wrong. The

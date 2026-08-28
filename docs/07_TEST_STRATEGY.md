@@ -337,6 +337,11 @@ reads records the application emitted rather than what CloudWatch received.
 | 38 | The same batch with one image renamed so nothing matches it | That image reports an error naming the file, and the other label still returns a result. **A whole-batch failure is a failure of this test.** | ADR 0009; FR-8; FR-9 |
 | 39 | The same batch with one document replaced by a file that cannot be read | That label reports an error naming the document, no field reports a match for it, and the other label still returns a result | ADR 0009; FR-9 |
 | 40 | Open the batch view and look at it before choosing any files | The naming rule that pairs an image with a document is on screen, not behind a disclosure. After choosing files, the count of pairs is shown and announced | ADR 0009; NFR-4; NFR-5 |
+| 41 | Choose a label photograph on the single-label view | The photograph itself appears inside the scan frame, at a size that makes the bottle recognizable. **A frame showing only the filename is a failure of this test.** | Restyle, 2026-08-28; NFR-4 |
+| 42 | Read one field result | The outcome chip leads the row, before the field name, and the two values read as label on the left and value on the right. Every outcome is still a word and a shape, not a colour | Restyle, 2026-08-28; FR-10; NFR-5 |
+| 43 | Move between the two views using only the keyboard | The segmented pill control is reached with one Tab, moved between with the arrow keys, and the selected segment is visibly filled and announced as selected. **Reaching it with two Tab stops, or an unclear active segment, is a failure of this test.** | Restyle, 2026-08-28; NFR-5 |
+| 44 | View the restyled page in greyscale | The active pill, the needs-review card and every outcome chip are still distinguishable, because each is carried by fill, weight or shape as well as by hue | Restyle, 2026-08-28; NFR-5 |
+| 45 | Load the page with the network blocked to everything but this origin | The page renders in Inter, from this origin. **A request to any font CDN is a failure of this test.** | Restyle, 2026-08-28; NFR-3 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.

@@ -149,11 +149,13 @@ looks unfinished. The requirement behind it is a stakeholder's, not a
 designer's: "clean, obvious, no hunting for buttons," for a team where technology
 comfort varies widely.
 
-**It is dressed in federal design language, and it says plainly that it is not
-an official system.** Navy, a gold rule, Public Sans, and a grey field under
-white panels, in the spirit of the U.S. Web Design System, because the tool is
-about federal label compliance and a prototype that looked like a consumer app
-would answer the wrong question about whether it belongs in this workflow.
+**It uses the government palette, and it says plainly that it is not an official
+system.** Navy and a gold accent, because the tool is about federal label
+compliance and a prototype with a brand of its own would answer the wrong
+question about whether it belongs in this workflow. The surface around that
+palette is a soft, modern one: white cards with generous radii and layered
+shadows over a muted blue-grey field, a segmented pill control, soft-tinted
+inputs, and the chosen photograph previewed inside a scan frame.
 
 The line between reflecting a design language and impersonating an agency is
 drawn at the seal and at claims of officialdom, and it is drawn in tests rather
@@ -177,7 +179,7 @@ section 6.
 | --- | --- |
 | Backend | Python 3.11, FastAPI, uvicorn |
 | Frontend | React 19, TypeScript, Vite |
-| Typeface | Public Sans, the face the U.S. Web Design System commissioned, under the SIL Open Font License 1.1. Bundled as a variable font and served from the application's own origin, never fetched from a CDN, because NFR-3 applies to the page as well as to the API |
+| Typeface | Inter, under the SIL Open Font License 1.1. Bundled as a variable font and served from the application's own origin, never fetched from a CDN, because NFR-3 applies to the page as well as to the API |
 | OCR | Tesseract via pytesseract, OpenCV for preprocessing |
 | Matching | rapidfuzz |
 | Container | Docker, multi-stage, non-root |
@@ -284,11 +286,11 @@ one per user story.
   against that palette, token by token, in
   `frontend/src/__tests__/contrast.test.ts`. A dark palette is a second palette
   to verify, not a toggle.
-- **The visual design reflects federal design language; it is not endorsed by,
+- **The visual design uses the government palette; it is not endorsed by,
   affiliated with, or issued by TTB or the Department of the Treasury.** That is
-  stated on every view of the interface itself, not only here. Public Sans is
-  used under the SIL Open Font License, which is a licensing question with a
-  clear answer rather than a branding claim.
+  stated on every view of the interface itself, not only here. Inter is used
+  under the SIL Open Font License, which is a licensing question with a clear
+  answer rather than a branding claim.
 - **No authentication and no persistence** (Decision D-9). Consequently there is
   no audit record that a verification occurred. For batch, the same decision
   means a dropped connection loses the whole submission: there is no

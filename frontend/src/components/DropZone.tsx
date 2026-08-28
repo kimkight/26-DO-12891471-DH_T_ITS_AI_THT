@@ -11,19 +11,35 @@
  * input is removed from the accessibility tree and from the tab order along
  * with it. The `.dropzone` wrapper carries the focus ring through
  * `:focus-within`, so focus is visible even though the control itself is not.
+ *
+ * `preview` turns the chosen file's name into a scan frame showing the
+ * photograph itself. It is off by default and on for label artwork only: a PDF
+ * of an application has nothing useful to show at this size, and the frame
+ * would be an empty box with a filename under it.
  */
 import { useId, useRef, useState } from 'react'
+import { ScanFrame } from './Ui'
 
 interface Props {
   label: string
   hint: string
   accept: string
   multiple?: boolean
+  /** Show the chosen image in a scan frame instead of naming it. */
+  preview?: boolean
   files: File[]
   onFiles: (files: File[]) => void
 }
 
-export function DropZone({ label, hint, accept, multiple = false, files, onFiles }: Props) {
+export function DropZone({
+  label,
+  hint,
+  accept,
+  multiple = false,
+  preview = false,
+  files,
+  onFiles,
+}: Props) {
   const inputId = useId()
   const describedBy = `${inputId}-hint`
   const inputRef = useRef<HTMLInputElement>(null)
@@ -65,7 +81,13 @@ export function DropZone({ label, hint, accept, multiple = false, files, onFiles
         aria-describedby={describedBy}
         onChange={(event) => onFiles(accepted(event.target.files))}
       />
-      {files.length > 0 ? (
+      {/*
+        The frame carries the filename in its own caption, so the line below is
+        suppressed when it is shown. Naming the file twice would be noise on
+        screen and a duplicate for a screen reader working through the group.
+      */}
+      {preview && files.length === 1 ? <ScanFrame file={files[0]} /> : null}
+      {files.length > 0 && !(preview && files.length === 1) ? (
         <p className="dropzone__chosen">
           {files.length === 1 ? files[0].name : `${files.length} files chosen`}
         </p>

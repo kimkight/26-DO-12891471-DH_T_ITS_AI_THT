@@ -102,9 +102,11 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       { name: '0001-stones-throw.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
       { name: '0002-hollow-creek.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
     ])
-    await panel.getByLabel('COLA documents').setInputFiles([
-      { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
-    ])
+    await panel
+      .getByLabel('COLA documents')
+      .setInputFiles([
+        { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
+      ])
 
     // Announced through a live region, and visible, from one sentence.
     await expect(
@@ -245,7 +247,32 @@ test.describe('what axe cannot check', () => {
     const family = await page
       .locator('h1')
       .evaluate((element) => getComputedStyle(element).fontFamily)
-    expect(family).toContain('Public Sans Variable')
+    expect(family).toContain('Inter Variable')
+  })
+
+  test('the chosen photograph is previewed in the scan frame, and it is decoration', async ({
+    page,
+  }) => {
+    await page.goto('/')
+    await page.getByLabel('Label image').setInputFiles({
+      name: 'stones-throw.png',
+      // A one-pixel PNG, so the element has something real to load.
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    })
+
+    // The preview carries the file's name as its alternative text, and the
+    // frame's corner brackets are decoration with no accessible name of their
+    // own.
+    const preview = page.getByAltText('Preview of stones-throw.png')
+    await expect(preview).toBeVisible()
+    await expect(preview).toHaveJSProperty('naturalWidth', 1)
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
   })
 
   test('the primary task is on the landing page with no navigation (NFR-4)', async ({ page }) => {
@@ -298,8 +325,9 @@ test.describe('what axe cannot check', () => {
     // The parsed values reach the same fields an agent would have typed into,
     // and every one of them says where it came from (FR-11, ADR 0008).
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
-    await expect(panel.getByText('Read from the application form. Change it if it is wrong.')
-      .first()).toBeVisible()
+    await expect(
+      panel.getByText('Read from the application form. Change it if it is wrong.').first(),
+    ).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Remove this application form' })).toBeVisible()
 
     const found = await violations(page)
@@ -474,6 +502,6 @@ const PARSED_APPLICATION = {
   fanciful_name: 'Small Batch Reserve',
   class_type_code: '141',
   notes: [
-    'The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document\'s text, and this document did not name one type on its own. Choose it yourself.',
+    "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text, and this document did not name one type on its own. Choose it yourself.",
   ],
 }
