@@ -136,7 +136,7 @@ to hold a smaller batch cheaply.
 | Component | MiB | Where the figure comes from |
 | --- | --- | --- |
 | Interpreter, FastAPI, uvicorn, numpy, OpenCV, pytesseract | 150 | Measured: 77 MiB peak RSS after importing `app.main` against `backend/requirements.lock`, on a four-core Linux session container running Python 3.11. Doubled here for the running ASGI stack and allocator behaviour under load. **Not measured on Fargate.** |
-| The batch payload, held as `bytes` for the batch's duration | 3 000 | `TTB_MAX_BATCH_BYTES`, below. |
+| The batch payload, held as `bytes` for the batch's duration | 3 000 | `TTB_MAX_BATCH_BYTES`, below. Since [ADR 0009](adr/0009-batch-cola-documents.md) this covers the label images **and** their COLA documents together, which does not change the figure: it is the envelope that bounds the payload, not the file count. |
 | Transient duplication while the parts are read | 300 | Starlette spools a multipart part to a temporary file once it exceeds 1 MiB; below that the part stays in memory while `await image.read()` makes the copy the batch holds. Worst case is 300 parts each just under 1 MiB, so both copies of all of them are resident at once. |
 | Per-image working set, one worker | 400 | The decoded image at the 1600 px long edge is about 7.3 MiB per copy and the preprocessing chain holds several; the Tesseract child process is the unmeasured part, and 400 MiB is a deliberately generous ceiling for it. |
 | Result objects, futures, NDJSON framing | 20 | 300 small dataclasses. No image bytes: results carry text and scores. |
@@ -168,8 +168,28 @@ the deployed ceiling is readable where the size is:
 | --- | --- | --- |
 | `TTB_MAX_BATCH_FILES` | `300` | The assignment's scenario. |
 | `TTB_MAX_UPLOAD_BYTES` | `10485760` | 10 MiB per image, the application default. |
-| `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly, which is 300 times 10 MiB. The budget above holds it. |
+| `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly. The budget above holds it. See the note below: this is now a tighter bound than the application would derive. |
 | `TTB_BATCH_WORKERS` | `1` | One worker per vCPU of quota. |
+
+**`TTB_MAX_BATCH_BYTES` is now a real bound rather than arithmetic, and that is
+deliberate.** It used to be exactly 300 times 10 MiB, one image per label at the
+per-file cap. Since [ADR 0009](adr/0009-batch-cola-documents.md) a batch carries
+one COLA document per image as well, and the application's own derivation
+doubled to match: `2 * TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, about
+6 GiB on the defaults. **The deployed value is not raised to follow it**, because
+the memory budget above is what sets this number and an 8 GiB task cannot hold a
+6 GiB payload.
+
+What that means in practice. A batch whose files total more than 3 000 MiB is
+refused from its Content-Length before the body is read, with the limit named
+(FR-9, NFR-7). That is the safe failure: a refusal an agent can act on rather
+than a task killed mid-batch. In the ordinary case it costs nothing, because the
+documents are the small half of each pair: a Public COLA Registry printout is
+kilobytes and the label photograph beside it is megabytes. The case it does bite
+is 300 scanned multi-page documents alongside 300 large photographs, and the
+answer there is the one FR-8 already gives, which is to split the batch. Section
+9's CloudWatch `MemoryUtilization` measurement is what would justify raising
+both this and `task_memory`.
 
 `TTB_BATCH_WORKERS` is pinned rather than derived, and this is worth knowing
 before you change the vCPU count. `backend/app/config.py` sizes the pool from
