@@ -302,13 +302,20 @@ runtime dependency beyond `react` and `react-dom`. Two endpoints and one screen
 do not need more, and every layer added between an agent and a form is a layer
 NFR-4 has to survive.
 
-**The visual design, and the line it does not cross.** The interface is dressed
-in federal design language in the spirit of the U.S. Web Design System: navy
-(`#112e51` for the masthead band, `#1a4480` for working primary), a gold rule
-(`#c05600` for edges, `#ffbe2e` on navy only), neutral greys, and Public Sans.
-The tool is about federal label compliance, and a prototype that looked like a
-consumer product would be answering the wrong question about whether it belongs
-in this workflow.
+**The visual design, and the line it does not cross.** The palette is the
+government one: navy (`#112e51` for the masthead band, `#1a4480` for working
+primary) and a gold accent (`#c05600` for brackets and edges, `#9a4a08` where
+gold has to carry text, `#ffbe2e` on navy only). The tool is about federal label
+compliance, and a prototype with a brand of its own would be answering the wrong
+question about whether it belongs in this workflow.
+
+The surface around that palette is a soft, modern product surface rather than a
+published form: white cards with 16px radii and layered low-opacity shadows over
+a muted blue-grey field, a segmented pill control instead of underlined tabs,
+soft-tinted inputs, pill buttons, small-caps kicker labels over card titles, and
+Inter. That changed on 2026-08-28, on the author's review of the deployed page:
+the tool is a working instrument and should read as one. **The palette did not
+change with it**, and neither did anything the next paragraph lists.
 
 Reflecting a design language and impersonating an agency are different things,
 and the difference is enforced in tests rather than left to judgement:
@@ -319,8 +326,10 @@ and the difference is enforced in tests rather than left to judgement:
 - The footer names the author and the assignment.
 - There is no TTB seal, no Treasury seal, no eagle, no coat of arms, and no
   "official website of the United States government" banner anywhere in the
-  repository. No raster or vector asset is imported at all; the only SVG is the
-  four outcome glyphs, drawn inline.
+  repository. No raster or vector asset is imported at all; every SVG is drawn
+  inline and is geometric: the four outcome glyphs, and the kicker and tile
+  icons the restyle added. None of them is a mark, and the masthead and the
+  footer carry no image or SVG at all, which `branding.test.tsx` asserts.
 - The agency's full name appears once, as plain text above the product name, at
   the size and weight a subject line gets rather than a wordmark's.
 
@@ -331,11 +340,14 @@ source file the built page is assembled from. It strips comments before
 scanning, so the comment explaining which marks are forbidden is not itself a
 violation.
 
-**Public Sans is bundled, not fetched.** It is the typeface the U.S. Web Design
-System commissioned, published under the SIL Open Font License 1.1, so using it
-is a licensing question with a clear answer. It ships as a variable font in the
+**Inter is bundled, not fetched.** A clean geometric sans, published under the
+SIL Open Font License 1.1, so using it is a licensing question with a clear
+answer. It replaced Public Sans in the 2026-08-28 restyle: Public Sans is the
+U.S. Web Design System's own commissioned face, and once the surface stopped
+being a USWDS-flavoured one, keeping its typeface was the one remaining thing
+claiming a lineage the page no longer has. It ships as a variable font in the
 build output and is served from the application's own origin.
-`@fontsource-variable/public-sans` is a dev dependency, which is correct because
+`@fontsource-variable/inter` is a dev dependency, which is correct because
 the container's frontend stage runs a full `npm ci` before `npm run build`.
 NFR-3 is the reason it is not linked from a font CDN: a stylesheet that fetched
 from one would break the interface on exactly the firewall Marcus Williams

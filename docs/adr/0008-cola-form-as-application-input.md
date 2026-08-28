@@ -164,6 +164,12 @@ The batch contract stays the CSV keyed by image filename (A-14). Per-row COLA
 documents are a possible future extension and are **not built**. Nothing in the
 batch path reads a COLA document.
 
+> **Superseded on 2026-08-28 by
+> [ADR 0009](0009-batch-cola-documents.md).** The possible future extension is
+> the next session's work: a batch is label images plus one COLA document per
+> label, paired by filename stem, read by this ADR's parser, and A-14's CSV is
+> gone. Nothing else in this ADR changed.
+
 ## Alternatives considered
 
 **COLA Registry API or scraping.** Rejected: it is precisely OOS-1, and it would

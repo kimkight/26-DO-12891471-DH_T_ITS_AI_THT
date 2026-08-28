@@ -42,7 +42,7 @@ describe('adding and removing photos of one label', () => {
     render(<SingleLabelTab />)
     expect(screen.getByLabelText('Label image')).toBeInTheDocument()
     expect(screen.queryByLabelText('Label image, photo 2')).not.toBeInTheDocument()
-    expect(screen.getByText('(0 of 3 chosen)')).toBeInTheDocument()
+    expect(screen.getByText('0 of 3 chosen')).toBeInTheDocument()
   })
 
   it('adds a second and a third slot, then stops offering more', async () => {
@@ -111,7 +111,7 @@ describe('adding and removing photos of one label', () => {
     await user.upload(screen.getByLabelText('Label image'), pngFile('first.png'))
     await addPhoto(user)
 
-    expect(screen.getByText('(1 of 3 chosen)')).toBeInTheDocument()
+    expect(screen.getByText('1 of 3 chosen')).toBeInTheDocument()
     // An empty second slot does not turn the check off, because the first
     // slot has a photo and one photo is a complete submission.
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled()

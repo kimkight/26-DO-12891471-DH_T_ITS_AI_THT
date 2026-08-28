@@ -32,6 +32,7 @@ import type { UiError } from '../lib/api'
 import { rowOutcome } from '../lib/outcomes'
 import { downloadCsv } from '../lib/csv'
 import { describePairing, pair } from '../lib/pairing'
+import { Chip, Kicker } from './Ui'
 import type { BatchLine } from '../types'
 
 export function BatchTab() {
@@ -84,7 +85,8 @@ export function BatchTab() {
   return (
     <div className="layout">
       <section className="panel" aria-labelledby="batch-submit-heading">
-        <h2 id="batch-submit-heading">The labels and their applications</h2>
+        <Kicker glyph="stack">Bulk submission</Kicker>
+        <h2 id="batch-submit-heading">Many labels, checked one by one.</h2>
 
         {/*
           The pairing rule, stated before the controls rather than hidden in a
@@ -124,7 +126,9 @@ export function BatchTab() {
           */}
           {chosen ? (
             <p className="field__hint" role="status" aria-live="polite">
-              {pairingSentence}
+              <Chip tone="navy" dot>
+                {pairingSentence}
+              </Chip>
             </p>
           ) : null}
 
@@ -181,6 +185,9 @@ export function BatchTab() {
       </section>
 
       <section className="panel" aria-labelledby="batch-results-heading">
+        <Kicker glyph="scan" tone="navy">
+          {running ? 'Scanning' : 'Results'}
+        </Kicker>
         <h2 id="batch-results-heading">Results</h2>
 
         <div className="visually-hidden" role="status" aria-live="polite">
@@ -190,6 +197,24 @@ export function BatchTab() {
               ? `Finished. ${done} labels checked. ${counts.review} need review, ${counts.mismatch} do not match, ${counts.failed} could not be checked.`
               : ''}
         </div>
+
+        {/*
+          The scanning line, while the stream is open. Decoration over the live
+          region below it, which says the same thing to a screen reader and is
+          unchanged; the dots are aria-hidden and stop moving for anyone who has
+          asked for reduced motion.
+        */}
+        {running ? (
+          <p className="scanning">
+            <span className="scanning__pulse" aria-hidden="true">
+              <span />
+              <span />
+              <span />
+            </span>
+            Reading label {Math.min(done + 1, total || images.length)} of {total || images.length}
+            ...
+          </p>
+        ) : null}
 
         {(running || done > 0) && total > 0 ? (
           <div className="progress">
@@ -230,6 +255,24 @@ export function BatchTab() {
               </li>
             </ul>
 
+            <BatchTable lines={lines} />
+
+            {/*
+              The running total, pinned under the rows. It is the one line an
+              agent watches while a 300-label batch runs, so it is set apart
+              from the four per-outcome counts above rather than being a fifth
+              of them. Not a live region: the polite one above already
+              announces the same progress, and two regions saying it would make
+              a screen reader read every row twice.
+            */}
+            <p className="total-row">
+              <span className="total-row__label">Running total</span>
+              <span className="total-row__value">
+                {done} of {total || done} checked, {counts.mismatch}{' '}
+                {counts.mismatch === 1 ? 'mismatch' : 'mismatches'}
+              </span>
+            </p>
+
             <button
               className="button"
               type="button"
@@ -238,8 +281,6 @@ export function BatchTab() {
             >
               Download results CSV
             </button>
-
-            <BatchTable lines={lines} />
 
             <p className="footnote">
               Nothing here is saved anywhere. Close this page and the results are gone, so download
@@ -250,7 +291,7 @@ export function BatchTab() {
 
         {done === 0 && !running && !error ? (
           <p className="placeholder">
-            Choose your label images and the application data file, then select
+            Choose your label images and their COLA documents, then select
             <strong> Check labels</strong>. Results appear here as each label finishes, so you can
             watch a large batch progress.
           </p>

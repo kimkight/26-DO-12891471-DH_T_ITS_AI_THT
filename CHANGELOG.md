@@ -521,6 +521,72 @@ and rate limiting, then access logs and an audit trail).
 
 ### Changed
 
+- **The interface is modern, and the palette is not.** The author reviewed the
+deployed USWDS-flavoured page and asked for something that reads as a working
+instrument rather than a published form. The reference vocabulary is
+transcribed from a product the author walked through on 2026-08-28, with its
+colours substituted for the government ones.
+
+What changed: content sits in white cards with 12 to 16 px radii and layered,
+low-opacity navy shadows, floating over a muted blue-grey field, with no hard
+black border anywhere. The two views are a segmented pill control on a pale
+navy track rather than underlined tabs. Inputs have a soft tinted fill and a
+large radius instead of a heavy outline, with the focus ring on the navy scale.
+Primary actions are generous navy pills; secondary actions are bordered white
+pills. Card titles are short declarative sentences under small-caps,
+letter-spaced kicker labels with a leading icon. Notices are soft-tinted
+rounded panels. The masthead is a deep navy band over the light content area,
+carrying exactly one gold-highlighted phrase, "You decide."
+- **The single-label view got the pattern that maps onto this tool.** The chosen
+photograph now previews inside a scan-frame panel with gold corner brackets, and
+the per-field results render as key-value rows: the outcome chip leads the row,
+the field name follows, and the two values sit as a muted label on the left and
+a bold value on the right. The preview earns its place beyond looking like a
+scanner: before it, an agent who chose a file got the filename back and nothing
+else, so a photograph of the wrong bottle looked exactly like a photograph of
+the right one until the results came back.
+- **The batch view became a live scanning widget.** A pulsing status line while
+the NDJSON stream is open, rows arriving one at a time, and a running total
+pinned under them: "3 of 3 checked, 1 mismatch". Presentation only. The stream,
+the progress element and the live-region announcements are unchanged.
+- Rounded-square icon tiles head the feature areas, and small rounded chips
+carry counts and states: "1 of 3 chosen", "Read from the application form",
+"3 pairs ready to check". Every chip is text first, so each reads correctly with
+its colour removed.
+- **Inter replaces Public Sans**, bundled as a dev dependency and served from
+this origin, with the lock file regenerated in the same change and the system
+stack behind it. No CDN font and no external request: NFR-3 covers the page, and
+the accessibility run asserts it. Public Sans is the U.S. Web Design System's
+own commissioned face, and once the surface stopped being a USWDS-flavoured one,
+keeping its typeface was the last thing claiming a lineage the page no longer
+has.
+- **What did not change, and is regression-gated so it cannot.** The palette
+stays navy and gold. There is still no TTB or Treasury seal, no eagle, and no
+official-government banner; the persistent prototype banner carries the same
+wording, stays at the top of every view, and is still not dismissible, now as a
+soft gold-tinted panel; the footer still names the author and the assignment.
+The computed-contrast test passes against the new tokens, which were changed
+until they passed rather than the thresholds being moved: the greys went onto a
+blue axis and the gold text darkened a step to hold 4.5:1 against the new tints.
+axe is green over the landing page, the batch view and a rendered result set;
+the keyboard walk passes; outcomes keep their text-plus-shape encoding; the
+live-region announcements are unchanged.
+- `docs/DEPENDENCY_TRIAGE_2026-08.md` gains the sixth Dependabot run:
+[#67](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/67), `@types/react-dom` 19.2.4 to 19.2.5, and
+[#68](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/68), `hashicorp/setup-terraform` 3 to 4. **Both recommended for
+merge, and neither merged or closed by the triage**, which is the standing rule
+in that document. #67 is a types-only patch verified on this session's tree
+rather than only on the one it was opened against, because two branches here
+change the files it touches and it will need a rebase. #68 is a CI action major
+whose one upstream breaking change is a Node 24 runner requirement, and the
+green job on its own pull request is the job that uses the action, which is the
+same evidence that carried the action bumps in the first triage.
+- The batch results table's header row was misaligned: the sortable headers
+supplied their own padding through their buttons and the one header without a
+button, "Detail", had none, so it sat hard against the top of the row. The cells
+carry the padding now and the buttons fill them. The progress element was
+drawing Chromium's default green bar, which belonged to no part of this palette;
+its track and value are set explicitly for both engines.
 - The batch envelope limit the application *derives* doubled, from
 `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES` to twice that: about 6 GiB on the
 defaults rather than 3 GiB. A batch carries one label image and one COLA
@@ -546,7 +612,9 @@ reconciliation rule for a partly matched group, and an answer for what a per-row
 error means when one photograph of three failed. None of that is difficult and
 none is asked for by any source. It is stated in the FR-8 notes and in ADR 0007,
 and asserted in `test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
-change unnoticed.
+change unnoticed. (The reasoning is now stated against the pairing contract
+rather than the CSV, since ADR 0009 replaced it later in this same unreleased
+block. The limit itself did not change: two images on one stem are an error.)
 
 - OQ-15 closed. The preflight it named as its own closing condition returned
 `200` from PyPI and from the npm registry in a new session, with Tesseract

@@ -137,8 +137,58 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     const rule = CSS.match(/\.field__source\s*{[^}]*}/)
     expect(rule, 'index.css does not define .field__source').not.toBeNull()
     expect(rule![0]).toContain('var(--gold-text)')
-    for (const surface of [...surfaces, 'shell']) {
+    for (const surface of [...surfaces, 'shell', 'gold-wash']) {
       expect(ratio(token('gold-text'), token(surface))).toBeGreaterThanOrEqual(AA_BODY)
+    }
+  })
+
+  /*
+   * The washes the restyle added: the pale navy behind the segmented pill
+   * track, the chips and the icon tiles, and the pale gold behind the "read
+   * from the application form" chip and the prototype banner. Each is a
+   * background that carries text, so each needs 4.5:1 with the colour put on
+   * it, and the wash is not the same value as --surface, so being checked
+   * against --surface would not have checked it.
+   */
+  it('the navy wash carries navy text at 4.5:1', () => {
+    expect(ratio(token('accent'), token('accent-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('accent-dark'), token('accent-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('text'), token('accent-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  it('the gold wash carries the gold text colour at 4.5:1', () => {
+    expect(ratio(token('gold-text'), token('gold-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('text'), token('gold-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  /*
+   * The active segment of the pill control is a white pill on the navy wash.
+   * The distinction is carried by weight and a shadow as well as by fill, and
+   * `aria-selected` is what a screen reader reads, but the fill still has to be
+   * a visible boundary: WCAG 1.4.11 puts non-text UI at 3:1.
+   */
+  it('the active pill is distinguishable from the track it sits in', () => {
+    expect(ratio(token('page'), token('accent-wash'))).toBeGreaterThanOrEqual(1.2)
+    expect(ratio(token('accent-dark'), token('accent-wash'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  /*
+   * The running total under a batch is white on the navy band, and its kicker
+   * is the bright gold that is only ever used on navy.
+   */
+  it('the running total row is readable on its navy background', () => {
+    expect(ratio('#ffffff', token('accent-dark'))).toBeGreaterThanOrEqual(AA_BODY)
+    expect(ratio(token('gold-bright'), token('accent-dark'))).toBeGreaterThanOrEqual(AA_BODY)
+  })
+
+  /*
+   * The scan frame's corner brackets (ADR 0007's photograph preview). They are
+   * a graphical object, not text, so 3:1 applies, and they are drawn on the
+   * white viewport inside a tinted panel.
+   */
+  it('the scan frame brackets are visible against the surfaces behind them', () => {
+    for (const surface of ['page', 'surface']) {
+      expect(ratio(token('gold'), token(surface))).toBeGreaterThanOrEqual(AA_NON_TEXT)
     }
   })
 
@@ -165,12 +215,12 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     expect(DECLARATIONS).not.toMatch(/@import\s+url\(\s*['"]?https?:/i)
     expect(DECLARATIONS).not.toMatch(/url\(\s*['"]?https?:\/\//i)
     expect(DECLARATIONS).not.toMatch(/fonts\.(googleapis|gstatic)\.com/i)
-    expect(DECLARATIONS).toMatch(/@import\s+'@fontsource-variable\/public-sans/)
+    expect(DECLARATIONS).toMatch(/@import\s+'@fontsource-variable\/inter/)
   })
 
   it('names a fallback after the bundled font, so a missing file is not a blank page', () => {
     const stack = CSS.match(/font-family:\s*([^;]+);/)?.[1] ?? ''
-    expect(stack).toMatch(/Public Sans Variable/)
+    expect(stack).toMatch(/Inter Variable/)
     expect(stack).toMatch(/system-ui/)
   })
 

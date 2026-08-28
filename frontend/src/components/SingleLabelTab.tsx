@@ -38,6 +38,7 @@ import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
 import { ResultCard } from './ResultCard'
+import { Chip, Kicker } from './Ui'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import { announcement } from '../lib/outcomes'
@@ -204,15 +205,17 @@ export function SingleLabelTab() {
   return (
     <div className="layout">
       <section className="panel" aria-labelledby="submit-heading">
-        <h2 id="submit-heading">The label and the application</h2>
+        <Kicker glyph="scan">Label scanning</Kicker>
+        <h2 id="submit-heading">Point. Upload. Check.</h2>
 
         <form onSubmit={submit} noValidate>
           <fieldset className="photos">
             <legend className="photos__legend">
-              Photos of this label
+              Photos of this label{' '}
               <span className="photos__count">
-                {' '}
-                ({photos.length} of {MAX_PHOTOS} chosen)
+                <Chip>
+                  {photos.length} of {MAX_PHOTOS} chosen
+                </Chip>
               </span>
             </legend>
             <p className="field__hint" id="photos-hint">
@@ -226,6 +229,7 @@ export function SingleLabelTab() {
                   label={position === 0 ? 'Label image' : `Label image, photo ${position + 1}`}
                   hint="Drag a file here, or choose one. JPEG, PNG, WebP or TIFF."
                   accept={ACCEPTED}
+                  preview
                   files={file ? [file] : []}
                   onFiles={(chosen) => setSlot(position, chosen[0] ?? null)}
                 />
@@ -336,6 +340,9 @@ export function SingleLabelTab() {
       </section>
 
       <section className="panel" aria-labelledby="results-heading">
+        <Kicker glyph="document" tone="navy">
+          Field by field
+        </Kicker>
         <h2 id="results-heading">What we found</h2>
 
         {/*

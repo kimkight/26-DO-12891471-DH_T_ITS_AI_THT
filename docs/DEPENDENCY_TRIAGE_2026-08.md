@@ -645,3 +645,108 @@ of its own, against the usual one-branch-per-task rule. The reason is
 mechanical: that branch already appends to this file for the #27 closure, and a
 second branch appending to the same file would conflict for no benefit. #56
 itself is untouched, and nothing here merges or closes it.
+
+## Sixth Dependabot run: #67 and #68, 2026-08-28
+
+Two pull requests, open and untouched since 2026-08-27. Both are triaged here
+under the standing policy: does CI pass on the rebased tree, does the lock
+regenerate, and is there a breaking configuration change. **Neither is merged
+or closed by this triage.**
+
+| PR | Bump | Kind | CI | Recommendation |
+| --- | --- | --- | --- | --- |
+| [#67](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/67) | `@types/react-dom` 19.2.4 to 19.2.5, in the minor-and-patch group | npm, patch, dev-only | Green, all six checks | **Merge** |
+| [#68](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/pull/68) | `hashicorp/setup-terraform` 3 to 4 | Action, major | Green, all six checks | **Merge** |
+
+### #67: `@types/react-dom` 19.2.4 to 19.2.5
+
+**A clean patch bump, and the recommendation is simply that.** It is a
+DefinitelyTyped patch release of a type-only, development-only package: it
+contributes no runtime code, ships nothing into the container, and cannot
+change what the built page does. The three policy questions are answered
+without a caveat worth writing at length.
+
+**1. Does CI pass?** Yes, on the pull request's own run
+([run 33068111814](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/33068111814)), all six checks green.
+Independently, with the bump applied on top of this session's branches, which
+is the tree it will actually land on rather than the one it was opened
+against:
+
+| Check | Result |
+| --- | --- |
+| Resolved version | `@types/react-dom@19.2.5` |
+| `npm ci` from the regenerated lock | Succeeds |
+| `npm run lint` | Clean |
+| `npm run format:check` | "All matched files use Prettier code style" |
+| `tsc -b --force` | Clean, which is the check that matters for a types-only bump |
+| `npm run build` | Built |
+| `npm run test` | 141 tests, 141 passed |
+| `npm run test:a11y` | 12 tests, 12 passed |
+| `npm audit --audit-level=high` | 0 vulnerabilities |
+
+Measured on a four-core Linux session container, Node 22.22.2.
+
+**2. Does the lock regenerate?** Yes, in the pull request: five insertions and
+five deletions across `frontend/package.json` and `frontend/package-lock.json`.
+The lock diff is the version, the resolved URL and the integrity hash of one
+entry, plus the declared range. No transitive dependency is added or removed.
+
+**3. Any breaking configuration change?** None. Nothing in the repository
+configures this package; it is resolved by `tsc` through `@types` and consumed
+by `react-dom`'s typings.
+
+**One thing to do before merging, and it is about order rather than about the
+bump.** This pull request was opened against `develop` at `417556a`, and this
+session's `feature/modern-ui` branch also changes `frontend/package.json` and
+`frontend/package-lock.json`, swapping the bundled typeface. Merging that first
+makes #67 conflict on both files. The fix is one comment, `@dependabot rebase`,
+and the bump is a single entry, so the rebase is mechanical. Merge the session's
+branches first, then rebase and merge #67.
+
+### #68: `hashicorp/setup-terraform` 3 to 4
+
+**Merge.** This is a major bump of a CI action, and the case for it is the same
+one that carried #29, #30, #31 and #33 in the first triage: the job on the pull
+request that reports it green is the job that uses it.
+
+**1. Does CI pass?** Yes, on the pull request's own run
+([run 33068167766](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/actions/runs/33068167766)), all six checks green. The
+one that counts is `infrastructure format and validate`, which is the only
+place this action is used, in `.github/workflows/ci.yml`. That job ran
+`terraform fmt -check -recursive -diff`, `terraform init -backend=false` and
+`terraform validate` under the new version, with both of the inputs this
+repository sets, and passed. This is not a green check on an unexercised
+action, which is what made #27 a hold: it is the action doing its whole job.
+
+**2. Does the lock regenerate?** Not applicable. An action reference is a git
+ref, not a locked dependency; the change is one line, `@v3` to `@v4`.
+
+**3. Any breaking configuration change?** None that reaches this repository,
+and the one breaking change upstream is worth naming rather than waving past.
+The release notes for v4.0.0, as quoted in the pull request, list exactly one:
+**the action now requires Node.js 24 on the runner.** No input was removed or
+renamed. This repository passes `terraform_version` and `terraform_wrapper`,
+and the green `infra` job is direct evidence that both are still accepted.
+
+The Node 24 requirement is a property of the runner rather than of the
+configuration. CI runs on `ubuntu-latest`, GitHub-hosted, which supplies the
+Node runtime a v4 action asks for, and the green run proves it did. **Where it
+would bite is a move to a self-hosted or pinned older runner**, which this
+repository does not have and would notice immediately if it did: the failure
+would be the action refusing to start, named in the log, on the one job that
+uses it.
+
+**What this bump is not evidence about.** Terraform itself. The version this
+repository installs is pinned at `1.13.3` in the workflow and is untouched by
+the action bump. And `terraform validate` still means what it always meant
+here: the configuration is well formed against the provider schema, checked
+with `-backend=false` and no credentials. It does not mean an apply would
+succeed, and nothing about moving to v4 changes that.
+
+### Both, together
+
+Neither pull request is blocked by anything in this session's work, and neither
+blocks it. Recommended merge order: this session's three feature branches
+first, because two of them change the files #67 touches; then `@dependabot
+rebase` on #67; then #67 and #68 in either order. As with every other entry in
+this document, **the merging is the repository owner's to do.**

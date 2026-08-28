@@ -3,11 +3,13 @@
  *
  * ## What this page claims to be, and what it refuses to claim
  *
- * The interface is dressed in federal design language: navy, a gold rule,
- * Public Sans, a grey field under white panels. That is a deliberate choice,
- * because the tool is about federal label compliance and a prototype that
- * looked like a consumer app would be answering the wrong question about
- * whether it belongs in this workflow.
+ * The interface is dressed in the government palette: navy, a gold accent, and
+ * white cards floating on a muted blue-grey field. That is a deliberate choice,
+ * because the tool is about federal label compliance and a prototype with a
+ * brand of its own would be answering the wrong question about whether it
+ * belongs in this workflow. The surface around that palette is a soft, modern
+ * product surface rather than a published form: segmented pill controls,
+ * generous radii, layered shadows. The colours did not change with it.
  *
  * Dressing like federal work and *claiming to be* federal work are different
  * things, and this file is where the difference is enforced:
@@ -37,6 +39,12 @@
  * is here because the alternative, two buttons that swap content with no
  * announcement, leaves a screen reader user with no way to know the page
  * changed.
+ *
+ * They are drawn as a segmented pill control rather than as underlined tabs,
+ * which is presentation and nothing else: the roles, the states and the key
+ * handling below are unchanged. The active segment is carried by a fill, a
+ * shadow and a weight change together, because a white pill on a pale track is
+ * a weak signal on its own, and `aria-selected` is what is actually read out.
  *
  * Both panels stay mounted once opened, so a half-filled form is still there
  * after a look at the other tab. Only the hidden one carries `hidden`, which
@@ -111,9 +119,15 @@ export default function App() {
           */}
           <p className="masthead__agency">Alcohol and Tobacco Tax and Trade Bureau</p>
           <h1>TTB Label Verifier</h1>
+          {/*
+            The one accent-highlighted phrase on the page. Gold on navy is the
+            pair that clears 4.5:1; the same gold on any light surface is
+            illegible and is never used there. Emphasis used twice is emphasis
+            used never, so there is no second one.
+          */}
           <p className="masthead__subtitle">
-            Compare label artwork against what the application says. This tool recommends. You
-            decide.
+            Compare label artwork against what the application says. This tool recommends.{' '}
+            <span className="masthead__accent">You decide.</span>
           </p>
         </div>
       </header>
