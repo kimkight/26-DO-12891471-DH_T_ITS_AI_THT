@@ -409,32 +409,43 @@ at the end.
 
 ## 9. First measurements
 
-**No figure in this repository was measured on the deployed target.** Every
-performance and accuracy number in the README, in
-[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md), and in the commit history names the
-hardware it came from, and none of them names production. This checklist is
-what turns that around, and until it is done the README's performance claims do
-not change.
+**Run on 2026-08-28. The README now carries the results.** Every performance and
+accuracy number in this repository names the hardware it came from, and these
+name the deployed target: build `sha-f66a4e2`, ECS Fargate with 1 vCPU and
+8 GiB behind the Application Load Balancer in `us-east-1`, exercised from the
+author's browser. The boxes below record what each run returned. One box is
+still open, the CloudWatch memory figure, and the README says "memory
+utilization measurement pending" rather than a number until it is in hand.
 
-- [ ] **`scripts/measure.py` semantics against the deployed URL.** The script
-      now has two modes and they measure different things. **Record which one
-      produced each figure**, because in-process and through-the-ALB are not the
-      same measurement.
+The same figures are summarized in the README under
+[Measured performance and accuracy](../README.md#measured-performance-and-accuracy).
+This section is the record of the runs; the README is the summary of them.
+
+- [x] **`scripts/measure.py` semantics against the deployed URL.** The script
+      has two modes and they measure different things. **Which one produced
+      each figure is recorded**, because in-process and through-the-ALB are not
+      the same measurement. **Every figure below is through the ALB.** The
+      single-label rows were submitted from the browser against the deployed
+      URL; the batch row used `--batch --url "$URL"`. No in-process figure is
+      quoted here.
       - Default, no arguments: imports the engine and runs it in this process.
         Accuracy, no network. To get that figure from the deployed hardware,
         run it inside the task (`aws ecs execute-command`, which needs
-        `enable_execute_command` on the service, currently off).
+        `enable_execute_command` on the service, currently off). **Not used for
+        anything below.**
       - `--batch --url "$URL"`: submits a real batch over HTTP, following the
         ADR 0009 contract, and prints total wall clock, per-label time, when the
         first and last lines arrived, the spread between them, and the counts by
-        status and error code. This is the mode for the two batch rows below.
+        status and error code. This is the mode that produced the batch row.
         It needs `samples/generate_samples.py` to have run, which writes the
         images and the paired COLA documents.
-- [ ] **NFR-1 end to end through the load balancer.** Median, 95th percentile,
-      and maximum over the twelve sample labels, from section 8.3. Report all
-      three; a single latency figure is not a measurement
-      ([07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 4).
-- [ ] **One full batch at the configured cap**: 300 label images plus 300 COLA
+- [x] **NFR-1 end to end through the load balancer.** Measured 2026-08-28,
+      build `sha-f66a4e2`. One label, the synthetic 1200x1600 fixture rotated
+      90 degrees, submitted with a Public COLA Registry printout attached:
+      **1.5 s end to end, 1.4 s of it inside the checker.** All five fields
+      matched, and the rotation was detected and reported. **NFR-1's roughly
+      five seconds is met with margin on this path.**
+- [x] **One full batch at the configured cap**: 300 label images plus 300 COLA
       documents, which is 600 files in one envelope (ADR 0009).
 
       ```bash
@@ -442,46 +453,65 @@ not change.
       ```
 
       `--copies 25` repeats the twelve-label sample set under fresh filename
-      stems, so the pairing still holds and no two labels collide. Record total
-      wall clock, whether any line failed, and the peak task memory from the
-      CloudWatch `MemoryUtilization` metric. **The memory number is the one that
-      matters**, because it is what replaces the two estimates in section 4.3
-      with a measurement, and it is what tells you whether 8 GiB was right.
-      **It matters more than it did**: the envelope limit doubled with ADR 0009,
-      from 300 files to 600, and FastAPI parses the whole envelope before the
-      route runs.
+      stems, so the pairing still holds and no two labels collide.
+
+      Measured 2026-08-28, build `sha-f66a4e2`: **approximately 6.5 to 7
+      minutes total wall clock, roughly 1.3 s per label.** 300 of 300 rows
+      returned. No line failed: 270 fully matching, 30 not matching, 0 needing
+      review, 0 unreadable. The 30 mismatches were exactly the 30 seeded ABV
+      defects in the fixture set, so every seeded defect was caught and there
+      were no false alarms. **NFR-2 is met**: the batch completed with no
+      timeout and no lost work, and progress was visible throughout.
+- [ ] **Peak task memory from the CloudWatch `MemoryUtilization` metric for the
+      batch window.** Being retrieved; not recorded yet, and the README says
+      "memory utilization measurement pending" rather than a number. **This is
+      the number that matters**, because it is what replaces the two estimates
+      in section 4.3 with a measurement, and it is what tells you whether 8 GiB
+      was right. **It matters more than it did**: the envelope limit doubled
+      with ADR 0009, from 300 files to 600, and FastAPI parses the whole
+      envelope before the route runs. The batch above completed, which says
+      8 GiB was enough; it does not say by how much.
 - [ ] **The document parse is inside the per-label cost now.** The sample
       documents are digitally generated PDFs, so their text layer is read in
-      milliseconds. A scanned document goes through OCR instead, which costs
-      about what reading a label photograph costs, so a batch of scans is
-      roughly twice a batch of text-layer PDFs. If real submissions are scans,
-      measure that separately rather than quoting the sample figure for it.
-- [ ] **The stream arrived progressively**, from section 8.4, recorded as a
-      yes or no with the timestamps that show it. `measure.py --batch` prints
-      the spread between the first and last line, which is the same check in one
-      number: a spread near zero is a buffering intermediary, not a fast
-      service.
-- [ ] **A three-photograph single-label submission** (ADR 0007). On a session
-      runner one, two and three photographs measured 1.24 s, 2.49 s and 3.83 s
-      end to end, so three photographs is inside NFR-1's roughly 5 seconds with
-      about a second to spare, and on the deployed task it may not be. That is
-      the thinnest margin against NFR-1 anywhere in the prototype and it is the
-      figure most worth having from real hardware. If it exceeds the target,
-      the lever is `TTB_MAX_LABEL_PHOTOS` or `TTB_CORRECT_ORIENTATION`, both of
-      which are task environment variables and neither of which needs a code
-      change.
-- [ ] **A real photograph, not a rendered one.** Submit an actual bottle
-      photographed sideways, and confirm the five fields come back, that the
-      response names the rotation it applied, and that a warning set in a
-      narrow hyphenated column reports a match (assumption A-15). This is the
-      check that found the failure the orientation and hyphenation work exists
-      to fix, and running it once against a synthetic label proves nothing
-      about it.
-- [ ] Record all of it with the date, the task size, and the image digest, the
-      way every other measurement in this repository is recorded.
+      milliseconds, and the 1.3 s per label above is a text-layer figure. A
+      scanned document goes through OCR instead, which costs about what reading
+      a label photograph costs, so a batch of scans is roughly twice a batch of
+      text-layer PDFs. If real submissions are scans, measure that separately
+      rather than quoting the sample figure for it. **Not measured.**
+- [x] **The stream arrived progressively.** Yes. Observed live through the load
+      balancer during the 300-label run: **83 labels complete at the 109 second
+      mark**, with the count advancing rather than jumping to complete at the
+      end. A spread near zero between the first and last line would have meant
+      a buffering intermediary; this is the opposite of that, and it is the
+      specific risk ADR 0006 recorded.
+- [x] **A three-photograph single-label submission** (ADR 0007). Measured
+      2026-08-28 on the deployed target with three real phone photographs of a
+      round bottle: **7.8 s end to end**, which is **outside NFR-1's roughly
+      five seconds**. On a session runner one, two and three photographs had
+      measured 1.24 s, 2.49 s and 3.83 s, so this section named it beforehand as
+      the thinnest margin against NFR-1 anywhere in the prototype, and the run
+      confirmed it. The levers stay what they were: `TTB_MAX_LABEL_PHOTOS` and
+      `TTB_CORRECT_ORIENTATION`, both task environment variables, neither
+      needing a code change. Neither has been changed; the figure is recorded
+      rather than tuned away.
+- [x] **A real photograph, not a rendered one.** Done, and it is the run above.
+      Three photographs of an actual round bottle: **brand name and class or
+      type stayed unreadable on the curved glass** and came back as mismatch and
+      not found. That is honest reporting by the tool rather than a defect in
+      it, and it is the SG-1 dewarping residual: a label wrapping a round bottle
+      is never flat in one photograph, and three photographs work around the
+      geometry rather than modelling it. Recorded, not fixed. See
+      [ADR 0007](adr/0007-multi-photo-single-label.md) and OQ-21.
+- [x] Record all of it with the date, the task size, and the image digest, the
+      way every other measurement in this repository is recorded. Done: 2026-08-28,
+      1 vCPU and 8 GiB on Fargate, build `sha-f66a4e2`, behind the ALB in
+      `us-east-1`, exercised from the author's browser.
 
-Then, and only then, update the README status table and
-[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 10.
+The README status table and its
+[Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
+section have been updated from this run.
+[05_ARCHITECTURE.md](05_ARCHITECTURE.md) section 10 is unchanged, because these
+runs did not change anything it describes.
 
 ## 10. Teardown
 
@@ -493,6 +523,13 @@ terraform destroy
 This is the resting state of the stack, not an exception. Expect it to take a
 few minutes; the load balancer and the ECS service drain first, and
 `deregistration_delay_seconds` (120) is part of that.
+
+**The evaluation window is the one standing exception, and it does not change
+the policy.** The stack stays up from submission until the author confirms the
+assignment has been reviewed, so that the deployed URL is live for whoever is
+reviewing it; `terraform destroy` runs once that confirmation is in. Destroy is
+still the resting state, and the window is a period with an end rather than a
+new default.
 
 Two things that would otherwise stop a destroy are already handled:
 

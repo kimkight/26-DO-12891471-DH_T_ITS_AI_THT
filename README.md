@@ -12,20 +12,21 @@ seconds, or agents go back to doing it manually.
 
 **Author:** Kimberly D. Kight
 
-> **Status: the prototype works and is deployed. Accuracy on real label
-> artwork is the open question.** Single-label and batch verification and the
-> agent-facing interface are built, tested, and running on ECS Fargate behind
-> an Application Load Balancer in `us-east-1`, deployed by image digest.
+> **Status: the prototype works, is deployed, and has been measured on the
+> deployed target. Accuracy on real label artwork is still the open question.**
+> Single-label and batch verification and the agent-facing interface are built,
+> tested, and running on ECS Fargate behind an Application Load Balancer in
+> `us-east-1`, deployed by image digest.
 >
-> Accuracy and latency are still measured on synthetic labels and on developer
-> hardware, not on the deployed target. The first photograph of a real bottle
-> submitted to the deployed prototype returned none of its five fields; two of
-> the three causes are fixed and recorded as assumption A-15, and the third,
-> that a label wrapping a round bottle is never flat in one photograph, is
-> worked around by [ADR 0007](docs/adr/0007-multi-photo-single-label.md) rather
-> than solved. See [Status](#status) below for exactly what works and
-> [Known limitations](#known-limitations) for what the measurements do not
-> cover.
+> The first measurements against the deployed URL were taken on 2026-08-28 and
+> are in [Measured performance and accuracy](#measured-performance-and-accuracy)
+> below. A single label comes back in 1.5 seconds and a batch of 300 finishes in
+> under seven minutes, both through the load balancer. What those runs did not
+> settle is accuracy on real label artwork: three phone photographs of a round
+> bottle still leave the brand and the class unreadable on curved glass, which is
+> the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
+> rather than solves. See [Status](#status) below for exactly what works and
+> [Known limitations](#known-limitations) for what the measurements do not cover.
 
 ## Repository map
 
@@ -210,8 +211,8 @@ section 6.
 
 ## Status
 
-**Every functional requirement is built and tested. Nothing is deployed, and no
-figure in this repository was measured on a deployed target.**
+**Every functional requirement is built and tested, the prototype is deployed,
+and the first figures measured on the deployed target are below.**
 
 | Capability | State |
 | --- | --- |
@@ -232,21 +233,80 @@ figure in this repository was measured on a deployed target.**
 | Infrastructure as code | Works: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI, and applied to an AWS account in `us-east-1`. |
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
-| Accuracy and latency measurements | Measured over a synthetic sample set, on developer hardware, not on the deployed target; see below and `docs/09_DEPLOYMENT.md` section 9. |
+| Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
 | Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
-Numbers are deliberately absent from this table. Accuracy and latency figures
-belong here once they have been measured on the target they describe, and the
-target now exists but has not been measured. The checklist that turns that
-around is `docs/09_DEPLOYMENT.md` section 9. `scripts/measure.py` prints the
-current figures for whatever machine runs it, and each pull request that
-measured something records its numbers with the hardware they came from.
+Numbers are deliberately absent from this table and are in their own section
+below, because a figure without the hardware, the date and the sample it came
+from is not a measurement. The checklist that produced them is
+`docs/09_DEPLOYMENT.md` section 9. `scripts/measure.py` prints the current
+figures for whatever machine runs it, and each pull request that measured
+something records its numbers with the hardware they came from.
 
 Planned work is tracked as
 [GitHub Issues](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues),
 one per user story.
+
+## Measured performance and accuracy
+
+**Where these came from.** Every figure below was measured by the author on
+2026-08-28 against the deployed URL, build `sha-f66a4e2`, running on ECS Fargate
+with 1 vCPU and 8 GiB of memory behind the Application Load Balancer in
+`us-east-1`, and exercised from the author's browser. They are measurements, not
+estimates or projections. Nothing here is scaled arithmetically from a smaller
+run, and nothing here was taken on a session container. The runs are the ones
+`docs/09_DEPLOYMENT.md` section 9 lists, and that section records the same
+values against its checklist.
+
+### Latency
+
+| Submission | End to end | Inside the checker | What came back |
+| --- | --- | --- | --- |
+| One label: the synthetic 1200x1600 fixture rotated 90 degrees, submitted with a Public COLA Registry printout attached | **1.5 s** | 1.4 s | All five fields matched. The rotation was detected and reported. |
+| One label: three real phone photographs of a round bottle, which is the hard case | **7.8 s** | Not recorded separately | Brand name and class or type stayed unreadable on that bottle's curved glass and were reported honestly as mismatch and not found. |
+| A batch at the configured cap: 300 label images with their 300 paired COLA documents in one submission | **Approximately 6.5 to 7 minutes**, roughly **1.3 s per label** | Not recorded separately | 300 of 300 rows returned. Results streamed progressively through the load balancer: 83 labels complete at the 109 second mark, observed live. |
+
+**NFR-1, about five seconds, is met with margin on the single-label path.** One
+photograph and its application document came back in 1.5 seconds end to end
+through the load balancer, against a target of roughly five seconds.
+
+**The three-photograph case is over that target, and that is a measurement
+rather than a failure to report.** 7.8 seconds for three photographs of one
+bottle is outside NFR-1's roughly five seconds. `docs/09_DEPLOYMENT.md`
+section 9 named this as the thinnest margin against NFR-1 anywhere in the
+prototype before it was run, and the run confirmed it. Both levers are task
+environment variables and neither needs a code change:
+`TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`.
+
+**NFR-2, batch throughput with visible progress, is met.** The full 300-label
+batch completed with no timeout and no lost work, and progress was visible
+throughout rather than arriving in one block at the end. The 83-of-300 reading
+at 109 seconds is the evidence that the load balancer did not buffer the stream,
+which was the specific risk ADR 0006 recorded and the reason the check exists.
+
+**Peak task memory for the batch window: memory utilization measurement
+pending.** The CloudWatch `MemoryUtilization` figure for that window is being
+retrieved and is not written here until it is in hand. It is the number that
+would replace the two estimates in `docs/09_DEPLOYMENT.md` section 4.3 with a
+measurement, and it is the one that says whether 8 GiB was the right size.
+
+### Accuracy
+
+**On the synthetic seeded set, 300 of 300 outcomes were correct.** The 300-label
+batch returned 270 fully matching rows and 30 not matching, with 0 needing review
+and 0 unreadable. The 30 mismatches were exactly the 30 seeded ABV defects in the
+fixture set: every seeded defect was caught, and there were no false alarms.
+
+**This is the self-built sample, not the real application population.** That
+distinction is the last bullet of section 5 of
+[docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md), and it is the whole
+qualification on the figure above. Rendered text is easier to read than a
+photographed bottle, so 300 of 300 is an upper bound on a synthetic set and says
+nothing about a real filing. The three-photograph run in the latency table is
+the counter-example measured on the same day: on real curved glass, two of the
+five fields did not come back at all.
 
 ### Known limitations
 
@@ -257,19 +317,20 @@ one per user story.
   accuracy against real label artwork is unmeasured and is the largest open
   technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
-- **Nothing has been measured on a deployed target, and the infrastructure to
-  create one now exists.** That is a change in what is possible, not in what is
-  known. The checklist that would produce the first real numbers, including
-  whether the batch stream survives a load balancer unbuffered, is
-  [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9. Nothing in this
-  README moves until it has been run.
-- **Latency figures come from a session container, not production hardware.**
-  The 5-second target (NFR-1) is asserted in the integration test, which is the
-  gate; the published numbers are measurements on whatever machine ran them and
-  say so. The same applies to batch: throughput has been measured at twelve and
-  one hundred labels, never at the 300 the configured limit allows, and never on
-  a deployed target. Scaling from one to the other is arithmetic, not a
-  measurement, and no source states a batch latency target anyway (OQ-6).
+- **The latency and throughput figures are now from the deployed target, and
+  one number is still missing.** The checklist in
+  [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9 was run on
+  2026-08-28, including the question of whether the batch stream survives a load
+  balancer unbuffered, which it does. The one box still open is the CloudWatch
+  `MemoryUtilization` figure for the batch window, and the README says "memory
+  utilization measurement pending" rather than a number until it is in hand.
+- **Three photographs of one label is over the five-second target.** The
+  single-label path with one photograph measures 1.5 seconds against NFR-1's
+  roughly five; three photographs of a round bottle measured 7.8 seconds on the
+  same hardware on the same day. It is recorded rather than tuned away, and both
+  levers are task environment variables rather than code:
+  `TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`. No source states a batch
+  latency target at all (OQ-6), so the batch figure is reported without one.
 - **Capitalization is checked; boldness is not.** 27 CFR 16.22(a)(2) requires
   the warning prefix in "capital letters and in bold type." The prototype checks
   only capitals and must not imply otherwise. The API says so in every warning

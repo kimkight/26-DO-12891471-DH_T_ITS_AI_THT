@@ -650,8 +650,10 @@ itself is untouched, and nothing here merges or closes it.
 
 Two pull requests, open and untouched since 2026-08-27. Both are triaged here
 under the standing policy: does CI pass on the rebased tree, does the lock
-regenerate, and is there a breaking configuration change. **Neither is merged
-or closed by this triage.**
+regenerate, and is there a breaking configuration change. **Neither was merged
+or closed by this triage.** Both were merged afterwards, by the author, on
+2026-08-28, and each is closed out in one line at the end of its own subsection
+below.
 
 | PR | Bump | Kind | CI | Recommendation |
 | --- | --- | --- | --- | --- |
@@ -703,6 +705,9 @@ makes #67 conflict on both files. The fix is one comment, `@dependabot rebase`,
 and the bump is a single entry, so the rebase is mechanical. Merge the session's
 branches first, then rebase and merge #67.
 
+**Closed.** Merged by the author into `develop` on 2026-08-28, in the
+recommended order and with the rebase above, as merge commit `880e4dc`.
+
 ### #68: `hashicorp/setup-terraform` 3 to 4
 
 **Merge.** This is a major bump of a CI action, and the case for it is the same
@@ -743,10 +748,14 @@ here: the configuration is well formed against the provider schema, checked
 with `-backend=false` and no credentials. It does not mean an apply would
 succeed, and nothing about moving to v4 changes that.
 
+**Closed.** Merged by the author into `develop` on 2026-08-28, as merge commit
+`f2b69ba`.
+
 ### Both, together
 
 Neither pull request is blocked by anything in this session's work, and neither
 blocks it. Recommended merge order: this session's three feature branches
 first, because two of them change the files #67 touches; then `@dependabot
 rebase` on #67; then #67 and #68 in either order. As with every other entry in
-this document, **the merging is the repository owner's to do.**
+this document, **the merging is the repository owner's to do** and she did it:
+both were merged on 2026-08-28, in that order, per the recommendations above.
