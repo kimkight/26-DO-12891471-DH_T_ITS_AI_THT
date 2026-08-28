@@ -38,7 +38,7 @@ seconds, or agents go back to doing it manually.
 | `docs/adr/` | Architecture decision records. |
 | `samples/` | Twelve label specifications, the renderer that draws them, and the ground truth CSVs. Images are generated locally and git-ignored. |
 | `scripts/` | `measure.py`, which runs the engine over the sample set and reports per-field accuracy and latency. |
-| `infra/` | Placeholder for Terraform. Not written. |
+| `infra/terraform/` | Terraform for the deployed stack: ECR, ECS on Fargate, ALB, CloudWatch Logs, IAM, and the GitHub OIDC deploy role. |
 | `.github/` | CI and deployment workflows, issue and pull request templates, CODEOWNERS, Dependabot. |
 | `Dockerfile` | Multi-stage build: frontend, then backend. Runs as a non-root user. |
 
