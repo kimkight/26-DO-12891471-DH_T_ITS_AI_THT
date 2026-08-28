@@ -1,10 +1,12 @@
 /**
- * The batch results table and the batch tab's progress and summary.
+ * The batch results table and the batch tab's progress, pairing and summary.
  *
  * Requirements: FR-8 (every row identifies its label; one unreadable image
- * errors that row only), FR-10 (a status chip per row, not colour alone),
- * NFR-2 (progress is observable), NFR-5 (sorting is keyboard operable and its
- * state is announced). Stories: US-9, US-10, US-11.
+ * errors that row only), FR-11 (the application side comes from each label's
+ * COLA document), FR-10 (a status chip per row, not colour alone), NFR-2
+ * (progress is observable), NFR-5 (the pairing is stated, keyboard reachable
+ * and announced; sorting is keyboard operable and its state is announced).
+ * Stories: US-9, US-10, US-11, US-23. Decision reference: ADR 0009.
  */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -116,16 +118,29 @@ describe('the batch tab', () => {
     } as unknown as Response)
   }
 
-  async function runBatch(user: ReturnType<typeof userEvent.setup>) {
+  function png(name: string) {
+    return new File([new Uint8Array([1])], name, { type: 'image/png' })
+  }
+
+  function pdf(name: string) {
+    return new File([new Uint8Array([1])], name, { type: 'application/pdf' })
+  }
+
+  async function chooseFiles(user: ReturnType<typeof userEvent.setup>) {
     await user.upload(screen.getByLabelText('Label images'), [
-      new File([new Uint8Array([1])], 'c-clean.png', { type: 'image/png' }),
-      new File([new Uint8Array([1])], 'a-broken.png', { type: 'image/png' }),
-      new File([new Uint8Array([1])], 'b-review.png', { type: 'image/png' }),
+      png('c-clean.png'),
+      png('a-broken.png'),
+      png('b-review.png'),
     ])
-    await user.upload(
-      screen.getByLabelText('Application data file'),
-      new File(['filename\n'], 'applications.csv', { type: 'text/csv' }),
-    )
+    await user.upload(screen.getByLabelText('COLA documents'), [
+      pdf('c-clean.pdf'),
+      pdf('a-broken.pdf'),
+      pdf('b-review.pdf'),
+    ])
+  }
+
+  async function runBatch(user: ReturnType<typeof userEvent.setup>) {
+    await chooseFiles(user)
     await user.click(screen.getByRole('button', { name: /^Check/ }))
   }
 
@@ -174,19 +189,88 @@ describe('the batch tab', () => {
     render(<BatchTab />)
     await runBatch(user)
 
+    // Scoped to the results panel: the submission panel has a live region of
+    // its own now, for the pairing count.
     await waitFor(() => {
-      expect(screen.getByRole('status')).toHaveTextContent(/Finished\. 3 labels checked/)
+      expect(
+        within(screen.getByRole('region', { name: 'Results' })).getByRole('status'),
+      ).toHaveTextContent(/Finished\. 3 labels checked/)
     })
   })
 
-  it('keeps the check off until both the images and the CSV are chosen', () => {
+  it('keeps the check off until both the images and the documents are chosen', () => {
     render(<BatchTab />)
     expect(screen.getByRole('button', { name: /^Check/ })).toBeDisabled()
     expect(
-      screen.getByText(
-        'Choose the label images and the application data file to turn on the check.',
-      ),
+      screen.getByText('Choose the label images and their COLA documents to turn on the check.'),
     ).toBeInTheDocument()
+  })
+
+  it('states the pairing rule on the page before anything is chosen (ADR 0009)', () => {
+    render(<BatchTab />)
+    const rule = screen.getByText(/They are matched by name/)
+    expect(rule).toHaveTextContent('0001-stones-throw.pdf')
+    expect(rule).toHaveTextContent('0001-stones-throw.png')
+  })
+
+  it('sends both lists to the batch route, with no CSV part', async () => {
+    const sent: FormData[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        sent.push(init.body as FormData)
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              async read() {
+                return { done: true, value: undefined }
+              },
+            }),
+          },
+        } as unknown as Response
+      }),
+    )
+    const user = userEvent.setup()
+    render(<BatchTab />)
+    await runBatch(user)
+
+    await waitFor(() => expect(sent).toHaveLength(1))
+    const body = sent[0]
+    expect(body.getAll('images')).toHaveLength(3)
+    expect(body.getAll('application_documents')).toHaveLength(3)
+    expect(body.get('applications')).toBeNull()
+  })
+
+  it('counts the pairs it will send and announces the count (NFR-5)', async () => {
+    const user = userEvent.setup()
+    render(<BatchTab />)
+    await chooseFiles(user)
+
+    const status = screen.getAllByRole('status').find((node) => node.textContent?.includes('pair'))
+    expect(status).toHaveTextContent('3 pairs ready to check.')
+  })
+
+  it('names the files that pair with nothing, before the batch is sent', async () => {
+    const user = userEvent.setup()
+    render(<BatchTab />)
+    await user.upload(screen.getByLabelText('Label images'), [png('a.png'), png('b.png')])
+    await user.upload(screen.getByLabelText('COLA documents'), [pdf('a.pdf'), pdf('c.pdf')])
+
+    const status = screen.getAllByRole('status').find((node) => node.textContent?.includes('pair'))
+    expect(status).toHaveTextContent(
+      '1 pair ready to check, 1 image with no matching document, 1 document with no matching image.',
+    )
+    expect(screen.getByText(/No document matches: b.png/)).toBeInTheDocument()
+    expect(screen.getByText(/No image matches: c.pdf/)).toBeInTheDocument()
+  })
+
+  it('still lets an unmatched batch run, because the rest of it is unaffected', async () => {
+    const user = userEvent.setup()
+    render(<BatchTab />)
+    await user.upload(screen.getByLabelText('Label images'), [png('a.png'), png('b.png')])
+    await user.upload(screen.getByLabelText('COLA documents'), [pdf('a.pdf')])
+    expect(screen.getByRole('button', { name: /^Check/ })).toBeEnabled()
   })
 })
 

@@ -295,50 +295,66 @@ return per-label, per-field results.
   rejected with a message naming the limit, before any file is processed.
 - The result identifies which label each result belongs to.
 - Given a batch submission, then it is one multipart request to
-  `POST /api/verify-batch` carrying the image files plus one CSV of application
-  data keyed by image filename, and results stream back as newline-delimited
-  JSON so progress is visible while the batch runs. See
-  [ADR 0006](adr/0006-batch-execution-model.md).
-- Given a CSV row whose `filename` matches no submitted image, or an image with
-  no matching CSV row, then that item reports an error on its own result line
-  and the rest of the batch still returns results.
+  `POST /api/verify-batch` carrying the label images plus one COLA document for
+  each, and results stream back as newline-delimited JSON so progress is visible
+  while the batch runs. See [ADR 0006](adr/0006-batch-execution-model.md) for
+  the stream and [ADR 0009](adr/0009-batch-cola-documents.md) for what a batch
+  is made of.
+- Given an image whose stem matches no submitted document, or a document whose
+  stem matches no submitted image, then that item reports an error on its own
+  result line and the rest of the batch still returns results.
+- Given a document that cannot be read, then that label reports an error naming
+  the document, no field reports a match for it, and the rest of the batch still
+  returns results.
 
-**Application data CSV contract.** `(Assumption)` A-14. One header row, one row
-per image:
+**Batch submission contract.** [ADR 0009](adr/0009-batch-cola-documents.md).
+Repeated `images` parts and repeated `application_documents` parts in one
+request, **paired by filename stem**: `0001-stones-throw.png` pairs with
+`0001-stones-throw.pdf`. The stem is the filename with its final extension
+removed, compared without regard to case; only the final extension is removed,
+so `0001-stones-throw.front.png` pairs with `0001-stones-throw.front.pdf`.
 
-| Column | Meaning |
-| --- | --- |
-| `filename` | Must match the filename of one submitted image part |
-| `brand_name` | Application brand name, compared per FR-4 |
-| `class_type` | Application class or type designation |
-| `alcohol_content` | Application ABV, compared per FR-7 and A-12 |
-| `net_contents` | Application net contents, compared per FR-7 and A-13 |
-| `beverage_type` | Distilled spirits, wine, or malt beverage |
+Each document is read by the FR-11 parser, and what it says is the application
+side for that label. Every value on this path is parsed rather than typed, so
+each row's result carries the parsed block and says per field whether the
+document supplied the value or did not carry it. A value the document does not
+carry is not compared, per FR-2, rather than guessed.
 
-`beverage_type` is present because A-12 and A-13 need it: the proof cross-check
-applies to distilled spirits, and range handling for wine cites 27 CFR 4.36.
-Without the beverage class the tool would have to guess which rule applies. No
-source states this format; it is assumed and recorded as A-14 in
-[ASSUMPTIONS.md](ASSUMPTIONS.md).
+The beverage type for a row comes from its document, and where the document does
+not state it the row says so. No comparison currently reads it: A-12's proof
+cross-check keys off a proof statement the label carries and A-13's range
+handling keys off a range in the value, so an unstated beverage type costs the
+comparison nothing. It is carried because A-12 and A-13 name it as the class
+that would decide which rule applies if a rule ever needed deciding.
+
+**This replaces a CSV of application data.** `(Superseded)` A-14 assumed the
+batch arrived as one CSV keyed by image filename, and recorded that no source
+stated that format. Nothing an importer files with TTB produces such a file:
+what they file is, per application, a COLA form plus label images, and FR-11 can
+now read that form. The CSV path is removed rather than kept alongside; the
+reasoning, including the alternatives rejected, is in
+[ADR 0009](adr/0009-batch-cola-documents.md).
 
 Sarah's case: "we get these big importers who dump 200, 300 label applications
 on us at once. Right now we literally have to process them one at a time."
-[Source: Sarah Chen interview] The default configured batch limit is 300 files,
-which is the top of the range she names. `(Assumption)`
+[Source: Sarah Chen interview] The default configured batch limit is 300 labels,
+which is the top of the range she names, and it is enforced on the images and on
+the documents alike, before anything is processed. `(Assumption)` A-1
 
-**One photograph per row, and that is a stated limit rather than an oversight.**
+**One photograph per label, and that is a stated limit rather than an oversight.**
 FR-1 accepts up to `TTB_MAX_LABEL_PHOTOS` photographs of one label on the
 single-label path ([ADR 0007](adr/0007-multi-photo-single-label.md)). The batch
-path does not: the A-14 CSV keys application data on one image filename, so a
-row covering several photographs would need a different column shape, a
-reconciliation rule for a group only partly matched, and an answer for what a
-per-row error means when one photograph of three failed. None of that is
-difficult and none of it is asked for by any source, so it is not invented here.
-An agent with a bulk submission of round bottles has to check those labels one
-at a time on the single-label tab. The limitation is asserted in
-`backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected` so it cannot
-change without being noticed, and it is recorded in ADR 0007 under
-"Deliberately out of scope this session".
+path does not: a stem pairing several images to one document would need a rule
+for a group only partly readable and an answer for what a per-row error means
+when one photograph of three failed. None of that is difficult and none of it is
+asked for by any source, so it is not invented here. Two images on one stem are
+an error, not a multi-photograph label. An agent with a bulk submission of round
+bottles has to check those labels one at a time on the single-label tab. The
+limitation is asserted in
+`backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected` and
+`backend/tests/test_batch.py::TestPairing` so it cannot change without being
+noticed, and it is recorded in ADR 0007 under "Deliberately out of scope this
+session".
 
 ### FR-9 Error handling for unreadable images
 
@@ -436,8 +452,13 @@ apply to a label image. The note under OOS-1 in
 - No outbound network call is made to read the document (NFR-3), and nothing
   about it is persisted or logged beyond a byte count and the path used (NFR-6).
 
-**Not built.** The batch path keeps the CSV contract in A-14. Per-row COLA
-documents are a possible future extension and no part of them exists.
+**On the batch path, this is how every value arrives.** Written when it was not:
+the batch kept the CSV contract in A-14, and per-row COLA documents were called
+a possible future extension. [ADR 0009](adr/0009-batch-cola-documents.md) built
+them on 2026-08-28 and removed the CSV. A batch row is one label image paired
+with one COLA document by filename stem, nothing is typed, and each row's result
+carries the parsed block and the per-field source exactly as a single-label
+submission with an attached document does.
 
 ## 4. Non-functional requirements
 

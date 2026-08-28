@@ -333,6 +333,10 @@ reads records the application emitted rather than what CloudWatch received.
 | 34 | Attach a photograph or scan of a printed form | It is read through the same local OCR the tool reads labels with, and the interface says so. **Values OCR could not read are reported as not found rather than approximated.** | FR-11; FR-1 |
 | 35 | Attach a file that is not a readable application, for example an empty PDF | The message names the problem, no field reports a match, and the typed fields are still usable | FR-11; FR-9 |
 | 36 | Attach a Public COLA Registry printout whose class or type is captioned `Class/Type Description:` | The class or type field holds the designation alone, for example `Kentucky Straight Bourbon Whiskey`. **A value beginning `Description:` is a failure of this test.** Where the printout also carries a `Class/Type Code:` line, the code is still reported beside the designation | Deployed-target test, 2026-08-28; FR-11; A-17 |
+| 37 | A batch of two labels, each with a COLA document named to match its image | Both labels return a result, and each result's application values are the ones its own document carried | ADR 0009; FR-8; FR-11 |
+| 38 | The same batch with one image renamed so nothing matches it | That image reports an error naming the file, and the other label still returns a result. **A whole-batch failure is a failure of this test.** | ADR 0009; FR-8; FR-9 |
+| 39 | The same batch with one document replaced by a file that cannot be read | That label reports an error naming the document, no field reports a match for it, and the other label still returns a result | ADR 0009; FR-9 |
+| 40 | Open the batch view and look at it before choosing any files | The naming rule that pairs an image with a document is on screen, not behind a disclosure. After choosing files, the count of pairs is shown and announced | ADR 0009; NFR-4; NFR-5 |
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.

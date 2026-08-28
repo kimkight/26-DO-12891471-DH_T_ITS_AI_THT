@@ -20,11 +20,12 @@ python samples/generate_samples.py
 | `labelmaker.py` | Renders one label from a specification, with Pillow | Yes |
 | `formmaker.py` | Writes a synthetic COLA application document from a specification: a PDF with a real text layer, a fillable PDF whose values live in AcroForm fields, and a PNG with no text layer at all (FR-11, ADR 0008) | Yes |
 | `specs.py` | The twelve label specifications and the application data submitted against each | Yes |
-| `generate_samples.py` | Renders the images and writes both CSVs | Yes |
+| `generate_samples.py` | Renders the images, writes both CSVs, and writes one COLA document per label | Yes |
 | `warning_text.py` | The 27 CFR 16.21 statement, kept separate from the application's copy | Yes |
 | `images/` | Rendered label artwork used as test input | No, git-ignored; see below |
 | `expected.csv` | Ground truth: one row per image | Yes |
-| `applications/applications.csv` | The application side of each case, in the A-14 column names | Yes |
+| `applications/applications.csv` | The application side of each case. No longer an API input; see below | Yes |
+| `applications/documents/*.pdf` | One synthetic Registry printout per label, named to pair with its image (ADR 0009) | No, git-ignored; regenerated like the artwork |
 
 ### COLA application documents
 
@@ -67,36 +68,39 @@ sample set is input to the application, so taking its ground truth from
 as correct. Both copies are checked against `docs/03_REQUIREMENTS.md` section 1
 by `backend/tests/test_samples.py`.
 
-## Batch application data CSV
+## The application side of a batch
 
-`applications/` holds the comparison side of a test case. For batch submissions
-(FR-8), application data is one CSV keyed by image filename, per
-[ADR 0006](../docs/adr/0006-batch-execution-model.md). The contract:
+`applications/` holds the comparison side of a test case, in two forms.
 
-| Column | Meaning |
-| --- | --- |
-| `filename` | Must match the filename of one submitted image part |
-| `brand_name` | Application brand name, compared per FR-4 |
-| `class_type` | Application class or type designation |
-| `alcohol_content` | Application ABV, compared per FR-7 and A-12 |
-| `net_contents` | Application net contents, compared per FR-7 and A-13 |
-| `beverage_type` | Distilled spirits, wine, or malt beverage |
+**`applications/documents/*.pdf` is what a batch submission carries.** Per
+[ADR 0009](../docs/adr/0009-batch-cola-documents.md), a batch is label images
+plus one COLA document each, paired by filename stem:
+`01-spirits-clean.png` goes with `01-spirits-clean.pdf`.
+`generate_samples.py` writes one synthetic Public COLA Registry printout per
+label, carrying that label's declared values.
 
-Example:
+A Registry printout rather than a blank TTB F 5100.31, because the form has no
+item for the class or type designation, the alcohol content or the net contents
+(A-17). A batch of forms would leave four of five fields with nothing to compare
+against, which would make the sample batch useless as a measurement.
 
-```csv
-filename,brand_name,class_type,alcohol_content,net_contents,beverage_type
-stones-throw-bourbon.png,Stone's Throw,Kentucky Straight Bourbon Whiskey,45%,750 mL,distilled spirits
-```
+The documents are git-ignored, for the reason the artwork is: they are
+regenerated from a fixed specification rather than committed. Every value in
+them is invented; see the COLA application documents section above.
+
+**`applications/applications.csv` is no longer an input to any API.** It was the
+batch contract under assumption A-14, which
+[ADR 0009](../docs/adr/0009-batch-cola-documents.md) supersedes: no source ever
+stated that format, and nothing an importer files with TTB produces such a file.
+The file stays because it is the application side of the accuracy tier, which
+runs the engine in process, and because it is what the documents above are
+written from.
 
 **Two files, two purposes.** `expected.csv` is ground truth: what the tool
-should extract from the artwork, used to score accuracy. The batch CSV is
-input: what the applicant claims, which the tool compares the artwork against.
-They overlap in columns and must not be conflated. `expected.csv` keys on
-`image_filename`; the batch CSV keys on `filename`, matching the API contract.
-
-This format is assumed rather than stated by any source, and is recorded as A-14
-in [docs/ASSUMPTIONS.md](../docs/ASSUMPTIONS.md).
+should extract from the artwork, used to score accuracy. `applications.csv` is
+the other side: what the applicant claims, which the tool compares the artwork
+against. They overlap in columns and must not be conflated. `expected.csv` keys
+on `image_filename`; `applications.csv` keys on `filename`.
 
 ## Why images are git-ignored
 
@@ -114,8 +118,9 @@ Derived from the interviews, these are the cases the accuracy and UAT tiers
 exercise. See `docs/07_TEST_STRATEGY.md` for the assertions. Every case below is
 present in `specs.py`. Case 7, batch submission, is exercised by
 `backend/tests/test_batch.py`, which submits the whole set through
-`POST /api/verify-batch` and asserts that every label returns a line; it needs
-no spec of its own because a batch is the existing twelve labels sent together.
+`POST /api/verify-batch`, each label paired with its own COLA document, and
+asserts that every label returns a line; it needs no spec of its own because a
+batch is the existing twelve labels sent together with their applications.
 
 1. A clean, correct label matching its application data on every field.
 2. A brand name differing only in letter case, for example `STONE'S THROW` on

@@ -87,8 +87,10 @@ fields found across all of them are merged into one result.**
 7. **The cap is three, configurable as `TTB_MAX_LABEL_PHOTOS`.** `(Assumption)`
    More than the cap is refused before any photograph is processed, with the
    limit named (NFR-7, FR-9).
-8. **The batch path stays at one photograph per row this session.** See
-   Consequences.
+8. **The batch path stays at one photograph per label this session.** See
+   Consequences. Restated 2026-08-28 against
+   [ADR 0009](0009-batch-cola-documents.md), which changed what the batch's
+   application side is without changing this limit.
 
 ## Alternatives considered
 
@@ -176,12 +178,15 @@ actually requires; the number is configurable and the assumption is recorded.
 
 **Deliberately out of scope this session**
 
-- **The batch path stays at one photograph per row.** FR-8's CSV contract (A-14)
-  keys application data on image filename, so a row that referred to several
-  images would need a new column shape, a new reconciliation rule for partially
-  matched groups, and a new answer for what a per-row error means when one of
-  three photographs failed. None of that is hard; all of it is a second design
-  with its own assumptions, and no source asks for it. It is stated in the FR-8
+- **The batch path stays at one photograph per label.** Written against FR-8's
+  CSV contract (A-14) and still true against the one that replaced it,
+  [ADR 0009](0009-batch-cola-documents.md), which pairs one label image with one
+  COLA document by filename stem. A stem covering several images would need a
+  new pairing rule for partially matched groups and a new answer for what a
+  per-row error means when one of three photographs failed. None of that is
+  hard; all of it is a second design with its own assumptions, and no source
+  asks for it. Under ADR 0009 two images on one stem are an error rather than a
+  multi-photograph label. It is stated in the FR-8
   notes rather than left to be discovered by an agent who tries it, and the
   behaviour is asserted in
   `backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected`.

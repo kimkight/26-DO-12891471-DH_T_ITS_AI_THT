@@ -25,13 +25,14 @@ updates every artifact the answer affects.
 | [OQ-13](#oq-13) | Closed 2026-08-24 | Nothing; the infrastructure code exists and 09_DEPLOYMENT.md is the runbook. Nothing is applied |
 | [OQ-14](#oq-14) | Closed 2026-08-21 | Nothing; the board exists and is linked to the repository |
 | [OQ-15](#oq-15) | Closed 2026-08-23 | Nothing; both registries and Tesseract are reachable from a session |
-| [OQ-16](#oq-16) | Closed by ADR 0006 and assumption A-14 | Nothing; the CSV contract is stated |
+| [OQ-16](#oq-16) | Reopened and reclosed 2026-08-28 by ADR 0009 | Nothing; a batch carries the applicant's own COLA documents |
 | [OQ-17](#oq-17) | Closed 2026-08-21 | Nothing; `develop` is the default branch |
 | [OQ-18](#oq-18) | Closed 2026-08-22 | Nothing; tags are created in the Releases web interface |
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 | [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
-| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17) |
+| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
+| [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 
 ---
 
@@ -873,6 +874,21 @@ never this question, and it is recorded above rather than left implicit.
 ## OQ-16
 **How is application data supplied for a batch?**
 
+**Status: reopened by the author on 2026-08-28 and closed again by
+[ADR 0009](adr/0009-batch-cola-documents.md).** Answer: the applicant's own COLA
+document, one per label, paired with its label image by filename stem. That is
+a document that exists rather than a format that did not, and the FR-11 parser
+already reads it.
+
+The author's question was "where would these CSVs even come from?" and the
+answer was that they would come from nowhere: nothing an importer files with TTB
+produces one, so the batch path silently required an agent to type 300 rows of
+the data they were trying not to type. A-14 is marked superseded. What is still
+genuinely unknown is what a bulk submission looks like as files, which is
+[OQ-23](#oq-23).
+
+*The original closure, kept because it is the reasoning ADR 0009 rests on:*
+
 **Status: Closed by [ADR 0006](adr/0006-batch-execution-model.md) and assumption
 [A-14](ASSUMPTIONS.md#a-14).** Answer: one CSV keyed by image filename,
 submitted as a part of the same multipart request as the images, with the
@@ -1123,3 +1139,40 @@ confirmation in an editable field before a check runs (ADR 0008), so a caption
 this parser does not recognize costs an agent the typing they were doing
 anyway rather than producing a wrong comparison. It bounds any claim that the
 feature works on real documents, and it is the reason no such claim is made.
+
+## OQ-23
+**What does an importer's bulk submission look like as files, and would an agent
+expect a batch to pair on filenames?**
+
+**Status: Open, 2026-08-28.**
+
+[ADR 0009](adr/0009-batch-cola-documents.md) decides that a batch is label
+images plus one COLA document each, paired by filename stem:
+`0001-stones-throw.png` with `0001-stones-throw.pdf`. The first half of that,
+that a submission consists of applications and label images, follows from what
+is filed with TTB. The second half, the pairing rule, is a choice this project
+made, and it is the part no source speaks to.
+
+**What is not known.** Whether a bulk submission arrives with filenames that
+already correspond, or as a folder per application, or as one archive, or as
+attachments on a set of emails. Whether an agent would find renaming files to
+match an acceptable price, or an obstacle that keeps them on the one-at-a-time
+path the batch exists to replace. Whether a stable identifier inside the
+document, the TTB ID or the serial number, would be the better key.
+
+**The alternative that was closest.** Pairing on an identifier read out of each
+document would survive renamed files. It was rejected for this session because
+it requires parsing every document before anything can be paired, so a batch
+could not report its total until every document had been read, which is what
+drives the progress display NFR-2 requires; because it depends on the parser
+finding that identifier, which is A-17 territory and unverified against a real
+filing ([OQ-22](#oq-22)); and because it still needs a fallback for a document
+where the identifier is not found. If the answer to this question is that
+filenames do not correspond in practice, that alternative is the one to build.
+
+**Who can answer:** Sarah Chen, and Janet in the Seattle office, who is the
+original requester of batch verification. One question each: what does the drop
+actually look like when it lands, and what is on the files.
+**Blocks:** nothing. The pairing rule is stated on the batch page, a mismatch
+names the file it is about, and the rest of the batch still runs. The cost of
+being wrong is that agents rename files they should not have had to.

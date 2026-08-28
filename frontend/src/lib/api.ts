@@ -109,6 +109,10 @@ export async function readApplication(document: File): Promise<ApplicationOutcom
 /**
  * Verify a batch, calling `onLine` as each result arrives (FR-8, NFR-2).
  *
+ * A batch is label images plus COLA documents, paired by filename stem
+ * (ADR 0009): `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. It was
+ * images plus one CSV until assumption A-14 was superseded.
+ *
  * The response is newline-delimited JSON, so it is read from the body stream
  * rather than awaited whole. That is the entire point of the design in
  * ADR 0006: a caller that waits for the last byte reinstates the frozen page
@@ -120,13 +124,16 @@ export async function readApplication(document: File): Promise<ApplicationOutcom
  */
 export async function verifyBatch(
   images: File[],
-  applications: File,
+  applicationDocuments: File[],
   onLine: (line: BatchLine) => void,
   signal?: AbortSignal,
 ): Promise<UiError | null> {
   const body = new FormData()
   for (const image of images) body.append('images', image)
-  body.append('applications', applications)
+  // One COLA document per label, paired by filename stem (ADR 0009). The
+  // pairing is the server's to do; sending the two lists is all this has to
+  // get right.
+  for (const document of applicationDocuments) body.append('application_documents', document)
 
   let response: Response
   try {

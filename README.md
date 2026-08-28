@@ -59,9 +59,11 @@ Expected response:
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
-choose a label image, type what the application says, and select **Check this
-label**. The second tab checks many at once, taking the images plus one CSV of
-application data keyed by image filename.
+choose a label image, attach the COLA document or type what the application
+says, and select **Check this label**. The second tab checks many at once,
+taking the label images plus one COLA document for each, **paired by filename
+stem**: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. The rule is
+stated on the page, and the page says how many pairs it found before you submit.
 
 To try it without artwork of your own, generate the sample set first:
 
@@ -69,9 +71,9 @@ To try it without artwork of your own, generate the sample set first:
 python samples/generate_samples.py
 ```
 
-That writes twelve labels into `samples/images/` and the matching application
-data into `samples/applications/applications.csv`, which is exactly the shape
-the batch tab expects.
+That writes twelve labels into `samples/images/` and one COLA document per label
+into `samples/applications/documents/`, already named to pair with them, which
+is exactly what the batch tab expects.
 
 Stop with `docker compose down`.
 
@@ -125,12 +127,20 @@ prefix is upper case. The reference text is quoted verbatim from 27 CFR 16.21,
 fetched from eCFR and cited in
 [docs/03_REQUIREMENTS.md](docs/03_REQUIREMENTS.md).
 
-**A batch is one streaming request, not a job queue.** Up to 300 images plus one
-CSV of application data go in a single submission; a bounded worker pool reads
-them and each result is written to the response as it finishes, so progress is
-visible while the batch runs and one unreadable image costs only its own row.
-There is no job store, because nothing is persisted. See
+**A batch is one streaming request, not a job queue.** Up to 300 label images
+and their 300 COLA documents go in a single submission; a bounded worker pool
+reads them and each result is written to the response as it finishes, so
+progress is visible while the batch runs and one unreadable image costs only its
+own row. There is no job store, because nothing is persisted. See
 [ADR 0006](docs/adr/0006-batch-execution-model.md).
+
+**A batch takes what an importer actually files.** It used to take a CSV of
+application data, keyed by image filename, assumed rather than stated by any
+source. Nothing produces such a file: what an importer files with TTB is, per
+application, a COLA form plus label images. So a batch is now the images plus
+one COLA document each, paired by filename stem, read by the same parser the
+single-label view uses. The CSV is gone rather than kept alongside. See
+[ADR 0009](docs/adr/0009-batch-cola-documents.md).
 
 **The interface is one screen.** The primary task is on the landing page with
 nothing to navigate, every outcome is carried by a word and a shape before it is
@@ -205,13 +215,13 @@ figure in this repository was measured on a deployed target.**
 | --- | --- |
 | `GET /api/health` | Works |
 | `POST /api/verify` (one label against its application data) | Works |
-| `POST /api/verify-batch` (many labels plus one CSV of application data) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md). |
+| `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
 | `POST /api/read-application` (read a COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
 | Verification interface, one label | Works: one screen, up to three photographs of the same label, the five application fields, an optional upload of the label application that fills those fields for confirmation, five result cards, and a note saying what was done to each photograph |
-| Verification interface, batch | Works: a second tab with progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per row; see ADR 0007 |
+| Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
 | One bad image failing only its own row in a batch | Works; covered by tests |

@@ -1,5 +1,18 @@
 /**
- * The batch tab (US-9, US-10, US-11, FR-8, NFR-2).
+ * The batch tab (US-9, US-10, US-11, US-23, FR-8, FR-11, NFR-2).
+ *
+ * **A batch is label images plus COLA documents, paired by filename stem**
+ * (ADR 0009). `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. It was
+ * images plus one CSV of application data until assumption A-14 was superseded:
+ * no source ever stated that format, and what an importer actually files is,
+ * per application, a COLA form plus label images.
+ *
+ * The pairing rule is stated on the page, and the pairing itself is worked out
+ * here as soon as files are chosen, before anything is sent. An agent who has
+ * dropped 300 images and 299 documents should find that out from the page
+ * rather than from one error line 20 minutes into a run. The same sentence goes
+ * to the live region, so it reaches a screen reader without being read twice
+ * (NFR-5).
  *
  * NFR-2's second criterion is that "batch progress is observable to the user
  * rather than presenting as a frozen page". The stream carries a position and a
@@ -18,11 +31,12 @@ import { verifyBatch } from '../lib/api'
 import type { UiError } from '../lib/api'
 import { rowOutcome } from '../lib/outcomes'
 import { downloadCsv } from '../lib/csv'
+import { describePairing, pair } from '../lib/pairing'
 import type { BatchLine } from '../types'
 
 export function BatchTab() {
   const [images, setImages] = useState<File[]>([])
-  const [applications, setApplications] = useState<File[]>([])
+  const [documents, setDocuments] = useState<File[]>([])
   const [lines, setLines] = useState<BatchLine[]>([])
   const [total, setTotal] = useState(0)
   const [running, setRunning] = useState(false)
@@ -31,7 +45,7 @@ export function BatchTab() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!images.length || !applications.length || running) return
+    if (!images.length || !documents.length || running) return
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -42,7 +56,7 @@ export function BatchTab() {
 
     const failure = await verifyBatch(
       images,
-      applications[0],
+      documents,
       (line) => {
         setTotal(line.total)
         setLines((previous) => [...previous, line])
@@ -55,6 +69,10 @@ export function BatchTab() {
     abortRef.current = null
   }
 
+  const pairing = pair(images, documents)
+  const chosen = images.length > 0 || documents.length > 0
+  const pairingSentence = describePairing(pairing)
+
   const done = lines.length
   const counts = {
     checked: lines.filter((line) => rowOutcome(line) === 'match').length,
@@ -66,29 +84,76 @@ export function BatchTab() {
   return (
     <div className="layout">
       <section className="panel" aria-labelledby="batch-submit-heading">
-        <h2 id="batch-submit-heading">The labels and the application data</h2>
+        <h2 id="batch-submit-heading">The labels and their applications</h2>
+
+        {/*
+          The pairing rule, stated before the controls rather than hidden in a
+          disclosure, because it is what the agent has to do to their filenames
+          before they can use this page at all.
+        */}
+        <p className="field__hint" id="batch-pairing-rule">
+          Attach the label images and one COLA document for each. They are matched by name: a
+          document named <code>0001-stones-throw.pdf</code> goes with the image named{' '}
+          <code>0001-stones-throw.png</code>. Only the file extension may differ, and upper and
+          lower case do not matter.
+        </p>
 
         <form onSubmit={submit} noValidate>
           <DropZone
             label="Label images"
-            hint="Drag files here, or choose several at once."
+            hint="Drag files here, or choose several at once. One photograph for each label."
             accept="image/jpeg,image/png,image/webp,image/tiff"
             multiple
             files={images}
             onFiles={setImages}
           />
           <DropZone
-            label="Application data file"
-            hint="One CSV, with a filename column matching each image."
-            accept=".csv,text/csv"
-            files={applications}
-            onFiles={setApplications}
+            label="COLA documents"
+            hint="One for each label image, named to match it. A PDF, or a scan or photograph of the form."
+            accept="application/pdf,image/jpeg,image/png,image/webp,image/tiff"
+            multiple
+            files={documents}
+            onFiles={setDocuments}
           />
+
+          {/*
+            Announced as well as shown, from the same sentence, so a screen
+            reader user learns what a sighted agent learns from the counts.
+            `role="status"` rather than an alert: this is the state of the
+            submission, not an error to clear.
+          */}
+          {chosen ? (
+            <p className="field__hint" role="status" aria-live="polite">
+              {pairingSentence}
+            </p>
+          ) : null}
+
+          {pairing.imagesWithoutDocument.length || pairing.documentsWithoutImage.length ? (
+            <details className="details">
+              <summary>Which files are unmatched</summary>
+              {pairing.imagesWithoutDocument.length ? (
+                <p>
+                  No document matches: {pairing.imagesWithoutDocument.join(', ')}. You can still run
+                  the check; each of these reports an error on its own line and the rest of the
+                  batch is unaffected.
+                </p>
+              ) : null}
+              {pairing.documentsWithoutImage.length ? (
+                <p>No image matches: {pairing.documentsWithoutImage.join(', ')}.</p>
+              ) : null}
+              {pairing.ambiguous.length ? (
+                <p>
+                  Used more than once, so which document belongs to which label is ambiguous:{' '}
+                  {pairing.ambiguous.join(', ')}.
+                </p>
+              ) : null}
+            </details>
+          ) : null}
 
           <button
             className="button button--primary"
             type="submit"
-            disabled={!images.length || !applications.length || running}
+            disabled={!images.length || !documents.length || running}
           >
             {running ? 'Checking...' : `Check ${images.length || ''} labels`.replace('  ', ' ')}
           </button>
@@ -97,20 +162,20 @@ export function BatchTab() {
               Stop
             </button>
           ) : null}
-          {!images.length || !applications.length ? (
+          {!images.length || !documents.length ? (
             <p className="field__hint">
-              Choose the label images and the application data file to turn on the check.
+              Choose the label images and their COLA documents to turn on the check.
             </p>
           ) : null}
         </form>
 
         <details className="details">
-          <summary>What the application data file needs</summary>
+          <summary>What the COLA documents are read for</summary>
           <p>
-            One header row, then one row for each image. The columns are <code>filename</code>,{' '}
-            <code>brand_name</code>, <code>class_type</code>, <code>alcohol_content</code>,{' '}
-            <code>net_contents</code> and <code>beverage_type</code>. The <code>filename</code> has
-            to match the name of one of the images you attached.
+            Each document supplies the application side of its label: the brand name, the class or
+            type designation, the alcohol content and the net contents. It is read here, on this
+            server, with no call to the COLA system. A value the document does not carry is reported
+            as not found for that label rather than guessed, and the field is not compared.
           </p>
         </details>
       </section>

@@ -76,9 +76,40 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
   test('the batch tab', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('tab', { name: 'Check many labels' }).click()
-    await expect(page.getByLabel('Application data file')).toBeVisible()
+    // Both pickers, and the pairing rule that says how they go together
+    // (ADR 0009), are on the page rather than behind a disclosure.
+    await expect(page.getByLabel('Label images')).toBeVisible()
+    await expect(page.getByLabel('COLA documents')).toBeVisible()
+    await expect(page.getByText(/They are matched by name/)).toBeVisible()
     const found = await violations(page)
     expect(report(found)).toBe('')
+  })
+
+  test('the batch pickers and the pairing count are reachable by keyboard', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('tab', { name: 'Check many labels' }).click()
+    const panel = page.locator('#panel-batch')
+
+    // Tab from the selected tab into the panel: the two pickers are the first
+    // two stops, in reading order (NFR-5).
+    await page.getByRole('tab', { name: 'Check many labels' }).focus()
+    await page.keyboard.press('Tab')
+    await expect(panel.getByLabel('Label images')).toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(panel.getByLabel('COLA documents')).toBeFocused()
+
+    await panel.getByLabel('Label images').setInputFiles([
+      { name: '0001-stones-throw.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
+      { name: '0002-hollow-creek.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
+    ])
+    await panel.getByLabel('COLA documents').setInputFiles([
+      { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
+    ])
+
+    // Announced through a live region, and visible, from one sentence.
+    await expect(
+      panel.getByText('1 pair ready to check, 1 image with no matching document.'),
+    ).toBeVisible()
   })
 
   test('the results, including a needs-review card and an error notice', async ({ page }) => {

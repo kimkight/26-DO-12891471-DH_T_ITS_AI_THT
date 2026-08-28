@@ -15,6 +15,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from samples.formmaker import ApplicationSpec, as_pdf_bytes, registry_printout_lines
 from samples.labelmaker import LabelSpec, render_png_bytes
 from samples.specs import SAMPLE_LABEL
 from samples.warning_text import WARNING_STATEMENT
@@ -24,6 +25,19 @@ from app.main import app
 from tests.conftest import requires_fonts, requires_tesseract
 
 client = TestClient(app)
+
+# The application side of one batch row (ADR 0009): a Registry printout carrying
+# the sample label's declared values, generated here rather than committed.
+REGISTRY_PRINTOUT = as_pdf_bytes(
+    registry_printout_lines(
+        ApplicationSpec(
+            brand_name="Stone's Throw",
+            class_type="Kentucky Straight Bourbon Whiskey",
+            alcohol_content="45",
+            net_contents="750 mL",
+        )
+    )
+)
 
 pytestmark = [requires_tesseract, requires_fonts]
 
@@ -260,21 +274,23 @@ class TestDisagreementBetweenPhotographs:
 
 
 class TestTheBatchPathIsUnaffected:
-    def test_the_batch_route_still_takes_one_image_per_row(self, sample_label_png):
-        """ADR 0007 leaves the batch path at one photograph per row this session."""
+    def test_the_batch_route_still_takes_one_image_per_label(self, sample_label_png):
+        """ADR 0007 leaves the batch path at one photograph per label.
+
+        ADR 0009 changed what the application side of a batch is, from one CSV
+        to one COLA document per label paired by filename stem, and left this
+        limitation where it was: a stem pairing several images to one document
+        would need a rule for a group only partly readable, and no source asks
+        for one. Two images on one stem are an error, not a multi-photograph
+        label, and that is asserted in test_batch.py.
+        """
         response = client.post(
             "/api/verify-batch",
             files=[
                 ("images", ("01.png", sample_label_png, "image/png")),
                 (
-                    "applications",
-                    (
-                        "applications.csv",
-                        b"filename,brand_name,class_type,alcohol_content,net_contents,"
-                        b"beverage_type\n01.png,Stone's Throw,Kentucky Straight Bourbon "
-                        b"Whiskey,45,750 mL,distilled spirits\n",
-                        "text/csv",
-                    ),
+                    "application_documents",
+                    ("01.pdf", REGISTRY_PRINTOUT, "application/pdf"),
                 ),
             ],
         )

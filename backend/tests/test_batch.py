@@ -2,31 +2,40 @@
 
 Covers FR-8 (every label returns a result, one unreadable image errors that row
 only, an over-count batch is refused before anything is processed, every line
-identifies its label, and CSV mismatches are reported), FR-9 (a per-row error
-names the problem and reports no match), NFR-2 (the batch does not fail as a
-whole and its progress is observable), NFR-6 (nothing is persisted), and
-NFR-7 (the file count is checked before processing).
+identifies its label, and pairing failures are reported), FR-9 (a per-row error
+names the problem and reports no match), FR-11 (the application side of every
+row is read off that row's COLA document), NFR-2 (the batch does not fail as a
+whole and its progress is observable), NFR-6 (nothing is persisted), and NFR-7
+(the file count is checked before processing).
 
-Stories: US-9, US-10, US-11. Decision reference: ADR 0006, assumption A-14.
+Stories: US-9, US-10, US-11, US-23. Decision references: ADR 0006 for the
+stream, ADR 0009 for what a batch is made of.
+
+**A batch is label images plus COLA documents, paired by filename stem.**
+`0001-stones-throw.png` pairs with `0001-stones-throw.pdf`. There is no CSV;
+assumption A-14 invented that format and ADR 0009 supersedes it.
+
+Every document here is generated at test time by samples/formmaker.py, with
+invented values. No real filing and no personal data, which is the test data
+policy in docs/07_TEST_STRATEGY.md section 8.
 
 The tiers are kept apart deliberately, following docs/07_TEST_STRATEGY.md
-section 1. The reconciliation and refusal tests need no Tesseract, because every
-one of them either rejects before decoding or fails to decode. The tests that
-read real artwork carry the integration markers.
+section 1. The pairing and refusal tests need no Tesseract, because every one of
+them either rejects before decoding or fails to decode. The tests that read real
+artwork carry the integration markers.
 """
 
 from __future__ import annotations
 
-import csv
-import io
 import json
 import time
 
 import pytest
 from fastapi.testclient import TestClient
+from samples.formmaker import ApplicationSpec, as_pdf_bytes, registry_printout_lines
 from samples.specs import SAMPLE_LABEL, SPECS
 
-from app.batch import REQUIRED_COLUMNS
+from app.batch import pairing_stem
 from app.config import settings
 from app.main import app
 from tests.conftest import requires_fonts, requires_tesseract
@@ -34,26 +43,41 @@ from tests.conftest import requires_fonts, requires_tesseract
 client = TestClient(app)
 
 CORRUPT_IMAGE = b"this is not an image"
+CORRUPT_DOCUMENT = b"this is not a pdf"
 
 
-def application_csv(rows: list[dict[str, str]], columns=REQUIRED_COLUMNS) -> bytes:
-    """Build an A-14 CSV. Written out rather than fixtured so each test's CSV is
-    visible in the test that depends on it."""
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=list(columns))
-    writer.writeheader()
-    writer.writerows(rows)
-    return buffer.getvalue().encode("utf-8")
+def document_for(spec=SAMPLE_LABEL) -> bytes:
+    """A Registry printout carrying one label spec's application values.
+
+    Written from the spec rather than fixtured, so the document a test depends
+    on is visible in the test.
+    """
+    application = spec.application
+    return as_pdf_bytes(
+        registry_printout_lines(
+            ApplicationSpec(
+                brand_name=application.get("brand_name", ""),
+                class_type=application.get("class_type", ""),
+                alcohol_content=application.get("alcohol_content", ""),
+                net_contents=application.get("net_contents", ""),
+                beverage_type=application.get("beverage_type", ""),
+            )
+        )
+    )
 
 
-def row_for(filename: str, spec=SAMPLE_LABEL) -> dict[str, str]:
-    return {"filename": filename, **spec.application}
-
-
-def submit(images: list[tuple[str, bytes]], csv_bytes: bytes, csv_name="applications.csv"):
+def submit(images: list[tuple[str, bytes]], documents: list[tuple[str, bytes]]):
     files = [("images", (name, content, "image/png")) for name, content in images]
-    files.append(("applications", (csv_name, csv_bytes, "text/csv")))
+    files += [
+        ("application_documents", (name, content, "application/pdf")) for name, content in documents
+    ]
     return client.post("/api/verify-batch", files=files)
+
+
+def paired(images: list[tuple[str, bytes]], spec=SAMPLE_LABEL):
+    """The submission for a set of images, each with a document named to match."""
+    documents = [(f"{pairing_stem(name)}.pdf", document_for(spec)) for name, _ in images]
+    return submit(images, documents)
 
 
 def lines(response) -> list[dict]:
@@ -68,13 +92,45 @@ def lines(response) -> list[dict]:
     return parsed
 
 
+class TestThePairingRule:
+    """ADR 0009's contract, stated as the function both sides are keyed on."""
+
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("0001-stones-throw.png", "0001-stones-throw"),
+            ("0001-stones-throw.pdf", "0001-stones-throw"),
+            ("0001-STONES-THROW.PDF", "0001-stones-throw"),
+            ("  0001-stones-throw.jpg  ", "0001-stones-throw"),
+            # Only the final extension is removed.
+            ("0001-stones-throw.front.png", "0001-stones-throw.front"),
+            # A browser sending a path pairs on the name.
+            ("batch/0001-stones-throw.png", "0001-stones-throw"),
+            # No extension at all is a stem in its own right.
+            ("0001-stones-throw", "0001-stones-throw"),
+        ],
+    )
+    def test_the_stem_is_the_name_without_its_final_extension(self, filename, expected):
+        assert pairing_stem(filename) == expected
+
+    def test_an_image_and_a_document_pair_when_their_stems_agree(self):
+        response = submit(
+            [("0001-stones-throw.png", CORRUPT_IMAGE)],
+            [("0001-STONES-THROW.pdf", document_for())],
+        )
+        received = lines(response)
+        assert len(received) == 1
+        # Paired: the failure is the image, not the pairing.
+        assert received[0]["error"]["code"] == "unreadable_image"
+
+
 class TestOverCount:
     """FR-8's third criterion and NFR-7's third."""
 
     def test_a_batch_over_the_limit_is_refused_and_the_message_names_the_limit(self, monkeypatch):
         monkeypatch.setattr(settings, "max_batch_files", 2)
         images = [(f"{index}.png", CORRUPT_IMAGE) for index in range(3)]
-        response = submit(images, application_csv([row_for(name) for name, _ in images]))
+        response = paired(images)
 
         assert response.status_code == 413
         body = response.json()
@@ -85,10 +141,19 @@ class TestOverCount:
         assert "fields" not in response.text
         assert "match" not in response.text
 
+    def test_too_many_documents_is_refused_on_the_same_limit(self, monkeypatch):
+        monkeypatch.setattr(settings, "max_batch_files", 2)
+        response = submit(
+            [("a.png", CORRUPT_IMAGE)],
+            [(f"{index}.pdf", document_for()) for index in range(3)],
+        )
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "batch_too_large"
+
     def test_a_batch_at_the_limit_is_accepted(self, monkeypatch):
         monkeypatch.setattr(settings, "max_batch_files", 2)
         images = [(f"{index}.png", CORRUPT_IMAGE) for index in range(2)]
-        response = submit(images, application_csv([row_for(name) for name, _ in images]))
+        response = paired(images)
         assert response.status_code == 200
         assert len(lines(response)) == 2
 
@@ -98,7 +163,7 @@ class TestEveryLineIdentifiesItsLabel:
 
     def test_each_line_names_its_image_and_carries_its_position(self):
         images = [(f"{index:02d}.png", CORRUPT_IMAGE) for index in range(4)]
-        response = submit(images, application_csv([row_for(name) for name, _ in images]))
+        response = paired(images)
 
         assert response.status_code == 200
         received = lines(response)
@@ -115,7 +180,7 @@ class TestEveryLineIdentifiesItsLabel:
         rejection still has to name the problem in one shape (FR-9)."""
         files = [
             ("images", ("", CORRUPT_IMAGE, "image/png")),
-            ("applications", ("a.csv", application_csv([row_for("a.png")]), "text/csv")),
+            ("application_documents", ("a.pdf", document_for(), "application/pdf")),
         ]
         response = client.post("/api/verify-batch", files=files)
 
@@ -125,17 +190,8 @@ class TestEveryLineIdentifiesItsLabel:
         assert "images" in error["message"]
         assert "fields" not in response.text
 
-    def test_a_batch_with_no_application_csv_is_refused_in_the_documented_shape(self):
-        files = [("images", ("a.png", CORRUPT_IMAGE, "image/png"))]
-        response = client.post("/api/verify-batch", files=files)
 
-        assert response.status_code == 422
-        error = response.json()["error"]
-        assert error["code"] == "invalid_submission"
-        assert "applications" in error["message"]
-
-
-class TestOneBadImageDoesNotFailTheBatch:
+class TestOneBadItemDoesNotFailTheBatch:
     """US-10, FR-8's second criterion, FR-9 applied per row."""
 
     @requires_tesseract
@@ -148,7 +204,7 @@ class TestOneBadImageDoesNotFailTheBatch:
             ("corrupt.png", CORRUPT_IMAGE),
             ("good-2.png", sample_label_png),
         ]
-        response = submit(images, application_csv([row_for(name) for name, _ in images]))
+        response = paired(images)
 
         assert response.status_code == 200
         received = {line["filename"]: line for line in lines(response)}
@@ -171,89 +227,144 @@ class TestOneBadImageDoesNotFailTheBatch:
                 "government_warning",
             ]
 
-    def test_a_disallowed_type_inside_a_batch_errors_that_row_only(self):
+    def test_an_unreadable_document_errors_that_row_only(self):
+        """FR-9 applied to the document half of a pair (ADR 0009)."""
+        response = submit(
+            [("broken-doc.png", CORRUPT_IMAGE), ("good-doc.png", CORRUPT_IMAGE)],
+            [
+                ("broken-doc.pdf", CORRUPT_DOCUMENT),
+                ("good-doc.pdf", document_for()),
+            ],
+        )
+
+        assert response.status_code == 200
+        received = {line["filename"]: line for line in lines(response)}
+        broken = received["broken-doc.png"]
+        assert broken["error"]["code"] == "unreadable_application_document"
+        assert "broken-doc.pdf" in broken["error"]["message"]
+        assert broken["result"] is None
+        # The other row still ran, and failed on its own terms rather than on
+        # the neighbouring row's.
+        assert received["good-doc.png"]["error"]["code"] == "unreadable_image"
+
+    def test_a_disallowed_image_type_inside_a_batch_errors_that_row_only(self):
         files = [
             ("images", ("ok.png", CORRUPT_IMAGE, "image/png")),
             ("images", ("notes.pdf", b"%PDF-1.4", "application/pdf")),
-            (
-                "applications",
-                (
-                    "a.csv",
-                    application_csv([row_for("ok.png"), row_for("notes.pdf")]),
-                    "text/csv",
-                ),
-            ),
+            ("application_documents", ("ok.pdf", document_for(), "application/pdf")),
+            ("application_documents", ("notes.pdf", document_for(), "application/pdf")),
         ]
         response = client.post("/api/verify-batch", files=files)
         assert response.status_code == 200
         received = {line["filename"]: line for line in lines(response)}
         assert received["notes.pdf"]["error"]["code"] == "unsupported_media_type"
         assert "image/png" in received["notes.pdf"]["error"]["limit"]
-        # The other row still ran, and failed on its own terms rather than on
-        # the neighbouring row's.
         assert received["ok.png"]["error"]["code"] == "unreadable_image"
 
+    def test_a_disallowed_document_type_errors_that_row_only(self):
+        files = [
+            ("images", ("a.png", CORRUPT_IMAGE, "image/png")),
+            ("images", ("b.png", CORRUPT_IMAGE, "image/png")),
+            ("application_documents", ("a.pdf", document_for(), "application/pdf")),
+            ("application_documents", ("b.txt", b"brand name: x", "text/plain")),
+        ]
+        response = client.post("/api/verify-batch", files=files)
+        received = {line["filename"]: line for line in lines(response)}
+        assert received["b.png"]["error"]["code"] == "unsupported_application_document"
+        assert received["a.png"]["error"]["code"] == "unreadable_image"
+
     def test_an_oversize_image_inside_a_batch_errors_that_row_only(self, monkeypatch):
-        monkeypatch.setattr(settings, "max_upload_bytes", 32)
-        images = [("small.png", CORRUPT_IMAGE), ("big.png", b"x" * 64)]
-        response = submit(images, application_csv([row_for(name) for name, _ in images]))
+        # Above the generated documents, which are under a kilobyte, so the
+        # limit this exercises is the one on the image.
+        monkeypatch.setattr(settings, "max_upload_bytes", 4096)
+        images = [("small.png", CORRUPT_IMAGE), ("big.png", b"x" * 8192)]
+        response = paired(images)
 
         assert response.status_code == 200
         received = {line["filename"]: line for line in lines(response)}
         assert received["big.png"]["error"]["code"] == "file_too_large"
-        assert "32" in received["big.png"]["error"]["limit"]
+        assert "4096" in received["big.png"]["error"]["limit"]
         assert received["small.png"]["error"]["code"] == "unreadable_image"
 
+    def test_an_oversize_document_inside_a_batch_errors_that_row_only(self, monkeypatch):
+        """The document is an upload in its own right, bounded the same way."""
+        monkeypatch.setattr(settings, "max_upload_bytes", 512)
+        response = submit(
+            [("a.png", CORRUPT_IMAGE), ("b.png", CORRUPT_IMAGE)],
+            [("a.pdf", b"%PDF-1.4 tiny"), ("b.pdf", document_for())],
+        )
 
-class TestCsvReconciliation:
-    """FR-8's sixth criterion: an unmatched row, a missing row and a duplicate
-    row each produce an error that names the problem, and the rest still runs."""
+        received = {line["filename"]: line for line in lines(response)}
+        assert received["b.png"]["error"]["code"] == "file_too_large"
+        # The other row got past the size check and failed on its own document.
+        assert received["a.png"]["error"]["code"] == "unreadable_application_document"
 
-    def test_a_csv_row_referencing_a_missing_file_errors_on_its_own_line(self):
+
+class TestPairing:
+    """FR-8's sixth criterion under ADR 0009: an image with no document, a
+    document with no image, and a duplicated stem each produce an error that
+    names the problem, and the rest of the batch still runs."""
+
+    def test_a_document_with_no_image_errors_on_its_own_line(self):
         response = submit(
             [("present.png", CORRUPT_IMAGE)],
-            application_csv([row_for("present.png"), row_for("absent.png")]),
+            [("present.pdf", document_for()), ("absent.pdf", document_for())],
         )
 
         assert response.status_code == 200
         received = {line["filename"]: line for line in lines(response)}
-        assert set(received) == {"present.png", "absent.png"}
+        assert set(received) == {"present.png", "absent.pdf"}
 
-        missing = received["absent.png"]
-        assert missing["status"] == "error"
-        assert missing["error"]["code"] == "unmatched_application_row"
-        assert "absent.png" in missing["error"]["message"]
-        assert missing["result"] is None
+        orphan = received["absent.pdf"]
+        assert orphan["status"] == "error"
+        assert orphan["error"]["code"] == "unmatched_application_document"
+        assert "absent.pdf" in orphan["error"]["message"]
+        assert orphan["result"] is None
         # The image that was submitted still got its own line.
         assert received["present.png"]["error"]["code"] == "unreadable_image"
 
-    def test_an_image_with_no_csv_row_errors_on_its_own_line(self):
+    def test_an_image_with_no_document_errors_on_its_own_line(self):
         response = submit(
             [("listed.png", CORRUPT_IMAGE), ("unlisted.png", CORRUPT_IMAGE)],
-            application_csv([row_for("listed.png")]),
+            [("listed.pdf", document_for())],
         )
 
         received = {line["filename"]: line for line in lines(response)}
-        assert received["unlisted.png"]["error"]["code"] == "missing_application_row"
-        assert "unlisted.png" in received["unlisted.png"]["error"]["message"]
+        assert received["unlisted.png"]["error"]["code"] == "missing_application_document"
+        assert "unlisted" in received["unlisted.png"]["error"]["message"]
         assert received["listed.png"]["error"]["code"] == "unreadable_image"
 
-    def test_a_duplicated_csv_filename_errors_that_row_and_leaves_the_others(self):
+    def test_two_documents_on_one_stem_error_that_row_and_leave_the_others(self):
         response = submit(
             [("twice.png", CORRUPT_IMAGE), ("once.png", CORRUPT_IMAGE)],
-            application_csv([row_for("twice.png"), row_for("twice.png"), row_for("once.png")]),
+            [
+                ("twice.pdf", document_for()),
+                ("TWICE.PDF", document_for()),
+                ("once.pdf", document_for()),
+            ],
         )
 
         received = {line["filename"]: line for line in lines(response)}
-        assert received["twice.png"]["error"]["code"] == "duplicate_application_row"
-        assert "twice.png" in received["twice.png"]["error"]["message"]
+        assert received["twice.png"]["error"]["code"] == "duplicate_application_document"
+        assert "twice" in received["twice.png"]["error"]["message"]
         assert received["once.png"]["error"]["code"] == "unreadable_image"
+
+    def test_two_images_on_one_stem_error_because_the_pairing_is_ambiguous(self):
+        """One document cannot belong to two labels (ADR 0009)."""
+        response = submit(
+            [("same.png", CORRUPT_IMAGE), ("same.jpeg", CORRUPT_IMAGE)],
+            [("same.pdf", document_for())],
+        )
+
+        received = lines(response)
+        assert len(received) == 2
+        assert {line["error"]["code"] for line in received} == {"duplicate_label_stem"}
 
     def test_two_images_submitted_under_one_filename_stay_distinguishable(self):
         files = [
             ("images", ("same.png", CORRUPT_IMAGE, "image/png")),
             ("images", ("same.png", CORRUPT_IMAGE, "image/png")),
-            ("applications", ("a.csv", application_csv([row_for("same.png")]), "text/csv")),
+            ("application_documents", ("same.pdf", document_for(), "application/pdf")),
         ]
         response = client.post("/api/verify-batch", files=files)
 
@@ -265,50 +376,99 @@ class TestCsvReconciliation:
         )
 
 
-class TestUnusableCsv:
+class TestUnusableSubmissions:
     """The batch-level half of FR-8's error criterion."""
 
-    def test_a_csv_missing_a_required_column_is_refused_and_the_column_is_named(self):
-        columns = [column for column in REQUIRED_COLUMNS if column != "alcohol_content"]
-        body = application_csv([dict.fromkeys(columns, "x")], columns=columns)
-        response = submit([("a.png", CORRUPT_IMAGE)], body)
-
-        assert response.status_code == 422
-        error = response.json()["error"]
-        assert error["code"] == "invalid_application_csv"
-        assert "alcohol_content" in error["message"]
-        assert "fields" not in response.text
-
-    def test_an_empty_csv_is_refused(self):
-        response = submit([("a.png", CORRUPT_IMAGE)], b"")
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "invalid_application_csv"
-
-    def test_a_csv_that_is_not_utf8_is_refused_with_a_message_an_agent_can_act_on(self):
-        body = application_csv([row_for("a.png")]).replace(b"Stone", b"St\xffne")
-        response = submit([("a.png", CORRUPT_IMAGE)], body)
-        assert response.status_code == 422
-        assert "UTF-8" in response.json()["error"]["message"]
-
-    def test_a_header_only_csv_is_refused(self):
-        response = submit([("a.png", CORRUPT_IMAGE)], application_csv([]))
-        assert response.status_code == 422
-        assert response.json()["error"]["code"] == "invalid_application_csv"
-
     def test_a_batch_with_no_images_is_refused(self):
-        files = [("applications", ("a.csv", application_csv([row_for("a.png")]), "text/csv"))]
+        files = [("application_documents", ("a.pdf", document_for(), "application/pdf"))]
         response = client.post("/api/verify-batch", files=files)
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "empty_batch"
 
-    def test_the_csv_header_is_read_case_insensitively_and_ignores_surrounding_space(self):
-        columns = [f" {column.upper()} " for column in REQUIRED_COLUMNS]
-        values = ["a.png", "Stone's Throw", "Bourbon", "45", "750 mL", "spirits"]
-        rows = [dict(zip(columns, values, strict=True))]
-        response = submit([("a.png", CORRUPT_IMAGE)], application_csv(rows, columns=columns))
+    def test_a_batch_with_no_documents_at_all_is_refused_and_the_rule_is_stated(self):
+        """Batch level rather than 300 identical per-row errors."""
+        files = [("images", ("a.png", CORRUPT_IMAGE, "image/png"))]
+        response = client.post("/api/verify-batch", files=files)
 
-        assert response.status_code == 200
-        assert lines(response)[0]["error"]["code"] == "unreadable_image"
+        assert response.status_code == 422
+        error = response.json()["error"]
+        assert error["code"] == "missing_application_documents"
+        assert ".pdf" in error["message"], "the message states the pairing rule"
+        assert "fields" not in response.text
+
+
+class TestWhatTheDocumentSupplied:
+    """FR-11 on the batch path: every value comes from that row's document."""
+
+    @requires_tesseract
+    @requires_fonts
+    def test_the_row_compares_against_what_its_document_said(self, sample_label_png):
+        response = paired([("01-spirits-clean.png", sample_label_png)])
+        line = lines(response)[0]
+        assert line["status"] == "ok", line
+
+        by_name = {field["name"]: field for field in line["result"]["fields"]}
+        assert by_name["brand_name"]["application_value"] == "Stone's Throw"
+        assert by_name["brand_name"]["outcome"] == "match"
+        # Nothing was typed on this path, so every supplied value is parsed.
+        assert by_name["brand_name"]["application_value_source"] == "parsed_from_form"
+
+    @requires_tesseract
+    @requires_fonts
+    def test_the_row_carries_the_parsed_block_so_the_reading_is_visible(self, sample_label_png):
+        response = paired([("01-spirits-clean.png", sample_label_png)])
+        document = lines(response)[0]["result"]["application_document"]
+
+        assert document is not None
+        assert document["extraction_path"] == "embedded_text"
+        assert {field["name"] for field in document["fields"]} == {
+            "brand_name",
+            "class_type",
+            "alcohol_content",
+            "net_contents",
+            "beverage_type",
+        }
+
+    @requires_tesseract
+    @requires_fonts
+    def test_a_beverage_type_the_document_did_not_state_says_so(self, sample_label_png):
+        """A Registry printout for a bourbon names no product type, and the row
+        reports that rather than inferring one (FR-1's rule, applied here).
+
+        No per-field comparison reads the beverage type: the proof cross-check
+        keys off a proof statement the label itself carries, and the wine range
+        handling keys off a range, both per A-12 and A-13. So an unstated
+        beverage type costs the comparison nothing, and the row says it was not
+        stated instead of guessing.
+        """
+        response = paired([("01-spirits-clean.png", sample_label_png)])
+        document = lines(response)[0]["result"]["application_document"]
+
+        beverage = next(field for field in document["fields"] if field["name"] == "beverage_type")
+        assert beverage["found_on_document"] is False
+        assert beverage["value"] is None
+        assert any("ticked box cannot be read" in note for note in document["notes"])
+
+    @requires_tesseract
+    @requires_fonts
+    def test_a_value_the_document_omits_is_not_compared_rather_than_mismatched(
+        self, sample_label_png
+    ):
+        """FR-2: a field the application did not supply is not a mismatch."""
+        response = submit(
+            [("a.png", sample_label_png)],
+            [
+                (
+                    "a.pdf",
+                    as_pdf_bytes(
+                        registry_printout_lines(ApplicationSpec(brand_name="Stone's Throw"))
+                    ),
+                )
+            ],
+        )
+        by_name = {field["name"]: field for field in lines(response)[0]["result"]["fields"]}
+        assert by_name["net_contents"]["outcome"] == "not_compared"
+        assert by_name["net_contents"]["application_value_source"] == "absent"
 
 
 class TestNothingIsPersisted:
@@ -316,10 +476,7 @@ class TestNothingIsPersisted:
 
     def test_no_field_value_or_filename_reaches_the_logs(self, caplog):
         caplog.set_level("INFO")
-        submit(
-            [("secret-brand.png", CORRUPT_IMAGE)],
-            application_csv([row_for("secret-brand.png")]),
-        )
+        paired([("secret-brand.png", CORRUPT_IMAGE)])
         logged = "\n".join(record.getMessage() for record in caplog.records)
         assert "secret-brand" not in logged
         assert "Stone's Throw" not in logged
@@ -333,10 +490,10 @@ class TestTheGeneratedSampleSet:
 
     def test_every_one_of_the_twelve_labels_returns_a_line(self, label_png, capsys):
         images = [(spec.filename, label_png(**spec.__dict__)) for spec in SPECS]
-        body = application_csv([{"filename": spec.filename, **spec.application} for spec in SPECS])
+        documents = [(f"{pairing_stem(spec.filename)}.pdf", document_for(spec)) for spec in SPECS]
 
         started = time.perf_counter()
-        response = submit(images, body)
+        response = submit(images, documents)
         elapsed = time.perf_counter() - started
 
         assert response.status_code == 200
@@ -349,10 +506,12 @@ class TestTheGeneratedSampleSet:
         for line in received:
             assert len(line["result"]["fields"]) == 5
             assert line["result"]["external_call_made"] is False, "NFR-3"
+            assert line["result"]["application_document"] is not None, "FR-11"
 
         with capsys.disabled():
             print(
-                f"\nBatch of {len(SPECS)} labels: {elapsed:.2f} s wall clock on "
+                f"\nBatch of {len(SPECS)} labels with their COLA documents: "
+                f"{elapsed:.2f} s wall clock on "
                 f"{settings.effective_batch_workers} workers "
                 f"({elapsed / len(SPECS):.2f} s per label). Measured on this "
                 "runner, not on production hardware. No batch latency target "
@@ -368,7 +527,7 @@ def test_the_worker_pool_bound_is_honoured_and_every_line_still_returns(monkeypa
     assert settings.effective_batch_workers == workers
 
     images = [(f"{index:02d}.png", CORRUPT_IMAGE) for index in range(8)]
-    response = submit(images, application_csv([row_for(name) for name, _ in images]))
+    response = paired(images)
 
     received = lines(response)
     assert len(received) == 8

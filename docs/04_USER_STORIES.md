@@ -334,22 +334,39 @@ going to use it. We learned that the hard way." [Source: Sarah Chen interview]
 | --- | --- |
 | Epic | Batch verification |
 | Priority | Must |
-| Requirements | FR-8 |
+| Requirements | FR-8, FR-11 |
 | Points | |
-| Issue | #9 |
-| Source | Sarah Chen interview |
+| Issue | #9, and [#70](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/70) for the change of contract |
+| Source | Sarah Chen interview; the author's question, 2026-08-28 |
 
 **As a** compliance agent handling a bulk importer submission,
-**I want** to upload many labels with their application data in one go,
-**so that** I am not processing a 300-application drop one at a time.
+**I want** to upload many labels together with the COLA document for each,
+**so that** I am not processing a 300-application drop one at a time, and I am
+not retyping 300 applications into a spreadsheet to do it.
 
 **Acceptance criteria**
 
 ```
-Given a batch of labels each with application data
+Given label images and one COLA document for each, named to match
 When  I submit the batch
 Then  the response contains a result set for every label in the batch
 And   each result identifies which label it belongs to
+And   each result's application values are the ones its document carried
+```
+
+```
+Given an image whose name matches no document, or a document matching no image
+When  I submit the batch
+Then  that item reports an error on its own result line
+And   every other label still returns results
+```
+
+```
+Given a document that cannot be read
+When  I submit the batch
+Then  that label reports an error naming the document
+And   no field reports a match for it
+And   every other label still returns results
 ```
 
 ```
@@ -358,6 +375,21 @@ When  I submit it
 Then  the request is rejected before any file is processed
 And   the message names the limit
 ```
+
+```
+Given I am on the batch view
+When  I look at it before choosing anything
+Then  the naming rule that pairs an image with a document is stated on screen
+```
+
+**What changed, and why.** This story asked for "many labels with their
+application data" from the beginning, and until 2026-08-28 that application data
+was one CSV keyed on image filename, assumed as A-14 and stated by no source.
+The author asked where such a CSV would come from. Nothing an importer files
+produces one; what they file is, per application, a COLA form plus label images,
+and FR-11 reads that form. The CSV is removed, not kept alongside. See
+[ADR 0009](adr/0009-batch-cola-documents.md), which also records the pairing
+rule: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`.
 
 Sarah: "during peak season, we get these big importers who dump 200, 300 label
 applications on us at once. Right now we literally have to process them one at a

@@ -9,6 +9,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The batch takes COLA documents, and the CSV is gone** (FR-8 rewritten,
+FR-11, US-9, [#70](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/70),
+[ADR 0009](docs/adr/0009-batch-cola-documents.md), superseding assumption A-14).
+The question this answers was the author's: why are we assuming the batch is a
+CSV, and where would these CSVs even come from? The answer was already in the
+repository. A-14 said "No source states this format; it is assumed." The CSV
+existed because Session 3 needed some way to attach application data to 300
+images before any COLA parser existed. Nothing an importer files with TTB
+produces such a file: what they file is, per application, a COLA form plus label
+images, and FR-11 can now read that form.
+
+**A batch submission is label images plus COLA documents, paired by filename
+stem.** `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`: the stem is
+the filename with its final extension removed, compared without regard to case,
+and only the final extension is removed, so `0001-stones-throw.front.png` pairs
+with `0001-stones-throw.front.pdf`. On the wire, repeated `images` parts and
+repeated `application_documents` parts in one request to
+`POST /api/verify-batch`. The rule is implemented once as `pairing_stem` in
+`backend/app/batch.py` and mirrored in `frontend/src/lib/pairing.ts` so the page
+can say what will pair before anything is sent.
+
+**The CSV path is removed, not kept alongside.** Two input contracts would be
+two things to build, test, document and explain, and the CSV's only origin story
+was our own assumption: there is no population of users with CSVs to preserve
+compatibility for. `parse_applications_csv`, the column contract and the CSV's
+reconciliation errors are deleted. A-14 is marked superseded in
+`docs/ASSUMPTIONS.md` rather than removed, with the original entry kept below
+the line, because the history of why the CSV existed is the reason the
+replacement is short. The alternatives rejected, one combined PDF of all the
+forms and pairing on an identifier inside each document, are recorded in
+ADR 0009 with what would make the second one right.
+- Each batch row is verified against what its own document said. Every value on
+that path is parsed rather than typed, so each row's result carries the parsed
+block and says per field whether the document supplied the value or did not
+carry it, exactly as a single-label submission with an attached document does. A
+value the document does not carry is not compared, per FR-2, rather than
+guessed.
+- The beverage type for a row comes from its document, and where the document
+does not state it the row says so. **No per-field comparison reads it**, and
+that is now stated rather than implied: A-12's proof cross-check keys off a
+proof statement the label itself carries and A-13's range handling keys off a
+range in the value, so an unstated beverage type costs the comparison nothing.
+It is carried because A-12 and A-13 name it as the class that would decide which
+rule applies if a rule ever needed deciding.
+- Pairing failures are per row, not per batch, which keeps FR-8's isolation rule
+intact. An image with no document is `missing_application_document`; a document
+with no image is `unmatched_application_document` on its own line; two documents
+on one stem is `duplicate_application_document`; two images on one stem is
+`duplicate_label_stem`; a document that cannot be read is
+`unreadable_application_document`, naming the document. Only two refusals stay
+at batch level, because there is nothing to attach them to: no images at all,
+and no documents at all, whose message states the pairing rule.
+- The batch view takes two pickers, label images and COLA documents, states the
+pairing rule on screen rather than behind a disclosure, and works out the
+pairing as soon as files are chosen. The count of pairs and of unmatched files
+is shown and announced through a live region from the same sentence, so an agent
+who has dropped 300 images and 299 documents finds out from the page rather than
+from one error line 20 minutes into a run.
+- `scripts/measure.py` grows a batch mode: `--batch --url "$URL"` submits a real
+batch over HTTP under the new contract and prints total wall clock, per-label
+time, when the first and last lines arrived, the spread between them, and the
+counts by status and error code. The spread is the section 8.4 streaming check
+in one number. `--copies 25` repeats the twelve-label sample set under fresh
+stems, which is the 300-label batch at the configured cap that section 9 asks
+for. It uses only the standard library, so nothing is added to either lock file.
+- `samples/generate_samples.py` writes one synthetic Public COLA Registry
+printout per label into `samples/applications/documents/`, named to pair with
+its image. A printout rather than a blank TTB F 5100.31, because the form has no
+item for three of the five compared values (A-17) and a batch of forms would
+leave four of five fields with nothing to compare against. Git-ignored and
+regenerated, like the artwork. `samples/applications/applications.csv` stays,
+and is no longer an input to any API: it is the accuracy tier's application data
+and the file the documents are written from.
+
 - **The label application accepted as an input, instead of typed** (FR-11,
 US-23, [#65](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/65),
 [ADR 0008](docs/adr/0008-cola-form-as-application-input.md)). The question this
@@ -440,6 +514,14 @@ and rate limiting, then access logs and an audit trail).
 
 ### Changed
 
+- The batch envelope limit doubled, from `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`
+to twice that: about 6 GiB on the defaults rather than 3 GiB. A batch carries one
+label image and one COLA document per label now (ADR 0009), and each of the two
+is an upload bounded by the same per-file limit. FastAPI parses the whole
+envelope before the route runs, so this is a task sizing input and it is twice
+the input it was; `docs/09_DEPLOYMENT.md` section 9 says to read the real figure
+off CloudWatch `MemoryUtilization` rather than estimate it.
+
 - **The batch path stays at one photograph per row.** ADR 0007 does not extend
 to it this session: the A-14 CSV keys application data on one image filename, so
 a row covering several photographs would need a different column shape, a
@@ -645,6 +727,19 @@ workflow, and the still-undeployed URL.
 
 ### Fixed
 
+- PDFium is not thread-safe, and the batch path reads COLA documents in a worker
+pool. Reading two at once segfaults the process, which takes the NDJSON stream
+and every completed result with it: a whole-batch failure NFR-2 forbids and one
+no per-row error can catch, because the process is gone. It was found the first
+time the new batch tests ran. Every call into PDFium is now made under one lock
+in `backend/app/application_form.py`, and the document is closed explicitly
+under that lock rather than left to a garbage collection that could run on
+another thread. The OCR fallback is deliberately outside the lock: pages are
+rendered to bytes under it and read by Tesseract after it is released, so a
+batch of scanned documents still spends its expensive step in parallel. This is
+the same shape of problem as the OpenMP one in `backend/app/ocr.py`, found the
+same way: a library that is fine on the single-label path and not fine in a
+pool.
 - A Public COLA Registry printout left a caption word inside the class or type
 designation it supplied. In the author's deployed-target test on 2026-08-28, a
 printout carrying the line `Class/Type Description: Kentucky Straight Bourbon
