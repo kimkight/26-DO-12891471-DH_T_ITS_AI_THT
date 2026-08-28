@@ -51,6 +51,7 @@ import ctypes
 import io
 import logging
 import re
+import threading
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -76,6 +77,25 @@ ExtractionPath = Literal["form_fields", "embedded_text", "ocr"]
 PDF_MAGIC = b"%PDF"
 
 logger = logging.getLogger(__name__)
+
+# **PDFium is not thread-safe, and the batch path reads documents in a pool.**
+#
+# PDFium keeps process-global state and its API has to be serialized by the
+# caller; pypdfium2 wraps it and inherits that. Reading two documents at once
+# segfaults the process, which on the batch path takes the stream and every
+# completed result with it: exactly the whole-batch failure NFR-2 forbids, and
+# not something a per-row error can catch, because the process is gone.
+#
+# So every call into PDFium is made under this lock. What is deliberately left
+# outside it is the OCR fallback: pages are rendered to bytes under the lock and
+# read by Tesseract after it is released, so a batch of scanned documents still
+# spends its expensive step in parallel. Text-layer and form-field reading, the
+# ordinary case, are milliseconds and serialize harmlessly.
+#
+# This is the same shape of problem as the OpenMP one in app.ocr, found the same
+# way: a library that is fine on the single-label path and not fine in a worker
+# pool.
+_PDFIUM_LOCK = threading.Lock()
 
 
 class UnreadableDocumentError(Exception):
@@ -135,6 +155,41 @@ def _is_pdf(content: bytes, content_type: str | None) -> bool:
 
 
 def _parse_pdf(content: bytes) -> ParsedApplication:
+    """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
+    with _PDFIUM_LOCK:
+        read, rendered_pages, pages = _read_pdf_with_pdfium(content)
+    if read is not None:
+        return read
+
+    # Nothing in the file itself, so it is a scan: read the pages rendered
+    # above. This runs outside the lock, because Tesseract is the expensive part
+    # and there is no reason for one document's OCR to block another's.
+    # Orientation correction is off because a page rendered from a PDF is
+    # already the right way up, and the OSD pass costs about as much again as
+    # the read it precedes (see app.ocr).
+    ocr_lines: list[OcrLine] = []
+    for rendered in rendered_pages:
+        ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
+    if not ocr_lines:
+        raise UnreadableDocumentError(
+            "No text could be read from the uploaded PDF, either from the file "
+            "itself or by reading its pages as images. Nothing was taken from "
+            "it. Type the application values instead."
+        )
+    return _with_notes(_from_lines(ocr_lines), path="ocr", pages_read=pages)
+
+
+def _read_pdf_with_pdfium(
+    content: bytes,
+) -> tuple[ParsedApplication | None, list[bytes], int]:
+    """Everything that touches PDFium, in one place, for one document.
+
+    Returns either the parsed reading, when the file itself carried values, or
+    the pages rendered to PNG bytes for the OCR fallback to read once the lock
+    is released. The document is closed here rather than left to the garbage
+    collector, because a collection running on another thread would call into
+    PDFium outside the lock.
+    """
     try:
         document = pdfium.PdfDocument(io.BytesIO(content))
         page_count = len(document)
@@ -145,47 +200,38 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
             "values instead."
         ) from exc
 
-    if not page_count:
-        raise UnreadableDocumentError(
-            "The uploaded PDF has no pages in it. Send the file again, or type "
-            "the application values instead."
-        )
-
-    pages = min(page_count, settings.max_document_pages)
-    from_fields = _from_form_fields(document, pages)
-    lines = _pdf_text_lines(document, pages)
-    from_text = _from_lines(lines)
-
-    merged = _combine(from_fields, from_text)
-    if merged.found_any:
-        path: ExtractionPath = "form_fields" if from_fields.found_any else "embedded_text"
-        return _with_notes(merged, path=path, pages_read=pages)
-
-    # Nothing in the file itself, so it is a scan: rasterize and read the
-    # pixels. Orientation correction is off because a page rendered from a PDF
-    # is already the right way up, and the OSD pass costs about as much again
-    # as the read it precedes (see app.ocr).
-    ocr_lines: list[OcrLine] = []
-    for index in range(pages):
-        try:
-            rendered = _render_page(document, index)
-        except Exception as exc:
-            # One page that will not render is not the document failing. The
-            # class name and the page number go to the log and nothing else:
-            # NFR-6 forbids anything about the content reaching it.
-            logger.warning(
-                "application document page could not be rendered",
-                extra={"page": index + 1, "cause": type(exc).__name__},
+    try:
+        if not page_count:
+            raise UnreadableDocumentError(
+                "The uploaded PDF has no pages in it. Send the file again, or type "
+                "the application values instead."
             )
-            continue
-        ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
-    if not ocr_lines:
-        raise UnreadableDocumentError(
-            "No text could be read from the uploaded PDF, either from the file "
-            "itself or by reading its pages as images. Nothing was taken from "
-            "it. Type the application values instead."
-        )
-    return _with_notes(_from_lines(ocr_lines), path="ocr", pages_read=pages)
+
+        pages = min(page_count, settings.max_document_pages)
+        from_fields = _from_form_fields(document, pages)
+        lines = _pdf_text_lines(document, pages)
+        from_text = _from_lines(lines)
+
+        merged = _combine(from_fields, from_text)
+        if merged.found_any:
+            path: ExtractionPath = "form_fields" if from_fields.found_any else "embedded_text"
+            return _with_notes(merged, path=path, pages_read=pages), [], pages
+
+        rendered_pages: list[bytes] = []
+        for index in range(pages):
+            try:
+                rendered_pages.append(_render_page(document, index))
+            except Exception as exc:
+                # One page that will not render is not the document failing. The
+                # class name and the page number go to the log and nothing else:
+                # NFR-6 forbids anything about the content reaching it.
+                logger.warning(
+                    "application document page could not be rendered",
+                    extra={"page": index + 1, "cause": type(exc).__name__},
+                )
+        return None, rendered_pages, pages
+    finally:
+        document.close()
 
 
 def _parse_image(content: bytes) -> ParsedApplication:

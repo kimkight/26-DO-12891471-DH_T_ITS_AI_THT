@@ -2,10 +2,19 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; the input contract half superseded by [ADR 0009](0009-batch-cola-documents.md) on 2026-08-28 |
 | Date | 2026-08-22 |
 | Author | Kimberly D. Kight |
 | Decision reference | Implements FR-8 and NFR-2; constrained by D-9 |
+
+> **What ADR 0009 changed, and what it did not.** The execution model decided
+> here stands unchanged: one synchronous multipart request, a bounded worker
+> pool, NDJSON streamed as each label finishes, no job store. What is superseded
+> is what the request carries. The CSV contract below, marked `(Assumption)`
+> A-14 when it was written, is replaced by label images plus one COLA document
+> per label paired by filename stem. The sections below are left as they were
+> written, because the reasoning they record is what made the replacement
+> obvious once FR-11 existed.
 
 ## Context
 
@@ -74,6 +83,11 @@ Concretely:
   copy of the results.
 
 ### CSV contract `(Assumption)` A-14
+
+**Superseded by [ADR 0009](0009-batch-cola-documents.md).** Kept as written, for
+the history. The batch now carries one COLA document per label, paired by
+filename stem, and the values below are read off that document by the FR-11
+parser rather than typed into a row.
 
 One header row, one row per image. Columns:
 

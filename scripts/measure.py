@@ -3,13 +3,28 @@
 
 Run from the repository root, after samples/generate_samples.py:
 
-    python scripts/measure.py
+    python scripts/measure.py                          # accuracy, in process
+    python scripts/measure.py --batch --url "$URL"     # a batch, over HTTP
+    python scripts/measure.py --batch --url "$URL" --copies 25   # 300 labels
 
 Prints a Markdown table of per-field precision, recall, review rate, false match
 rate, and latency, following the metric definitions in
 docs/07_TEST_STRATEGY.md section 3. Nothing is written to docs/: a number
 belongs in a document once it has been measured on hardware the document
 describes, and a session container is not that.
+
+**Two modes, and they measure different things.** The default imports the
+engine and runs it in this process, so what it reports is extraction accuracy
+with no network in it. `--batch --url` submits a real batch to a deployed
+service and reports what came back and when, which is what
+docs/09_DEPLOYMENT.md section 9 asks for and what the in-process mode cannot
+answer. Say which one produced a figure whenever one is recorded.
+
+**The batch mode follows the ADR 0009 contract**: label images plus one COLA
+document each, paired by filename stem, sent as repeated `images` and
+`application_documents` parts. There is no CSV. `--copies` repeats the sample
+set under fresh stems so that the full 300-label batch section 9 asks for can
+actually be sent from a twelve-label sample set.
 
 **What ground truth means here, stated because it bounds what these numbers
 show.** The ground truth outcome for each field is computed by running the same
@@ -27,9 +42,15 @@ remains the largest open technical risk in the prototype (ADR 0003).
 
 from __future__ import annotations
 
+import argparse
 import csv
+import json
 import statistics
 import sys
+import time
+import urllib.error
+import urllib.request
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,6 +61,7 @@ for path in (REPO_ROOT, REPO_ROOT / "backend"):
 
 from samples.generate_samples import (  # noqa: E402
     APPLICATIONS_CSV,
+    DOCUMENTS_DIR,
     EXPECTED_CSV,
     IMAGES_DIR,
 )
@@ -213,5 +235,188 @@ def report() -> str:
     return "\n".join(lines)
 
 
+# --------------------------------------------------------------------------
+# Batch mode: the ADR 0009 contract, against a deployed service.
+# --------------------------------------------------------------------------
+
+BOUNDARY = f"----ttb-measure-{uuid.uuid4().hex}"
+
+# What each side of a pair is sent as. Images are PNG because that is what
+# samples/generate_samples.py renders; documents are the PDFs it writes
+# alongside them.
+IMAGE_TYPE = "image/png"
+DOCUMENT_TYPE = "application/pdf"
+
+
+def batch_parts(copies: int) -> list[tuple[str, str, str, bytes]]:
+    """Every part of one batch submission, as (field, filename, type, bytes).
+
+    Each copy after the first gets a fresh stem on both sides of the pair, so
+    the pairing still holds and no two labels collide. That is what lets a
+    twelve-label sample set stand in for the 300-label batch at the configured
+    cap; it measures throughput and memory, not accuracy, and the labels being
+    repeated does not change either.
+    """
+    if not IMAGES_DIR.is_dir() or not any(IMAGES_DIR.glob("*.png")):
+        generate()
+
+    parts: list[tuple[str, str, str, bytes]] = []
+    for copy in range(copies):
+        suffix = "" if copy == 0 else f"-copy{copy + 1:03d}"
+        for image_path in sorted(IMAGES_DIR.glob("*.png")):
+            document_path = DOCUMENTS_DIR / f"{image_path.stem}.pdf"
+            if not document_path.is_file():
+                raise SystemExit(
+                    f"No COLA document for {image_path.name}. Run "
+                    "samples/generate_samples.py, which writes one per label."
+                )
+            stem = f"{image_path.stem}{suffix}"
+            parts.append(("images", f"{stem}.png", IMAGE_TYPE, image_path.read_bytes()))
+            parts.append(
+                (
+                    "application_documents",
+                    f"{stem}.pdf",
+                    DOCUMENT_TYPE,
+                    document_path.read_bytes(),
+                )
+            )
+    return parts
+
+
+def multipart_body(parts: list[tuple[str, str, str, bytes]]) -> bytes:
+    """Encode the parts by hand, so this script needs no HTTP dependency.
+
+    The runtime lock file carries no HTTP client and this script is run by an
+    author against a deployed URL; adding a dependency for one measurement
+    would be a worse trade than forty lines of encoding.
+    """
+    chunks: list[bytes] = []
+    for field, filename, content_type, content in parts:
+        chunks.append(f"--{BOUNDARY}\r\n".encode())
+        chunks.append(
+            f'Content-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'.encode()
+        )
+        chunks.append(f"Content-Type: {content_type}\r\n\r\n".encode())
+        chunks.append(content)
+        chunks.append(b"\r\n")
+    chunks.append(f"--{BOUNDARY}--\r\n".encode())
+    return b"".join(chunks)
+
+
+def run_batch(url: str, copies: int) -> str:
+    """Submit one batch and report what came back, and when.
+
+    The arrival time of every line is recorded, because whether the response
+    streamed is the question docs/09_DEPLOYMENT.md section 8.4 cannot answer
+    from a total. If every line lands at the same moment, something between the
+    application and here buffered the whole response and NFR-2 is not met on
+    the deployed path however green the tests are.
+    """
+    parts = batch_parts(copies)
+    labels = sum(1 for field, *_ in parts if field == "images")
+    body = multipart_body(parts)
+
+    request = urllib.request.Request(  # noqa: S310
+        url.rstrip("/") + "/api/verify-batch",
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={BOUNDARY}",
+            "Content-Length": str(len(body)),
+        },
+    )
+
+    arrivals: list[float] = []
+    statuses: dict[str, int] = {}
+    codes: dict[str, int] = {}
+    started = time.perf_counter()
+    try:
+        with urllib.request.urlopen(request) as response:  # noqa: S310
+            for raw in response:
+                line = raw.decode("utf-8").strip()
+                if not line:
+                    continue
+                arrivals.append(time.perf_counter() - started)
+                record = json.loads(line)
+                status = record.get("status", "unknown")
+                statuses[status] = statuses.get(status, 0) + 1
+                if status == "error":
+                    code = (record.get("error") or {}).get("code", "unknown")
+                    codes[code] = codes.get(code, 0) + 1
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", "replace")[:500]
+        raise SystemExit(f"The service refused the batch: HTTP {error.code}. {detail}") from error
+    except urllib.error.URLError as error:
+        raise SystemExit(f"Could not reach {url}: {error.reason}") from error
+
+    elapsed = time.perf_counter() - started
+    if not arrivals:
+        raise SystemExit("The response carried no lines at all.")
+
+    lines = [
+        f"Batch of {labels} labels, each with its own COLA document, submitted to "
+        f"{url} as one multipart request (ADR 0009). Envelope: "
+        f"{len(body) / 1_048_576:.1f} MiB.",
+        "",
+        "| Measurement | Value |",
+        "| --- | --- |",
+        f"| Lines received | {len(arrivals)} |",
+        f"| Total wall clock | {elapsed:.1f} s |",
+        f"| Per label | {elapsed / labels:.2f} s |",
+        f"| First line arrived after | {arrivals[0]:.2f} s |",
+        f"| Last line arrived after | {arrivals[-1]:.2f} s |",
+        f"| Spread between first and last line | {arrivals[-1] - arrivals[0]:.2f} s |",
+        "",
+        "| Line status | Count |",
+        "| --- | --- |",
+    ]
+    lines += [f"| {status} | {count} |" for status, count in sorted(statuses.items())]
+    if codes:
+        lines += ["", "| Error code | Count |", "| --- | --- |"]
+        lines += [f"| {code} | {count} |" for code, count in sorted(codes.items())]
+    lines += [
+        "",
+        "**Read the spread.** It is the streaming check from "
+        "docs/09_DEPLOYMENT.md section 8.4, in one number: a spread near zero "
+        "means the whole response arrived at once, which is a buffering "
+        "intermediary rather than a fast service, and NFR-2 is not met on the "
+        "deployed path. The peak task memory this run cost is not here and "
+        "cannot be: read it from the CloudWatch MemoryUtilization metric for "
+        "the task, as section 9 requires.",
+    ]
+    return "\n".join(lines)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Submit a batch to a deployed service instead of measuring accuracy in process.",
+    )
+    parser.add_argument("--url", help="Base URL of the deployed service, for --batch.")
+    parser.add_argument(
+        "--copies",
+        type=int,
+        default=1,
+        help=(
+            "Repeat the sample set this many times under fresh filename stems. "
+            "25 copies of the twelve-label set is the 300-label batch at the "
+            "configured cap."
+        ),
+    )
+    arguments = parser.parse_args()
+
+    if not arguments.batch:
+        print(report())
+        return 0
+    if not arguments.url:
+        parser.error("--batch needs --url, the base URL of the deployed service")
+    if arguments.copies < 1:
+        parser.error("--copies has to be at least 1")
+    print(run_batch(arguments.url, arguments.copies))
+    return 0
+
+
 if __name__ == "__main__":
-    print(report())
+    raise SystemExit(main())

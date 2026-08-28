@@ -133,8 +133,9 @@ sequenceDiagram
     participant W as Per-label processing
     participant R as Result assembler
 
-    A->>API: POST /api/verify-batch (N images + one application CSV)
-    API->>V: Check batch file count against TTB_MAX_BATCH_FILES
+    A->>API: POST /api/verify-batch (N images + N COLA documents)
+    API->>V: Check both counts against TTB_MAX_BATCH_FILES
+    API->>V: Pair each image with the document of the same filename stem
     alt Count exceeds limit
         V-->>A: Rejected before any file is processed, limit named
     else Within limit
@@ -151,10 +152,39 @@ sequenceDiagram
     Note over W,R: One failing label never fails the batch (US-10).
 ```
 
+**What a batch is made of** ([ADR 0009](adr/0009-batch-cola-documents.md)).
+Label images plus one COLA document for each, in one multipart request as
+repeated `images` and `application_documents` parts, **paired by filename
+stem**: `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`. The stem is
+the filename with its final extension removed, compared without regard to case,
+and only the final extension is removed. Each document is read by the FR-11
+parser inside the worker pool, per row, so the reading is parallelized and a
+document that cannot be read is that row's error rather than the batch's.
+
+This replaced a CSV of application data keyed by image filename, assumed as
+A-14. Nothing an importer files with TTB produces such a file; what they file is
+a COLA form plus label images, which FR-11 can read. A-14 is marked superseded
+rather than deleted.
+
+Every value on this path is parsed rather than typed, so each row's result
+carries the same parsed block and the same per-field source marks a single-label
+submission with an attached document carries.
+
+Pairing failures are per row, not per batch. An image with no document, a
+document with no image, two documents on one stem and two images on one stem
+each report an error on their own line; only a submission with no images at all,
+or no documents at all, is refused as a whole.
+
 Isolation between labels is the design property that matters here. Sarah's
 scenario is a 300-application drop; losing 299 good results to one bad image
 would make the tool useless in exactly the case it was built for.
 [Source: Sarah Chen interview]
+
+**PDFium is serialized.** It is not thread-safe, and this pool reads documents
+concurrently: two at once segfaults the process and takes the stream with it.
+Every call into PDFium is made under one lock in `application_form.py`, with the
+OCR fallback outside it so a batch of scanned documents still spends its
+expensive step in parallel.
 
 Batch concurrency, and whether long batches need an asynchronous job model
 rather than a single request, are unresolved; see OQ-6 in
@@ -176,11 +206,11 @@ find out why it exists.
 | `ocr.py` | Decode honouring the EXIF orientation tag, preprocess (long edge to 1600 px, grayscale, adaptive threshold, cardinal turn from Tesseract OSD, then bounded deskew), run Tesseract, return text with word confidence, line geometry, the orientation applied and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
 | `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
-| `application_form.py` | Read the application values off an uploaded COLA document: AcroForm field values, then the text layer, then OCR over rendered pages. An explicit not found per value, with the reason where the form has no item for it | FR-11, FR-9, NFR-3, NFR-6, A-17 | `tests/test_application_form.py`, `tests/test_cola_document_api.py` |
+| `application_form.py` | Read the application values off an uploaded COLA document: AcroForm field values, then the text layer, then OCR over rendered pages. An explicit not found per value, with the reason where the form has no item for it. Serializes every PDFium call, because the batch pool reads documents concurrently and PDFium is not thread-safe | FR-11, FR-9, FR-8, NFR-3, NFR-6, A-17 | `tests/test_application_form.py`, `tests/test_cola_document_api.py`, `tests/test_batch.py` |
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
 | `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
 | `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
-| `batch.py` | The A-14 CSV parser, reconciliation of images against rows, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, NFR-2, NFR-6 | `tests/test_batch.py` |
+| `batch.py` | The filename-stem pairing of images with COLA documents, the per-row pairing errors, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, FR-11, NFR-2, NFR-6 | `tests/test_batch.py` |
 | `api.py` | `POST /api/verify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
 
 Two implementation notes that are not obvious from the table:
@@ -318,7 +348,7 @@ this origin.
 | `App.tsx` | The one screen: the prototype banner, the masthead, the skip link, the two tabs, the ARIA tabs keyboard behaviour, and the footer attribution | NFR-4, NFR-5 | `tests/a11y.spec.ts`, `src/__tests__/branding.test.tsx` |
 | `components/SingleLabelTab.tsx` | The photo slots and their add and remove controls, the five labelled inputs, the check button, the result cards, the timing line, and the live regions | FR-10, NFR-1, NFR-4, NFR-5, ADR 0007 | `src/__tests__/liveRegion.test.tsx`, `src/__tests__/multiPhoto.test.tsx` |
 | `components/PhotoNotes.tsx` | What was done to each submitted photograph, rendered only when there is something to say | FR-10, ADR 0007, A-15 | `src/__tests__/multiPhoto.test.tsx` |
-| `components/BatchTab.tsx` | The two pickers, the progress indicator driven by the stream, the summary counts, and the CSV download | FR-8, NFR-2 | `src/__tests__/batchTable.test.tsx` |
+| `components/BatchTab.tsx` | The two pickers, images and COLA documents, the pairing rule stated on screen with the pair count announced, the progress indicator driven by the stream, the summary counts, and the results CSV download | FR-8, FR-11, NFR-2, NFR-5 | `src/__tests__/batchTable.test.tsx`, `tests/a11y.spec.ts` |
 | `components/BatchTable.tsx` | The sortable results table with a status chip per row | FR-8, FR-10, NFR-5 | `src/__tests__/batchTable.test.tsx` |
 | `components/ResultCard.tsx` | One field's card, and the warning's separate capitalization and bold-type sections | FR-3, FR-6, FR-10, OOS-4 | `src/__tests__/outcomes.test.tsx` |
 | `components/OutcomeBadge.tsx` | An outcome as text, then shape, then colour | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
@@ -327,7 +357,8 @@ this origin.
 | `lib/api.ts` | The two calls, including reading the batch NDJSON stream incrementally | FR-8, NFR-2 | `src/__tests__/batchTable.test.tsx` |
 | `lib/outcomes.ts` | The text, shape and tone for each outcome, and the live-region sentence | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
 | `lib/plainLanguage.ts` | API error codes rendered as something an agent can act on | FR-9, NFR-4 | `src/__tests__/liveRegion.test.tsx` |
-| `lib/csv.ts` | The results CSV, built in the browser | FR-8, D-9 | `src/__tests__/batchTable.test.tsx` |
+| `lib/csv.ts` | The results CSV, built in the browser. Output only: nothing is submitted as CSV | FR-8, D-9 | `src/__tests__/batchTable.test.tsx` |
+| `lib/pairing.ts` | The ADR 0009 pairing rule, mirrored from `batch.py`, so the page can say what will pair before anything is sent | FR-8, NFR-4, NFR-5 | `src/__tests__/batchTable.test.tsx` |
 | `lib/photos.ts` | The wording for each photograph's note, and the per-field attribution label | FR-10, ADR 0007 | `src/__tests__/multiPhoto.test.tsx` |
 | `index.css` | One light palette, defined as tokens, with every contrast pair checked, and the bundled font imported rather than linked | NFR-3, NFR-5 | `src/__tests__/contrast.test.ts` |
 
@@ -361,7 +392,7 @@ Four notes that are not obvious from the table:
 
 | Component | Responsibility | Explicitly not responsible for |
 | --- | --- | --- |
-| React SPA | Collect the image and application data; present per-field outcomes accessibly; show batch progress; build the results CSV in the browser | Any comparison logic; any judgment about compliance; retaining anything past the page |
+| React SPA | Collect the images, the typed application values and the COLA documents; present per-field outcomes accessibly; show batch progress and what will pair; build the results CSV in the browser | Any comparison logic; any judgment about compliance; retaining anything past the page |
 | FastAPI routing layer | HTTP contract, request lifecycle, error shaping | Image decoding; matching |
 | Validation | Size, MIME type, and batch count limits, enforced before decoding | Content correctness |
 | Extraction (Tesseract, OpenCV) | Turn image pixels into text for the five fields | Deciding whether a value is correct |

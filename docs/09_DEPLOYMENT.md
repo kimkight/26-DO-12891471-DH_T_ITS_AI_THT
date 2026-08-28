@@ -136,7 +136,7 @@ to hold a smaller batch cheaply.
 | Component | MiB | Where the figure comes from |
 | --- | --- | --- |
 | Interpreter, FastAPI, uvicorn, numpy, OpenCV, pytesseract | 150 | Measured: 77 MiB peak RSS after importing `app.main` against `backend/requirements.lock`, on a four-core Linux session container running Python 3.11. Doubled here for the running ASGI stack and allocator behaviour under load. **Not measured on Fargate.** |
-| The batch payload, held as `bytes` for the batch's duration | 3 000 | `TTB_MAX_BATCH_BYTES`, below. |
+| The batch payload, held as `bytes` for the batch's duration | 3 000 | `TTB_MAX_BATCH_BYTES`, below. Since [ADR 0009](adr/0009-batch-cola-documents.md) this covers the label images **and** their COLA documents together, which does not change the figure: it is the envelope that bounds the payload, not the file count. |
 | Transient duplication while the parts are read | 300 | Starlette spools a multipart part to a temporary file once it exceeds 1 MiB; below that the part stays in memory while `await image.read()` makes the copy the batch holds. Worst case is 300 parts each just under 1 MiB, so both copies of all of them are resident at once. |
 | Per-image working set, one worker | 400 | The decoded image at the 1600 px long edge is about 7.3 MiB per copy and the preprocessing chain holds several; the Tesseract child process is the unmeasured part, and 400 MiB is a deliberately generous ceiling for it. |
 | Result objects, futures, NDJSON framing | 20 | 300 small dataclasses. No image bytes: results carry text and scores. |
@@ -168,8 +168,28 @@ the deployed ceiling is readable where the size is:
 | --- | --- | --- |
 | `TTB_MAX_BATCH_FILES` | `300` | The assignment's scenario. |
 | `TTB_MAX_UPLOAD_BYTES` | `10485760` | 10 MiB per image, the application default. |
-| `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly, which is 300 times 10 MiB. The budget above holds it. |
+| `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly. The budget above holds it. See the note below: this is now a tighter bound than the application would derive. |
 | `TTB_BATCH_WORKERS` | `1` | One worker per vCPU of quota. |
+
+**`TTB_MAX_BATCH_BYTES` is now a real bound rather than arithmetic, and that is
+deliberate.** It used to be exactly 300 times 10 MiB, one image per label at the
+per-file cap. Since [ADR 0009](adr/0009-batch-cola-documents.md) a batch carries
+one COLA document per image as well, and the application's own derivation
+doubled to match: `2 * TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, about
+6 GiB on the defaults. **The deployed value is not raised to follow it**, because
+the memory budget above is what sets this number and an 8 GiB task cannot hold a
+6 GiB payload.
+
+What that means in practice. A batch whose files total more than 3 000 MiB is
+refused from its Content-Length before the body is read, with the limit named
+(FR-9, NFR-7). That is the safe failure: a refusal an agent can act on rather
+than a task killed mid-batch. In the ordinary case it costs nothing, because the
+documents are the small half of each pair: a Public COLA Registry printout is
+kilobytes and the label photograph beside it is megabytes. The case it does bite
+is 300 scanned multi-page documents alongside 300 large photographs, and the
+answer there is the one FR-8 already gives, which is to split the batch. Section
+9's CloudWatch `MemoryUtilization` measurement is what would justify raising
+both this and `task_memory`.
 
 `TTB_BATCH_WORKERS` is pinned rather than derived, and this is worth knowing
 before you change the vCPU count. `backend/app/config.py` sizes the pool from
@@ -329,7 +349,9 @@ curl -s -o /dev/null -w 'total %{time_total}s\n' \
 ```
 
 Take the field values from the matching row of
-`samples/applications/applications.csv`, which is keyed on `filename`; the four
+`samples/applications/applications.csv`, which is keyed on `filename` and is the
+sample set's application data (it is not a batch input any more, see ADR 0009);
+the four
 above are the first row as generated and are worth checking against the file
 rather than trusted from this page. What this measures is the whole path,
 including the load balancer and the network between you and it, which is what
@@ -344,26 +366,44 @@ NDJSON line arrives in one flush at the end, the progress display shows nothing
 until it is over, and NFR-2 is not met even though every test passes. **This
 has never been verified against a load balancer.**
 
+A batch is label images plus one COLA document each, paired by filename stem
+([ADR 0009](adr/0009-batch-cola-documents.md)).
+`samples/generate_samples.py` writes both sides, so
+`samples/applications/documents/01-spirits-clean.pdf` is already named to pair
+with `samples/images/01-spirits-clean.png`.
+
 ```bash
 curl -N -s \
-  -F 'applications=@samples/applications/applications.csv' \
   -F 'images=@samples/images/01-spirits-clean.png' \
   -F 'images=@samples/images/02-spirits-case-difference.png' \
   -F 'images=@samples/images/03-spirits-title-case-warning.png' \
   -F 'images=@samples/images/04-spirits-altered-warning.png' \
   -F 'images=@samples/images/05-spirits-no-warning.png' \
+  -F 'application_documents=@samples/applications/documents/01-spirits-clean.pdf' \
+  -F 'application_documents=@samples/applications/documents/02-spirits-case-difference.pdf' \
+  -F 'application_documents=@samples/applications/documents/03-spirits-title-case-warning.pdf' \
+  -F 'application_documents=@samples/applications/documents/04-spirits-altered-warning.pdf' \
+  -F 'application_documents=@samples/applications/documents/05-spirits-no-warning.pdf' \
   "$URL/api/verify-batch" \
   | while IFS= read -r line; do printf '%s  %s\n' "$(date +%T)" "${line:0:80}"; done
 ```
+
+`scripts/measure.py --batch --url "$URL"` sends the same shape of request and
+prints the arrival spread as a number; use whichever is easier to read. There is
+no `applications` CSV part any more: sending one is ignored, and a submission
+with no `application_documents` at all is refused with a message stating the
+pairing rule.
 
 `-N` disables curl's own buffering, so what you are watching is the network.
 **Read the timestamps.** Lines should arrive spread across the run, roughly one
 per image. If every timestamp is identical, the response was buffered somewhere
 and the finding belongs in the issue tracker before the URL is shown to anyone.
 
-Then repeat it in the browser: open the batch tab, submit the same five, and
-confirm the progress bar advances while the run is in flight rather than
-jumping to complete at the end.
+Then repeat it in the browser: open the batch tab, attach the same five images
+in the first picker and their five documents in the second, and confirm two
+things. The page states how many pairs it found before you submit, and the
+progress bar advances while the run is in flight rather than jumping to complete
+at the end.
 
 **8.5 One full batch.** The same, at the configured cap. See section 9.
 
@@ -377,22 +417,50 @@ what turns that around, and until it is done the README's performance claims do
 not change.
 
 - [ ] **`scripts/measure.py` semantics against the deployed URL.** The script
-      as committed imports the engine and runs it in-process; it does not take
-      a URL. Run it inside the task (`aws ecs execute-command`, which needs
-      `enable_execute_command` on the service, currently off) or extend it with
-      an HTTP mode. Either way, record which one, because in-process and
-      through-the-ALB are different measurements.
+      now has two modes and they measure different things. **Record which one
+      produced each figure**, because in-process and through-the-ALB are not the
+      same measurement.
+      - Default, no arguments: imports the engine and runs it in this process.
+        Accuracy, no network. To get that figure from the deployed hardware,
+        run it inside the task (`aws ecs execute-command`, which needs
+        `enable_execute_command` on the service, currently off).
+      - `--batch --url "$URL"`: submits a real batch over HTTP, following the
+        ADR 0009 contract, and prints total wall clock, per-label time, when the
+        first and last lines arrived, the spread between them, and the counts by
+        status and error code. This is the mode for the two batch rows below.
+        It needs `samples/generate_samples.py` to have run, which writes the
+        images and the paired COLA documents.
 - [ ] **NFR-1 end to end through the load balancer.** Median, 95th percentile,
       and maximum over the twelve sample labels, from section 8.3. Report all
       three; a single latency figure is not a measurement
       ([07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 4).
-- [ ] **One full batch at the configured cap**: 300 images plus the CSV. Record
-      total wall clock, whether any line failed, and the peak task memory from
-      the CloudWatch `MemoryUtilization` metric. **The memory number is the one
-      that matters**, because it is what replaces the two estimates in section
-      4.3 with a measurement, and it is what tells you whether 8 GiB was right.
+- [ ] **One full batch at the configured cap**: 300 label images plus 300 COLA
+      documents, which is 600 files in one envelope (ADR 0009).
+
+      ```bash
+      python scripts/measure.py --batch --url "$URL" --copies 25
+      ```
+
+      `--copies 25` repeats the twelve-label sample set under fresh filename
+      stems, so the pairing still holds and no two labels collide. Record total
+      wall clock, whether any line failed, and the peak task memory from the
+      CloudWatch `MemoryUtilization` metric. **The memory number is the one that
+      matters**, because it is what replaces the two estimates in section 4.3
+      with a measurement, and it is what tells you whether 8 GiB was right.
+      **It matters more than it did**: the envelope limit doubled with ADR 0009,
+      from 300 files to 600, and FastAPI parses the whole envelope before the
+      route runs.
+- [ ] **The document parse is inside the per-label cost now.** The sample
+      documents are digitally generated PDFs, so their text layer is read in
+      milliseconds. A scanned document goes through OCR instead, which costs
+      about what reading a label photograph costs, so a batch of scans is
+      roughly twice a batch of text-layer PDFs. If real submissions are scans,
+      measure that separately rather than quoting the sample figure for it.
 - [ ] **The stream arrived progressively**, from section 8.4, recorded as a
-      yes or no with the timestamps that show it.
+      yes or no with the timestamps that show it. `measure.py --batch` prints
+      the spread between the first and last line, which is the same check in one
+      number: a spread near zero is a buffering intermediary, not a fast
+      service.
 - [ ] **A three-photograph single-label submission** (ADR 0007). On a session
       runner one, two and three photographs measured 1.24 s, 2.49 s and 3.83 s
       end to end, so three photographs is inside NFR-1's roughly 5 seconds with

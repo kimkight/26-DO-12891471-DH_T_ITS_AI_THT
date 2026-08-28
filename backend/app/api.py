@@ -20,6 +20,11 @@ and US-23 is the COLA document path. The pipeline both verification routes run
 is in ``app.verify``; the batch reconciliation, worker pool and stream are in
 ``app.batch``; the document parser is in ``app.application_form``. US-2 and
 FR-10 are presentation requirements and are not part of this module.
+
+The batch route takes label images and COLA documents, paired by filename stem
+(FR-8, [ADR 0009](../../docs/adr/0009-batch-cola-documents.md)). It took a CSV
+of application data until ADR 0009 superseded assumption A-14; the parser the
+documents go through is the FR-11 one the single-label route uses.
 """
 
 from __future__ import annotations
@@ -66,8 +71,8 @@ logger = logging.getLogger(__name__)
 #
 # max_part_size is raised alongside it, but note what it does and does not do.
 # The parser applies it to non-file parts only; a file part streams into the
-# spooled file with no cap of its own. So this bounds the batch CSV and the
-# single-label form fields, not the images. Images are bounded exactly, after
+# spooled file with no cap of its own. So this bounds the single-label form
+# fields, not the uploads. Images are bounded exactly, after
 # parsing, by verify.check_size. Note also that the parser takes max_part_size
 # as a constructor argument defaulted to 1 MB and assigns it to the instance, so
 # this class-level value is shadowed on every request; it is set for the case
@@ -80,8 +85,9 @@ router = APIRouter(prefix="/api", tags=["verification"])
 
 # What each upload route accepts as a whole request body, checked from
 # Content-Length before the body is read. The two differ by construction: a
-# batch envelope carries many images plus a CSV, so measuring it against the
-# per-image limit would reject every batch of more than one file. Matching is
+# batch envelope carries many images plus one COLA document each, so measuring
+# it against the per-image limit would reject every batch of more than one
+# label. Matching is
 # exact rather than by prefix for the same reason; a prefix match on
 # "/api/verify" would apply the single-file limit to "/api/verify-batch".
 def _envelope_limit(path: str) -> int | None:
@@ -144,11 +150,13 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     TTB_MAX_UPLOAD_BYTES. Lower TTB_MAX_LABEL_PHOTOS or TTB_MAX_UPLOAD_BYTES to
     tighten it.
 
-    The batch route is measured against its own envelope limit, which is
-    TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default. That bounds the
-    request, not any one image in it: each image is still checked exactly
-    against TTB_MAX_UPLOAD_BYTES after parsing, and an oversize one is that
-    row's error rather than the batch's.
+    The batch route is measured against its own envelope limit, which is twice
+    TTB_MAX_BATCH_FILES times TTB_MAX_UPLOAD_BYTES by default: a batch carries
+    one label image and one COLA document per label (ADR 0009), and each of the
+    two is an upload bounded by the same per-file limit. That bounds the
+    request, not any one file in it: each image and each document is still
+    checked exactly against TTB_MAX_UPLOAD_BYTES after parsing, and an oversize
+    one is that row's error rather than the batch's.
     """
 
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -386,13 +394,9 @@ def _oversize_response(limit: int | None = None) -> JSONResponse:
         413: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },
-    summary="Verify many labels against one CSV of application data",
+    summary="Verify many labels against their COLA documents, paired by filename",
 )
 async def verify_batch(
-    applications: Annotated[
-        UploadFile,
-        File(description="One CSV of application data keyed by image filename (A-14)."),
-    ],
     images: Annotated[
         list[UploadFile],
         # Defaulted rather than required so that a submission with no images at
@@ -401,23 +405,41 @@ async def verify_batch(
         # default is never mutated; FastAPI reads it and builds a new list.
         File(description="Label artwork, one part per image, repeated."),
     ] = [],  # noqa: B006
+    application_documents: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "The COLA documents, one part per document, repeated. Each pairs "
+                "with the image of the same name before its file extension "
+                "(ADR 0009)."
+            )
+        ),
+    ] = [],  # noqa: B006
 ) -> Response:
     """Verify a batch of labels and stream the results (FR-8, NFR-2, ADR 0006).
+
+    **A batch is label images plus COLA documents, paired by filename stem**
+    (ADR 0009). `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`: the
+    stem is the filename with its final extension removed, compared without
+    regard to case. Each document is read by the FR-11 parser and what it says
+    is the application side for that label. There is no CSV: A-14 invented that
+    format and ADR 0009 supersedes it.
 
     The response is `application/x-ndjson`: one JSON object per line, each
     naming the image it belongs to, emitted as each label finishes rather than
     in submission order. Nothing is persisted; the stream is the only copy of
     the results (D-9, NFR-6).
 
-    Three rejections happen before any image is read, and each names what was
+    Four rejections happen before any image is read, and each names what was
     exceeded (FR-9, NFR-7):
 
     * more images than `TTB_MAX_BATCH_FILES`, which is FR-8's third criterion,
       "the request is rejected with a message naming the limit, before any file
       is processed";
+    * more documents than the same limit, for the same reason;
     * a request body over the batch envelope limit, caught in middleware from
       Content-Length before the body is read at all;
-    * an application CSV that cannot serve as application data for any row.
+    * a submission carrying no images, or no documents at all.
 
     Everything else is a per-row error on its own line, which is what keeps one
     bad image from costing an agent the other 299 results (FR-8, US-10).
@@ -426,25 +448,34 @@ async def verify_batch(
     # compared. The bodies are in memory by now, because FastAPI parses the
     # multipart form while resolving these parameters; "before any file is
     # processed" is the guarantee the requirement states and the one kept here.
-    if len(images) > settings.max_batch_files:
-        detail = batch.over_count_error(len(images))
-        return _error(413, detail.code, detail.message, limit=detail.limit)
+    #
+    # Both sides are counted against the same limit, because the limit is on
+    # labels and a batch carries one document per label (A-1, ADR 0009).
+    for count, part in ((len(images), "images"), (len(application_documents), "documents")):
+        if count > settings.max_batch_files:
+            detail = batch.over_count_error(count, part=part)
+            return _error(413, detail.code, detail.message, limit=detail.limit)
 
     if not images:
         return _error(
             422,
             "empty_batch",
-            "No images were submitted. Attach at least one label image and the "
-            "application data CSV.",
+            "No images were submitted. Attach the label images and one COLA "
+            "document for each, named to match.",
         )
 
-    try:
-        table = batch.parse_applications_csv(await applications.read())
-    except batch.ApplicationCsvError as exc:
-        # Batch level rather than per row: with no usable header there is no row
-        # to attach an error to, and repeating one message 300 times down the
-        # stream would tell an agent nothing the first line did not.
-        return _error(422, "invalid_application_csv", exc.message, limit=exc.limit)
+    if not application_documents:
+        # Batch level rather than per row, for the reason the CSV refusal it
+        # replaces was batch level: with no documents at all there is nothing to
+        # compare any label against, and repeating one message 300 times down
+        # the stream would tell an agent nothing the first line did not.
+        return _error(
+            422,
+            "missing_application_documents",
+            "No application documents were submitted. Attach one COLA document "
+            "for each label image, named to match the image before its file "
+            "extension: 0001-stones-throw.png pairs with 0001-stones-throw.pdf.",
+        )
 
     submitted = [
         batch.SubmittedImage(
@@ -455,6 +486,16 @@ async def verify_batch(
         for position, image in enumerate(images)
     ]
     submitted = _name_duplicates(submitted)
+    table = batch.collect_documents(
+        [
+            batch.SubmittedDocument(
+                filename=document.filename or f"document-{position + 1}",
+                content_type=document.content_type,
+                content=await document.read(),
+            )
+            for position, document in enumerate(application_documents)
+        ]
+    )
 
     return StreamingResponse(
         batch.stream(submitted, table),
@@ -478,9 +519,11 @@ def _name_duplicates(images: list[batch.SubmittedImage]) -> list[batch.Submitted
     name without the results becoming ambiguous, and a part with no filename at
     all cannot be reported against anything. Both are renamed to a positional
     label here, so that every line in the stream identifies exactly one
-    submitted part. The renamed part then matches no CSV row and is reported as
-    `missing_application_row`, which names the real problem: the agent has to
-    fix the filenames before the batch can be checked.
+    submitted part. Renaming does not change the pairing stem, which is taken
+    before the parenthetical suffix, so two parts under one filename still share
+    a stem and are both reported as `duplicate_label_stem` (ADR 0009). That
+    names the real problem: the agent has to fix the filenames before the batch
+    can be checked.
     """
     seen: set[str] = set()
     named: list[batch.SubmittedImage] = []

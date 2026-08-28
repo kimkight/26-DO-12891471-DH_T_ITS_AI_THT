@@ -152,19 +152,24 @@ class Settings(BaseSettings):
     def effective_max_batch_bytes(self) -> int:
         """The largest batch envelope accepted, in bytes.
 
-        Derived as ``max_batch_files * max_upload_bytes`` rather than set to a
-        figure of its own, because that product is the largest batch the two
+        Derived as ``2 * max_batch_files * max_upload_bytes`` rather than set to
+        a figure of its own, because that product is the largest batch the
         stated limits already permit, and inventing a smaller number here would
-        impose a third limit no source asks for.
+        impose a further limit no source asks for. The factor of two is
+        ADR 0009: a batch carries one label image and one COLA document per
+        label, and each of the two is an upload bounded by
+        ``max_upload_bytes``. Before ADR 0009 the application side of a whole
+        batch was one CSV of a few kilobytes, and the factor was one.
 
-        Read the arithmetic before deploying: at the defaults this is 300 files
-        times 10 MB, about 3 GiB, and FastAPI has the whole envelope parsed
+        Read the arithmetic before deploying: at the defaults this is 600 files
+        times 10 MB, about 6 GiB, and FastAPI has the whole envelope parsed
         before the route runs. That is a task sizing input, not a memory
-        guarantee. It interacts with OQ-13 item 6 and is recorded there.
+        guarantee, and it is twice what it was. It interacts with OQ-13 item 6
+        and is recorded there.
         """
         if self.max_batch_bytes > 0:
             return self.max_batch_bytes
-        return self.max_batch_files * self.max_upload_bytes
+        return 2 * self.max_batch_files * self.max_upload_bytes
 
 
 settings = Settings()

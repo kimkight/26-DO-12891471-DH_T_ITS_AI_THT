@@ -24,7 +24,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-11](#a-11) | English-only OCR is sufficient | FR-1 | Low |
 | [A-12](#a-12) | Alcohol content must be numerically identical; no tolerance band | FR-7 | Medium |
 | [A-13](#a-13) | Net contents compared only when units match; no conversion | FR-7 | Low |
-| [A-14](#a-14) | Batch application data arrives as one CSV keyed by image filename | FR-8, US-9 | Medium |
+| [A-14](#a-14) | ~~Batch application data arrives as one CSV keyed by image filename~~ **Superseded** by [ADR 0009](adr/0009-batch-cola-documents.md) | FR-8, US-9 | Was medium; it was wrong |
 | [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
 | [A-16](#a-16) | Three photographs of one label is enough, and no source states a number | FR-1, US-22 | Low |
 | [A-17](#a-17) | The COLA form field map, and that three of the five compared values are not items on the form | FR-11, US-23 | Medium |
@@ -268,6 +268,35 @@ possible, which costs agent time only.
 section 2. Marks OQ-5 as closed by assumption A-13.
 
 ## A-14
+**Status: superseded on 2026-08-28 by
+[ADR 0009](adr/0009-batch-cola-documents.md).** A batch submission is label
+images plus COLA documents paired by filename stem. There is no CSV. The
+assumption is kept here in full, below the line, because the reason it existed
+is the reason the replacement is short, and deleting it would leave the batch
+contract looking like something that was always obvious.
+
+**What was wrong with it.** Not the column set, and not the keying on filename.
+What was wrong is the premise: that a CSV of application data exists anywhere.
+Nothing an importer files with TTB produces one. What they file is, per
+application, a COLA form plus label images. To use the batch path an agent would
+have had to type 300 rows of the data they were trying not to type, which is the
+work FR-11 exists to remove. A-14 named exactly what would falsify it, "asking
+Sarah Chen or Janet what an importer actually sends today", and the answer
+turned out to be available without asking, in the shape of the form FR-11 now
+reads.
+
+**What survives it.** The reasoning about identifiers. Filename is still the
+only identifier present on both sides of a submission, so the pairing is still
+keyed on it; ADR 0009 pairs on the stem rather than the whole name so that an
+image and a document can be the same label under different extensions. The
+`beverage_type` reasoning survives too, and is now answered rather than assumed:
+the document supplies it where it states one, and where it does not the row says
+so.
+
+---
+
+*The assumption as originally recorded, 2026-08-24:*
+
 **Batch application data arrives as one CSV keyed by image filename, with the
 columns `filename`, `brand_name`, `class_type`, `alcohol_content`,
 `net_contents`, and `beverage_type`.**
@@ -306,6 +335,10 @@ fixed layout. If it does, that layout wins and this assumption is discarded.
 **Risk if wrong:** medium. It is one input adapter, and the verification core
 does not depend on the format, so the blast radius is a parser and a document.
 The cost of being wrong is rework on FR-8 and US-9 rather than a redesign.
+
+*End of the superseded entry. The risk assessment held: it was one input
+adapter, and replacing it cost a parser call, a route signature and a document
+rather than a redesign.*
 
 ## A-15
 **A word split across a line break by a printer's hyphen is presentation, and

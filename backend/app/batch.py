@@ -1,13 +1,25 @@
-"""Batch verification: CSV reconciliation, a bounded worker pool, an NDJSON stream.
+"""Batch verification: pairing by filename stem, a bounded worker pool, an NDJSON stream.
 
 Governing requirements: FR-8 (many labels in one submission, per-label results,
 the count limit refused before anything is processed, every result naming its
-label, and CSV mismatches reported per row), FR-9 (one unreadable image is that
-row's error, not the batch's), NFR-2 (the batch does not fail as a whole and its
-progress is observable), NFR-6 (nothing is persisted and no field value reaches
-the logs), NFR-7 (the file count is checked before processing).
-Decision reference: [ADR 0006](../../docs/adr/0006-batch-execution-model.md),
-assumption A-14 for the CSV contract.
+label, and pairing failures reported per row), FR-9 (one unreadable image, or
+one unreadable document, is that row's error rather than the batch's), FR-11
+(the application side of every row is read off the applicant's own COLA
+document), NFR-2 (the batch does not fail as a whole and its progress is
+observable), NFR-6 (nothing is persisted and no field value reaches the logs),
+NFR-7 (the file count is checked before processing).
+Decision references: [ADR 0006](../../docs/adr/0006-batch-execution-model.md)
+for the stream, [ADR 0009](../../docs/adr/0009-batch-cola-documents.md) for what
+a batch is made of, [ADR 0008](../../docs/adr/0008-cola-form-as-application-input.md)
+for how one document is read.
+
+**A batch is label images plus COLA documents, paired by filename stem.**
+``0001-stones-throw.png`` pairs with ``0001-stones-throw.pdf``: the stem is the
+filename with its final extension removed, compared without regard to case. Each
+document is read by the FR-11 parser, and what it says is the application side
+for that label. There is no CSV. A-14, which invented one, is superseded by
+ADR 0009: no source ever stated that format, and what an importer actually files
+with TTB is, per application, a COLA form plus label images.
 
 **Why a stream rather than a response body.** ADR 0006 rules out an
 asynchronous job model because D-9 forbids the persistence one needs, and rules
@@ -20,47 +32,57 @@ disk.
 
 **What is deliberately not here.** No retry, no partial resubmission, and no
 resume. A dropped connection loses the batch, which ADR 0006 records as the
-direct cost of having no job store.
+direct cost of having no job store. One photograph per label, too: ADR 0007's
+several photographs of one label stay on the single-label path, because a stem
+that paired several images to one document would need a rule for a group only
+partly readable, and no source asks for one (ADR 0009).
 """
 
 from __future__ import annotations
 
-import csv
-import io
 import logging
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
+from app.application_form import UnreadableDocumentError, parse_application_document
 from app.config import settings
 from app.schemas import BatchLine, ErrorDetail, VerificationResult
-from app.verify import VerificationError, check_media_type, check_size, verify_image
+from app.verify import (
+    VerificationError,
+    check_document_media_type,
+    check_media_type,
+    check_size,
+    document_result,
+    resolve_application,
+    verify_image,
+)
 
 logger = logging.getLogger(__name__)
 
-# The A-14 column contract. `filename` keys the row to an image part; the rest
-# are the application side of the comparison. `beverage_type` is in the contract
-# because A-12 and A-13 need it: the proof cross-check applies to distilled
-# spirits and the range handling for wine cites 27 CFR 4.36, so without the
-# beverage class the tool would have to guess which rule to apply.
-REQUIRED_COLUMNS = (
-    "filename",
-    "brand_name",
-    "class_type",
-    "alcohol_content",
-    "net_contents",
-    "beverage_type",
-)
 
-# The columns fed to the comparison. `beverage_type` is read from the CSV and
-# carried for the rules that need it, but it is not itself a compared field:
-# there are five fields on a label and beverage type is not one of them (FR-1).
-COMPARED_COLUMNS = ("brand_name", "class_type", "alcohol_content", "net_contents")
+def pairing_stem(filename: str) -> str:
+    """The key both sides of a pair are matched on (ADR 0009).
+
+    The filename with its final extension removed, folded to lower case. Case is
+    folded because an agent's file manager and an agent's scanner disagree about
+    it routinely and a pairing that failed on `.PDF` against `.pdf` would be a
+    puzzle rather than an error. Only the final extension is removed, so
+    ``0001-stones-throw.front.png`` has the stem ``0001-stones-throw.front`` and
+    pairs with ``0001-stones-throw.front.pdf`` rather than with
+    ``0001-stones-throw.pdf``.
+
+    Any directory part a browser sends with a `webkitdirectory` selection is
+    dropped, because the pairing is on names rather than on paths.
+    """
+    name = filename.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    base, separator, _ = name.rpartition(".")
+    return (base if separator and base else name).casefold()
 
 
 @dataclass(frozen=True)
 class SubmittedImage:
-    """One image part, already read into memory.
+    """One label image part, already read into memory.
 
     ``content_type`` is kept alongside the bytes because the media type check
     has to happen before anything is decoded (NFR-7), and by this point the
@@ -72,164 +94,168 @@ class SubmittedImage:
     content: bytes
 
 
-@dataclass
-class ApplicationTable:
-    """The parsed CSV, plus what was wrong with it.
+@dataclass(frozen=True)
+class SubmittedDocument:
+    """One COLA document part, already read into memory (FR-11, ADR 0009)."""
 
-    ``duplicates`` is a set rather than a count because a duplicated
-    ``filename`` makes that one row ambiguous and leaves every other row usable.
-    FR-8 asks for "a per-row or batch-level error that names the problem", and
-    per row is the more useful of the two here: one repeated line should not
-    cost an agent the other 299 results.
+    filename: str
+    content_type: str | None
+    content: bytes
+
+
+@dataclass
+class DocumentTable:
+    """The submitted COLA documents, keyed by pairing stem, plus what was wrong.
+
+    ``duplicates`` is a set rather than a count because two documents on one
+    stem make that one pair ambiguous and leave every other pair usable. FR-8
+    asks for "a per-row or batch-level error that names the problem", and per
+    row is the more useful of the two here: one repeated stem should not cost an
+    agent the other 299 results.
     """
 
-    rows: dict[str, dict[str, str]] = field(default_factory=dict)
+    documents: dict[str, SubmittedDocument] = field(default_factory=dict)
     duplicates: set[str] = field(default_factory=set)
 
 
-class ApplicationCsvError(Exception):
-    """The CSV could not be used at all, so no row can be verified.
+def collect_documents(documents: list[SubmittedDocument]) -> DocumentTable:
+    """Key the submitted documents by pairing stem (ADR 0009).
 
-    This is the batch-level half of FR-8's error criterion. A missing header, an
-    unreadable encoding, or a header missing a required column is not a problem
-    with one label; it makes every comparison impossible, so it is refused
-    before any image is read rather than repeated 300 times down the stream.
+    Nothing is parsed here. Reading a document costs about what reading a label
+    photograph costs when it falls back to OCR, so it is done inside the worker
+    pool, per row, where it is both parallelized and attributable to the row it
+    belongs to.
     """
-
-    def __init__(self, message: str, limit: str | None = None) -> None:
-        super().__init__(message)
-        self.message = message
-        self.limit = limit
-
-
-def parse_applications_csv(raw: bytes) -> ApplicationTable:
-    """Read the application CSV into rows keyed by filename (A-14).
-
-    Raises ``ApplicationCsvError`` when the file cannot serve as application
-    data at all. Everything survivable, which is a duplicated filename, is
-    recorded on the table and reported against the row it affects.
-    """
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise ApplicationCsvError(
-            "The application data file could not be read as UTF-8 text. Save it "
-            "as CSV with UTF-8 encoding and submit it again."
-        ) from exc
-
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames is None:
-        raise ApplicationCsvError(
-            "The application data file is empty. It needs a header row and one row per image."
-        )
-
-    present = {(name or "").strip().lower() for name in reader.fieldnames}
-    missing = [column for column in REQUIRED_COLUMNS if column not in present]
-    if missing:
-        raise ApplicationCsvError(
-            "The application data file is missing the column "
-            f"{'s ' if len(missing) > 1 else ' '}"
-            f"{', '.join(missing)}. Check the header row.",
-            limit=f"required columns: {', '.join(REQUIRED_COLUMNS)}",
-        )
-
-    table = ApplicationTable()
-    for row in reader:
-        normalized = {
-            (key or "").strip().lower(): (value or "").strip() for key, value in row.items()
-        }
-        name = normalized.get("filename", "")
-        if not name:
-            # A row with no filename cannot be matched to an image and cannot be
-            # reported against one either, so there is nothing to attach an
-            # error to. It is counted in the log line and otherwise ignored.
+    table = DocumentTable()
+    for document in documents:
+        stem = pairing_stem(document.filename)
+        if not stem:
+            # A part with no usable name cannot be paired with anything and
+            # cannot be reported against a label either. It is counted in the
+            # completion log and otherwise ignored.
             continue
-        if name in table.rows:
-            table.duplicates.add(name)
+        if stem in table.documents:
+            table.duplicates.add(stem)
             continue
-        table.rows[name] = normalized
-
-    if not table.rows:
-        raise ApplicationCsvError(
-            "The application data file has a header row but no usable rows. Each "
-            "row needs a filename matching one of the submitted images."
-        )
+        table.documents[stem] = document
     return table
 
 
-def over_count_error(count: int) -> ErrorDetail:
+def over_count_error(count: int, *, part: str = "images") -> ErrorDetail:
     """The FR-8 refusal, which names the limit and happens before processing."""
     return ErrorDetail(
         code="batch_too_large",
         message=(
-            f"This batch has {count} images, which is more than this service "
+            f"This batch has {count} {part}, which is more than this service "
             "accepts in one submission. Split it into smaller batches and send "
             "them one after another."
         ),
-        limit=f"maximum images per batch: {settings.max_batch_files}",
+        limit=f"maximum labels per batch: {settings.max_batch_files}",
     )
 
 
-def plan(images: list[SubmittedImage], table: ApplicationTable) -> tuple[list[str], int]:
-    """Reconcile the images against the CSV and say how many lines will be emitted.
+def plan(images: list[SubmittedImage], table: DocumentTable) -> tuple[list[str], int]:
+    """Reconcile the two sides and say how many lines will be emitted.
 
-    Returns the CSV filenames that matched no image, and the total line count.
-    The total is known before any OCR runs, which is what lets the first line of
-    the stream carry it and a client render "1 of 300" immediately (NFR-2).
+    Returns the filenames of the documents that paired with no image, and the
+    total line count. The total is known before any OCR runs, which is what lets
+    the first line of the stream carry it and a client render "1 of 300"
+    immediately (NFR-2).
 
     Every submitted image produces exactly one line, whether it verifies or
-    errors, and every unmatched CSV row produces one more. Duplicated image
-    filenames still produce one line each; they are reported as errors rather
-    than verified, because two results under one name would break FR-8's
-    requirement that a result identify which label it belongs to.
+    errors, and every unpaired document produces one more.
     """
-    submitted = [image.filename for image in images]
-    unmatched = [name for name in table.rows if name not in set(submitted)]
-    return unmatched, len(images) + len(unmatched)
+    stems = {pairing_stem(image.filename) for image in images}
+    unpaired = [
+        document.filename for stem, document in table.documents.items() if stem not in stems
+    ]
+    return unpaired, len(images) + len(unpaired)
 
 
-def _row_error(image: SubmittedImage, table: ApplicationTable) -> ErrorDetail | None:
-    """The reconciliation failures that stop one image being verified (FR-8)."""
-    if image.filename in table.duplicates:
+def _row_error(
+    image: SubmittedImage, table: DocumentTable, image_stems: dict[str, int]
+) -> ErrorDetail | None:
+    """The pairing failures that stop one image being verified (FR-8, ADR 0009)."""
+    stem = pairing_stem(image.filename)
+    if image_stems.get(stem, 0) > 1:
         return ErrorDetail(
-            code="duplicate_application_row",
+            code="duplicate_label_stem",
             message=(
-                f"The application data file has more than one row for "
-                f"{image.filename}. Nothing was compared for this label, because "
-                "which row applies is ambiguous. Remove the repeated row."
+                f"More than one image in this batch is named {stem} before its "
+                "file extension, so which label the matching application "
+                "document belongs to is ambiguous. Nothing was compared for this "
+                "label. Give each label a name of its own."
             ),
         )
-    if image.filename not in table.rows:
+    if stem in table.duplicates:
         return ErrorDetail(
-            code="missing_application_row",
+            code="duplicate_application_document",
             message=(
-                f"No row in the application data file has the filename "
-                f"{image.filename}, so there is nothing to compare this label "
-                "against. Add a row for it, or remove the image from the batch."
+                f"More than one application document in this batch is named "
+                f"{stem} before its file extension. Nothing was compared for "
+                "this label, because which document applies is ambiguous. Remove "
+                "the repeated document."
+            ),
+        )
+    if stem not in table.documents:
+        return ErrorDetail(
+            code="missing_application_document",
+            message=(
+                f"No application document in this batch is named {stem} before "
+                f"its file extension, so there is nothing to compare "
+                f"{image.filename} against. Attach a COLA document with that "
+                "name, or remove the image from the batch."
             ),
         )
     return None
 
 
 def _verify_one(
-    image: SubmittedImage, table: ApplicationTable
+    image: SubmittedImage, table: DocumentTable, image_stems: dict[str, int]
 ) -> tuple[str, ErrorDetail | None, VerificationResult | None]:
-    """Verify one image, returning either its result or its error, never raising.
+    """Verify one label against its document, returning a result or an error, never raising.
 
     A raised exception here would kill the stream and take the completed results
     with it, which is the failure NFR-2 names. Every failure becomes this row's
     error instead, which is FR-8's second criterion and FR-9 applied per row.
+
+    The document is read here rather than up front for two reasons. It is where
+    the cost is parallelized, and it is where a document that cannot be read
+    becomes one row's error rather than the batch's.
     """
-    reconciliation = _row_error(image, table)
+    reconciliation = _row_error(image, table, image_stems)
     if reconciliation is not None:
         return image.filename, reconciliation, None
 
-    row = table.rows[image.filename]
-    application = {column: row.get(column, "") for column in COMPARED_COLUMNS}
+    document = table.documents[pairing_stem(image.filename)]
     try:
+        # Both guards run before anything is decoded or parsed (NFR-7).
         check_media_type(image.content_type)
         check_size(image.content)
-        result = verify_image(image.content, application)
+        check_document_media_type(document.content_type)
+        check_size(document.content)
+        try:
+            parsed = parse_application_document(document.content, document.content_type)
+        except UnreadableDocumentError as exc:
+            # FR-9 applied to the document half of the pair. The message names
+            # the document rather than the label, because that is the file the
+            # agent has to do something about, and this row reports no field
+            # outcomes at all.
+            raise VerificationError(
+                code="unreadable_application_document",
+                message=f"{document.filename}: {exc}",
+                status_code=422,
+            ) from exc
+
+        # Nothing is typed on the batch path, so every value is either read off
+        # the document or absent, and the result says which per field (FR-11).
+        application, sources = resolve_application({}, parsed)
+        result = verify_image(
+            image.content,
+            application,
+            application_sources=sources,
+            application_document=document_result(parsed),
+        )
     except VerificationError as exc:
         detail = ErrorDetail(code=exc.code, message=exc.message, limit=exc.limit)
         return image.filename, detail, None
@@ -254,7 +280,7 @@ def _verify_one(
     return image.filename, None, result
 
 
-def stream(images: list[SubmittedImage], table: ApplicationTable) -> Iterator[str]:
+def stream(images: list[SubmittedImage], table: DocumentTable) -> Iterator[str]:
     """Yield one NDJSON line per item, as each finishes (ADR 0006).
 
     Concurrency is bounded by ``settings.effective_batch_workers`` so that a
@@ -267,12 +293,16 @@ def stream(images: list[SubmittedImage], table: ApplicationTable) -> Iterator[st
     OCR being CPU bound and in-process (ADR 0003) means there is nothing for an
     async version to await.
     """
-    unmatched, total = plan(images, table)
+    unpaired, total = plan(images, table)
+    image_stems: dict[str, int] = {}
+    for image in images:
+        stem = pairing_stem(image.filename)
+        image_stems[stem] = image_stems.get(stem, 0) + 1
     emitted = 0
 
-    # Unmatched CSV rows need no work, so they go out first and the stream
+    # Unpaired documents need no work, so they go out first and the stream
     # starts immediately rather than after the first image finishes.
-    for name in unmatched:
+    for name in unpaired:
         emitted += 1
         yield _line(
             BatchLine(
@@ -281,11 +311,11 @@ def stream(images: list[SubmittedImage], table: ApplicationTable) -> Iterator[st
                 total=total,
                 status="error",
                 error=ErrorDetail(
-                    code="unmatched_application_row",
+                    code="unmatched_application_document",
                     message=(
-                        f"The application data file has a row for {name} but no "
-                        "image with that filename was submitted. Nothing was "
-                        "checked for it."
+                        f"{name} is an application document with no label image "
+                        "of the same name in this batch. Nothing was checked for "
+                        "it."
                     ),
                 ),
             )
@@ -293,7 +323,7 @@ def stream(images: list[SubmittedImage], table: ApplicationTable) -> Iterator[st
 
     failures = 0
     with ThreadPoolExecutor(max_workers=settings.effective_batch_workers) as pool:
-        futures = [pool.submit(_verify_one, image, table) for image in images]
+        futures = [pool.submit(_verify_one, image, table, image_stems) for image in images]
         try:
             for future in as_completed(futures):
                 filename, error, result = future.result()
@@ -317,14 +347,16 @@ def stream(images: list[SubmittedImage], table: ApplicationTable) -> Iterator[st
             for future in futures:
                 future.cancel()
 
-    # NFR-6: counts only. No filename, no image content, no field value.
+    # NFR-6: counts only. No filename, no image content, no field value, and
+    # nothing any document said.
     logger.info(
         "batch completed",
         extra={
             "images": len(images),
-            "unmatched_rows": len(unmatched),
-            "duplicate_rows": len(table.duplicates),
-            "failures": failures + len(unmatched),
+            "documents": len(table.documents),
+            "unpaired_documents": len(unpaired),
+            "duplicate_documents": len(table.duplicates),
+            "failures": failures + len(unpaired),
             "workers": settings.effective_batch_workers,
         },
     )
