@@ -528,6 +528,121 @@ OQ-7 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
 ---
 
+### US-24 Start from the application document, not from five empty boxes
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | FR-11, FR-2, FR-9, NFR-4, NFR-5 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's own use of the deployed prototype, 2026-08-28 |
+
+**As a** compliance agent who is holding the applicant's COLA document when I
+sit down to check a label,
+**I want** the tool to start from that document rather than from five empty text
+boxes,
+**so that** I spend my attention confirming what the application says instead of
+copying it.
+
+**Acceptance criteria**
+
+```
+Given the single-label view on load
+When  I look at it
+Then  the application document upload is the application-side input on screen
+And   it comes directly after the photo picker
+And   it is not worded as the alternative to typing
+And   the five typed fields are collapsed behind "Or type the application values"
+```
+
+```
+Given no application document at hand
+When  I open "Or type the application values"
+Then  the five fields appear and I can type them
+```
+
+```
+Given a document that was read and left gaps
+When  the read finishes
+Then  the fields open on their own
+And   the values it did carry are filled in and marked as read from the form
+And   the gaps are empty and waiting
+And   the expansion is announced
+```
+
+```
+Given a document that could not be read
+When  the read fails
+Then  the message names the problem
+And   the fields open as the fallback
+And   the expansion is announced
+```
+
+```
+Given a document that carried every value
+When  the read finishes
+Then  nothing opens, because there is nothing left for me to enter
+```
+
+```
+Given a value read off the document and the same value typed by me
+When  I run the check
+Then  my typed value is used, exactly as before
+```
+
+```
+Given the beverage type
+When  I look for it
+Then  it is inside the disclosure and not the first field I meet
+And   it says it is not compared against the label
+```
+
+```
+Given a keyboard alone
+When  I reach the disclosure
+Then  it is reachable with visible focus
+And   its expanded or collapsed state is announced correctly
+```
+
+The question this story exists for is the author's, from using the deployed
+prototype: when would the typed fields actually be used? Walked through from the
+agent's chair, the answer is almost never as a starting point. US-23 built the
+upload and left the layout saying the opposite of what US-23 had learned: five
+empty boxes first, and the document offered "instead". This story inverts that.
+The flow the empty state now describes is the flow the batch tab has told from
+the day ADR 0009 landed: photographs, then the application, then check.
+
+**Three expansion cases, and only three.** The agent opens the disclosure; a
+parsed document leaves gaps; a document fails to parse. A document that supplies
+everything opens nothing, because there is nothing left to enter and the upload's
+own summary already says what it read. Nothing ever closes the disclosure except
+the agent, and no expansion moves focus: the parse can return while the agent is
+reading something else, so it is announced to a live region instead.
+
+Gaps are the normal case rather than the exceptional one. TTB F 5100.31
+(04/2023) has no box for the class or type designation or the alcohol content at
+all, and carries the net contents only when it is blown, branded or embossed on
+the container (A-17). So the second expansion case is what an agent attaching the
+form proper will meet every time, and the fields appear with the parsed values in
+place and the gaps empty.
+
+**Nothing about precedence changes.** FR-11's rule stands: a value the agent
+typed wins over the same value read off the document, and the response says which
+it was. There is no API change in this story.
+
+**Beverage type is demoted rather than removed.** It is never compared. It says
+which numeric rule to expect, the A-12 proof cross-check for spirits or A-13
+range handling for wine, and nothing else. In the engine those rules key off the
+value rather than off this control: the proof cross-check fires when the label
+itself states a proof, and range handling fires when the value carries a range.
+The rule that actually ran is named in the field result's own reason, which is
+the honest place for it, so the control fills from the document when the document
+states it and otherwise sits at the bottom of the disclosure.
+
+---
+
 ## Epic D: Platform, security, and deployment
 
 ### US-14 Work behind a firewall that blocks outbound traffic

@@ -878,6 +878,53 @@ main {
 }
 
 /*
+ * The disclosure over the typed application values (US-24).
+ *
+ * The document above it is the primary input, so this control has to read as a
+ * way in rather than as a skipped step: a quiet button with a rotating marker,
+ * not a link and not a heading. The marker is a triangle drawn in CSS and is
+ * `aria-hidden` in the markup, because the button's own aria-expanded already
+ * says which way it points. Its rotation is a transition, so anyone who has
+ * asked for reduced motion gets the same two positions without the movement,
+ * through the global rule earlier in this file.
+ */
+.disclosure {
+  margin: 0 0 1.5rem;
+}
+
+.disclosure__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-right: 0;
+  font-weight: 600;
+}
+
+.disclosure__marker {
+  width: 0;
+  height: 0;
+  border-top: 0.3125rem solid transparent;
+  border-bottom: 0.3125rem solid transparent;
+  border-left: 0.375rem solid currentColor;
+  transition: transform 120ms ease;
+}
+
+.disclosure__toggle[aria-expanded='true'] .disclosure__marker {
+  transform: rotate(90deg);
+}
+
+/*
+ * The panel is padded and ruled on its leading edge so that, once open, the
+ * fields read as belonging to the control that opened them rather than as a
+ * second form. `hidden` in the markup does the hiding; nothing here fights it.
+ */
+.disclosure__panel {
+  margin-top: 1rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--border);
+}
+
+/*
  * The per-field mark, as a chip. Text, not a colour swatch: NFR-5's greyscale
  * rule means every state the interface reports has to survive having its colour
  * removed, and this one is bound to its input through aria-describedby so it is

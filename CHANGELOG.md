@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - unreleased until tagged
+
+**This section collects everything below it and is the release the author cuts
+after the pull requests from 2026-08-28 merge.** It is dated when the tag is
+created, not before. The version is bumped in `backend/app/__init__.py`,
+`backend/pyproject.toml` and `frontend/package.json`, so the deployed build
+identifies itself as 1.0.0 through `GET /api/health` rather than as 0.1.0, which
+named a build from before most of what is in it. The release procedure, and the
+fact that **publishing the release is what deploys rather than the tag itself**,
+are in [docs/08_SDLC_PROCESS.md](docs/08_SDLC_PROCESS.md) section 7.
+
 ### Added
 
 - **The batch takes COLA documents, and the CSV is gone** (FR-8 rewritten,
@@ -576,6 +587,84 @@ are closed out in [docs/DEPENDENCY_TRIAGE_2026-08.md](docs/DEPENDENCY_TRIAGE_202
 Both were merged by the author on 2026-08-28, in the order the sixth triage
 recommended, and each subsection now ends with the merge commit that closed it.
 
+- **The application document comes first, and the typed fields are behind a
+disclosure** (FR-11, FR-2, FR-9, NFR-4, NFR-5, US-24,
+[#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74)).
+The author's question, from using the deployed prototype: when would the typed
+fields actually be used? Walked through from the agent's chair, the answer is
+almost never as a starting point. The normal case is an agent holding the COLA
+document, and then the five fields are a confirmation surface rather than a
+data-entry task. The layout said the opposite. Five empty text boxes greeted the
+agent and the upload was styled as the alternative, worded "instead". It is
+inverted.
+
+**The upload is the primary application-side input on the single-label view**,
+directly after the photo picker, and no longer framed as the alternative to
+typing. FR-11's title changes with it, from "accepted as an input, instead of
+typed" to "the input, with typing as the fallback", because which one is the
+default is a requirement rather than a layout preference.
+
+**The typed fields live under "Or type the application values", collapsed by
+default, and open in exactly three cases.** The agent opens the disclosure, with
+no document at hand. A parsed document leaves gaps, which is the normal outcome
+rather than an error: TTB F 5100.31 (04/2023) has no box for the class or type
+designation or the alcohol content at all and carries the net contents only when
+it is blown, branded or embossed (A-17), so the fields appear with the parsed
+values filled and the gaps empty. Or a document fails to parse, and the fields
+open as the fallback FR-9's message already promised. A document that supplies
+every value opens nothing, because there is nothing left to enter. Nothing but
+the agent ever closes it, and no expansion moves focus: the parse can return
+while the agent is reading something else, so each auto-expansion is announced to
+a live region of its own instead.
+
+**Parsed values keep today's behaviour exactly**, and there is no API change.
+Shown filled, marked "Read from the application form", editable, and FR-11's
+precedence unchanged: a typed value always wins, and the response still says
+which it was.
+
+**Beverage type is demoted.** It is never compared; it says which numeric rule to
+expect and nothing else. It fills from the document when the document states it
+and otherwise sits at the bottom of the disclosure, so it is no longer the first
+field an agent meets. Written down while doing it, because the requirement text
+and the engine did not quite agree: the rules key off the value rather than off
+this control. A-12's proof cross-check fires when the label itself states a
+proof, and A-13's range handling fires when the value carries a range. The rule
+that actually ran is named in the field result's own reason line, which is where
+an agent reads it.
+
+**Accessibility is regression-gated as always.** The disclosure is a button with
+`aria-expanded` and `aria-controls` rather than a styled `<details>`, because the
+open state has to be settable from the two document cases as well as from the
+control. Collapsed, the panel is `hidden`, so the five fields leave the tab order
+and the accessibility tree together rather than one without the other. axe-core
+runs over the built page in both states, the keyboard walk covers the control and
+its visible focus, and outcomes keep text plus shape.
+
+The batch tab is untouched: it has told this story since ADR 0009, taking
+documents only and asking for no typing. The single-label empty state now tells
+the same one, photographs then the application then check.
+
+Nineteen new component tests in `frontend/src/__tests__/applicationFirst.test.tsx`
+cover the collapsed default and the three expansion cases by name, and two new
+accessibility tests cover the collapsed and expanded page and the gap case
+end to end. The existing prefill and precedence tests are unchanged in behaviour.
+UAT rows 46 to 53 carry the same cases for a person to run.
+- **The application version is 1.0.0**, declared in `backend/app/__init__.py`,
+`backend/pyproject.toml` and `frontend/package.json`, so `GET /api/health`
+reports the version of the build being reviewed. `frontend/package-lock.json` is
+regenerated with it. The backend lock files were regenerated too and came back
+byte-identical, because they carry no entry for the project itself and a
+version-only bump does not move the resolved dependency set.
+- `docs/08_SDLC_PROCESS.md` section 7 is corrected against the deploy workflow as
+it exists rather than the workflow being changed to match it. Two things were
+wrong. The section said the workflow triggers on the `v*` tag "once that workflow
+is enabled"; the workflow is enabled, and it triggers on `workflow_dispatch` and
+on `release` with `types: [published]`, never on a pushed tag. **Publishing the
+release is what deploys, and a tag created without publishing deploys nothing.**
+And the release procedure led with cutting a `release/*` branch, which v1.0.0
+does not do: the version bump and the changelog section are prepared on
+`develop`, and a release branch is now written as the exception it is, for when
+`develop` has to keep moving while a release settles.
 ### Changed
 
 - **The interface is modern, and the palette is not.** The author reviewed the
@@ -1041,5 +1130,6 @@ advisories against the transitive `starlette` version they resolved to.
 See OQ-3.
 - Container base images are pinned by tag rather than by digest.
 
-[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v0.1.0...develop
+[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v1.0.0...develop
+[1.0.0]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/releases/tag/v0.1.0
