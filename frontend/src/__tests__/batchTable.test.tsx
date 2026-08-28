@@ -15,6 +15,7 @@ import { BatchTab } from '../components/BatchTab'
 import { BatchTable } from '../components/BatchTable'
 import { resultsToCsv } from '../lib/csv'
 import { rowOutcome } from '../lib/outcomes'
+import { plainMessage } from '../lib/plainLanguage'
 import { batchLine } from './fixtures'
 import type { BatchLine } from '../types'
 
@@ -295,5 +296,45 @@ describe('the downloadable CSV', () => {
     const line = batchLine('x.png', 1, 1, ['match', 'match', 'match', 'match', 'match'])
     line.result!.fields[0].label_value = '=1+1'
     expect(resultsToCsv([line])).toContain("'=1+1")
+  })
+})
+
+/*
+ * The batch error codes and their plain-language lines (FR-9, NFR-4).
+ *
+ * `plainMessage` falls back to a generic sentence for a code it does not know,
+ * which is the right behaviour at runtime and the wrong thing to discover in
+ * production: a code the server emits and this table has never heard of reads
+ * as "we could not check this label" when the real problem is a filename. So
+ * the codes ADR 0009 defines are listed here and asserted to have a line of
+ * their own. The list is the contract; adding a code to `app/batch.py` without
+ * adding it here fails this test.
+ */
+describe('every batch error code an agent can meet has a plain-language line', () => {
+  const CODES = [
+    'batch_too_large',
+    'empty_batch',
+    'missing_application_documents',
+    'missing_application_document',
+    'unmatched_application_document',
+    'duplicate_application_document',
+    'duplicate_label_stem',
+    'unreadable_application_document',
+    'unsupported_application_document',
+    'unsupported_media_type',
+    'file_too_large',
+    'unreadable_image',
+    'verification_failed',
+  ]
+
+  const FALLBACK = plainMessage('a-code-that-does-not-exist')
+
+  it.each(CODES)('%s reads as something other than the fallback', (code) => {
+    expect(plainMessage(code)).not.toBe(FALLBACK)
+  })
+
+  it('the pairing failures name the file extension rule an agent has to act on', () => {
+    expect(plainMessage('missing_application_documents')).toContain('.pdf')
+    expect(plainMessage('missing_application_document')).toContain('same name')
   })
 })

@@ -21,15 +21,21 @@ const MESSAGES: Record<string, string> = {
     "We couldn't read any of the photos of this label. Try clearer photos, in better light.",
   too_many_photos: 'That is more photos than we can read for one label. Remove one and try again.',
   batch_too_large: 'That is too many labels for one batch. Split it and send them in groups.',
-  empty_batch: 'No label images were attached. Choose the images, then the application data file.',
-  invalid_application_csv:
-    'We could not read the application data file. Check that it is a CSV with the expected columns.',
+  empty_batch: 'No label images were attached. Choose the images, then a COLA document for each.',
   invalid_submission: 'Something the check needs was missing from the form.',
   malformed_upload: 'The upload did not arrive in one piece. Try sending it again.',
-  missing_application_row: 'No row in the application data file matches this image.',
-  unmatched_application_row: 'The application data file lists this file, but it was not attached.',
-  duplicate_application_row:
-    'The application data file has more than one row for this image, so nothing was compared.',
+  // The batch pairing failures (ADR 0009). Each names the file the agent has to
+  // do something about, because a batch of 300 is not a place to go hunting.
+  missing_application_documents:
+    'No COLA documents were attached. Each label image needs one with the same name, so photo.png goes with photo.pdf.',
+  missing_application_document:
+    'No COLA document has the same name as this image, so there was nothing to compare it against.',
+  unmatched_application_document:
+    'This COLA document has no label image with the same name, so nothing was checked for it.',
+  duplicate_application_document:
+    'More than one COLA document has this name, so which one applies is unclear and nothing was compared.',
+  duplicate_label_stem:
+    'More than one image has this name before its file extension, so which label the document belongs to is unclear.',
   verification_failed: "We couldn't check this label. Try submitting it on its own.",
   unsupported_application_document:
     'That file is not one we can read as a label application. Send a PDF, or a photo or scan of the form.',
