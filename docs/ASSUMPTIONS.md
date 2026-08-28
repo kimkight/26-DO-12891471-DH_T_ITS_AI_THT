@@ -475,8 +475,8 @@ inferred from the requirement text. Nothing is fetched at runtime.
 | Brand name | Item 6, "BRAND NAME (Required)" | `6. BRAND NAME (Required)` |
 | Fanciful name (carried, not compared) | Item 7, "FANCIFUL NAME (If any)" | `7. FANCIFUL NAME (If any)` |
 | Beverage type | Item 5, "TYPE OF PRODUCT (Required)": WINE, DISTILLED SPIRITS, MALT BEVERAGES | `Check Box22`, one radio group, export values `Wine`, `Spirits`, `Malt` |
-| Class or type designation | **Not an item.** On the labels affixed to the application; on a Public COLA Registry printout as `CLASS/TYPE` | none |
-| Class or type code (recorded, not compared) | **Not an item.** On a Registry printout, printed before the description | none |
+| Class or type designation | **Not an item.** On the labels affixed to the application; on a Public COLA Registry printout as `CLASS/TYPE`, or, as the author observed on 2026-08-28, as `Class/Type Description` | none |
+| Class or type code (recorded, not compared) | **Not an item.** On a Registry printout, printed before the description, either joined to it by a dash or on its own `Class/Type Code` line | none |
 | Alcohol content | **Not an item.** On the labels affixed to the application; on a Registry printout as `ALCOHOL CONTENT` | none |
 | Net contents | Item 15 **only** when blown, branded or embossed on the container and not on the labels; otherwise on the labels, and on a Registry printout as `NET CONTENTS` | `15.  SHOW ANY INFORMATION THAT IS BLOWN, BRANDED, OR EMBOSSED ON THE CONTAINER (e.g., net contents) ONLY IF IT DOES NOT APPEAR ON THE LABELS` |
 
@@ -498,11 +498,24 @@ them (NFR-6, OOS-6).
    the value has to be entered.
 2. **That a Registry printout labels its rows `BRAND NAME`, `FANCIFUL NAME`,
    `CLASS/TYPE`, `ALCOHOL CONTENT` and `NET CONTENTS`.** This is the weakest
-   link in the map. The blank form was downloaded and read; a Registry detail
-   page was not, because the only real ones are real applicants' records and the
-   no-personal-data rule forbids committing one as a fixture. The parser matches
-   those captions case-insensitively, tolerantly, and at the start of a line.
-   Tracked as OQ-22.
+   link in the map, and part of it has since been corrected by evidence. The
+   blank form was downloaded and read; a Registry detail page was not, because
+   the only real ones are real applicants' records and the no-personal-data rule
+   forbids committing one as a fixture. The parser matches those captions
+   case-insensitively, tolerantly, and at the start of a line. Tracked as OQ-22.
+
+   **What the evidence corrected, 2026-08-28.** A printout the author put
+   through the deployed prototype captions the class or type
+   `Class/Type Description:`, and prints the code on a separate
+   `Class/Type Code:` line rather than joined to the description by a dash. The
+   parser's tolerant caption matching made that worse rather than safer: it
+   matched the `Class/Type` prefix and kept `Description:` as the head of the
+   value, so the class or type compared against the label was
+   `Description: Kentucky Straight Bourbon Whiskey`. The reader now removes a
+   residual caption word left at the front of a value, and reads a separate code
+   line. What this shows about the assumption is that a caption which *partly*
+   matches is the dangerous case, not the one that does not match at all; the
+   risk paragraph below is corrected accordingly.
 3. **That a class or type printed as `141 - BOURBON WHISKY` is a code followed
    by a description.** The description is what is compared; the code is
    recorded and reported and compared against nothing.
@@ -519,7 +532,11 @@ application and a real Registry printout, which the author could not do without
 using an applicant's record. Ask Sarah Chen or Jenny Park which of the two
 documents an agent actually has in front of them, and on which editions.
 
-**Risk if wrong:** medium. A wrong caption means a value reads as not found and
-the agent types it, which is where they started; it does not produce a wrong
-comparison, because every parsed value is shown for confirmation in an editable
-field before the check runs (ADR 0008).
+**Risk if wrong:** medium. A caption that does not match at all means the value
+reads as not found and the agent types it, which is where they started. A
+caption that matches *in part* is the worse case, and it is not hypothetical:
+2026-08-28 produced a prefilled value carrying a caption word, which an agent
+who accepted the prefill would have compared against the label. In both cases
+every parsed value is shown for confirmation in an editable field before the
+check runs (ADR 0008), so the agent can see and correct it; that is the control,
+and it is a control that depends on the agent reading what was prefilled.

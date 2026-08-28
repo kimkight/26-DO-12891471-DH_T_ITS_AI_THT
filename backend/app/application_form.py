@@ -283,9 +283,15 @@ _VALUE_CAPTIONS: dict[str, re.Pattern[str]] = {
     "fanciful_name": re.compile(
         r"^\s*(?:item\s+)?(?:7\s*[.)]\s*)?fanciful\s+name\b", re.IGNORECASE
     ),
-    # Not an item on the form. A Public COLA Registry printout carries it.
+    # Not an item on the form. A Public COLA Registry printout carries it, and
+    # captions it "Class/Type Description" alongside a separate
+    # "Class/Type Code". The negative lookahead is what keeps the code line from
+    # being read as the designation: without it the code line is matched first,
+    # because it is printed first, and the description is never reached.
     "class_type": re.compile(
-        r"^\s*class\s*(?:/|\s+or\s+|\s+)\s*type(?:\s+designation)?\b", re.IGNORECASE
+        r"^\s*class\s*(?:/|\s+or\s+|\s+)\s*type(?:\s+(?:designation|description))?\b"
+        r"(?!\s*code\b)",
+        re.IGNORECASE,
     ),
     "alcohol_content": re.compile(r"^\s*alcohol\s+content\b", re.IGNORECASE),
     "net_contents": re.compile(r"^\s*net\s+contents\b", re.IGNORECASE),
@@ -331,6 +337,34 @@ _STOP_CAPTIONS = re.compile(
 _CAPTION_QUALIFIER = re.compile(
     r"^\s*[(\[{]\s*(?:required|if\s+any|if\s+on\s+label)\s*[)\]}1|]?", re.IGNORECASE
 )
+
+# A caption word left over after the caption above has matched.
+#
+# **Why this exists.** A Public COLA Registry printout does not print
+# "Class/Type:". It prints "Class/Type Description: Kentucky Straight Bourbon
+# Whiskey", and the caption pattern that matched "Class/Type" left "Description:"
+# at the front of the value, so the class or type was read as
+# "Description: Kentucky Straight Bourbon Whiskey" and compared against the
+# label as that. The residue is stripped here rather than by lengthening every
+# caption pattern, because the same three words attach to more than one caption
+# and no value is one of them on its own.
+#
+# Anchored, and applied only to what is left after a caption has matched, so a
+# value that merely contains one of these words keeps it.
+_RESIDUAL_CAPTION_WORDS = re.compile(
+    r"^[\s:.\-–]*(?:description|designation|code)\b", re.IGNORECASE
+)
+
+# "Class/Type Code: 141", which a registry printout prints beside the
+# description. Read separately so the code is still recorded where a printout
+# splits it from the designation rather than writing "141 - BOURBON WHISKY" on
+# one line.
+_CLASS_TYPE_CODE_CAPTION = re.compile(
+    r"^\s*class\s*(?:/|\s+or\s+|\s+)\s*type\s+code\b", re.IGNORECASE
+)
+
+# The code itself, taken from the head of that caption's value.
+_LEADING_CODE = re.compile(r"^(\d{1,4})\b")
 
 # The three product types item 5 offers, in the words this application uses.
 _PRODUCT_TYPE_WORDS = {
@@ -438,8 +472,20 @@ def _from_lines(lines: list[OcrLine]) -> ParsedApplication:
         else:
             values[name] = found
 
+    if code is None:
+        code = _class_type_code(texts)
+
     values["beverage_type"] = _sole_product_type(texts)
     return ParsedApplication(values=values, fanciful_name=fanciful, class_type_code=code)
+
+
+def _class_type_code(texts: list[str]) -> str | None:
+    """The code from a "Class/Type Code" caption, where the document splits it out."""
+    captioned = _value_for(texts, _CLASS_TYPE_CODE_CAPTION)
+    if not captioned:
+        return None
+    digits = _LEADING_CODE.match(captioned)
+    return digits.group(1) if digits else None
 
 
 def _value_for(texts: list[str], caption: re.Pattern[str]) -> str | None:
@@ -466,15 +512,32 @@ def _value_for(texts: list[str], caption: re.Pattern[str]) -> str | None:
             if not candidate or _STOP_CAPTIONS.match(candidate):
                 break
             collected.append(candidate)
-        joined = " ".join(collected).strip()
+        # The residue is stripped here too, for the document that wraps a
+        # caption onto two lines and prints "Description: ..." on the second.
+        joined = _strip_residual_caption(" ".join(collected).strip()).lstrip(" :-–\t").strip()
         return joined or None
     return None
 
 
 def _strip_qualifier(text: str) -> str:
-    """Drop a caption's own instruction and separator from the value."""
+    """Drop a caption's own instruction, its residual words, and the separator."""
     text = _CAPTION_QUALIFIER.sub("", text)
+    text = _strip_residual_caption(text)
     return text.lstrip(" :-–\t").strip()
+
+
+def _strip_residual_caption(text: str) -> str:
+    """Remove caption words the matched pattern left behind.
+
+    Repeated rather than applied once, because a caption can carry more than one
+    of them ("Class/Type Designation Description"). Each pass shortens the
+    string, so this terminates.
+    """
+    while True:
+        shortened = _RESIDUAL_CAPTION_WORDS.sub("", text, count=1)
+        if shortened == text:
+            return text
+        text = shortened
 
 
 def _sole_product_type(texts: list[str]) -> str | None:

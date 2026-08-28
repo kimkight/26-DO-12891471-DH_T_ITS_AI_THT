@@ -645,6 +645,25 @@ workflow, and the still-undeployed URL.
 
 ### Fixed
 
+- A Public COLA Registry printout left a caption word inside the class or type
+designation it supplied. In the author's deployed-target test on 2026-08-28, a
+printout carrying the line `Class/Type Description: Kentucky Straight Bourbon
+Whiskey` produced the class or type value `Description: Kentucky Straight
+Bourbon Whiskey`, and that is what the label was compared against. The caption
+pattern matched `Class/Type` and stopped there, so the rest of the caption
+became the head of the value.
+
+After a value caption matches, a residual caption word at the front of what is
+left, `Description`, `Designation` or `Code`, and its separator, are now removed
+before the value is taken. The rule is applied where the caption matched rather
+than by lengthening each caption pattern, because those three words attach to
+more than one caption and no value is one of them on its own; it is anchored, so
+a value that merely contains one of the words keeps it. A printout that splits
+the code onto its own `Class/Type Code:` line is read too, and the code is still
+reported beside the designation rather than in place of it. This is a defect fix
+against FR-11 and A-17, covered by
+`backend/tests/test_application_form.py::TestARegistryPrintoutWithDescriptiveCaptions`
+and `::TestCaptionResidueInGeneral`, and by UAT row 36.
 - The alcohol content was read from any percent on the label, including one in
 marketing copy. In the author's three-photograph bottle test against the
 deployed prototype on 2026-08-27 the field came back as `7%`, taken from a

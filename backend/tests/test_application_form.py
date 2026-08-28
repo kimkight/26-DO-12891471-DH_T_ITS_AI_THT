@@ -141,6 +141,115 @@ class TestARegistryPrintout:
         assert parsed.fanciful_name == "Small Batch Reserve"
 
 
+class TestARegistryPrintoutWithDescriptiveCaptions:
+    """The caption shape the author read off a deployed-target printout.
+
+    Deployed-target evidence, 2026-08-28: a printout carrying the line
+    "Class/Type Description: Kentucky Straight Bourbon Whiskey" was parsed as
+    "Description: Kentucky Straight Bourbon Whiskey". The caption pattern matched
+    "Class/Type" and left the rest of the caption at the front of the value, so
+    the class or type compared against the label was the caption word plus the
+    designation. This is a defect against FR-11 and A-17.
+    """
+
+    BOURBON = ApplicationSpec(
+        brand_name="STONE'S THROW",
+        fanciful_name="Small Batch Reserve",
+        beverage_type="distilled spirits",
+        class_type="Kentucky Straight Bourbon Whiskey",
+        class_type_code="141",
+        alcohol_content="45% ALC/VOL",
+        net_contents="750 ML",
+    )
+
+    @pytest.fixture
+    def parsed(self):
+        pdf = as_pdf_bytes(registry_printout_lines(self.BOURBON, captions="descriptive"))
+        return parse_application_document(pdf, "application/pdf")
+
+    def test_the_caption_word_is_not_left_in_the_class_or_type(self, parsed):
+        assert parsed.values["class_type"] == "Kentucky Straight Bourbon Whiskey"
+
+    def test_the_code_is_still_captured_separately(self, parsed):
+        """Split across its own caption here, rather than joined by a dash."""
+        assert parsed.class_type_code == "141"
+
+    def test_the_brand_name_is_unaffected(self, parsed):
+        """A caption with no residual word keeps reading exactly as it did."""
+        assert parsed.values["brand_name"] == "STONE'S THROW"
+
+    def test_the_other_captions_still_read(self, parsed):
+        assert parsed.values["alcohol_content"] == "45% ALC/VOL"
+        assert parsed.values["net_contents"] == "750 ML"
+        assert parsed.fanciful_name == "Small Batch Reserve"
+
+    def test_nothing_is_explained_away_that_was_found(self, parsed):
+        assert not [note for note in parsed.notes if "class or type" in note]
+
+
+class TestCaptionResidueInGeneral:
+    """The rule, exercised without going through a PDF.
+
+    ``_from_lines`` is the seam every one of the three ways in converges on, so
+    a line-level test states the rule once rather than three times.
+    """
+
+    @staticmethod
+    def _read(lines: list[str]):
+        from app.application_form import _from_lines
+        from app.ocr import OcrLine
+
+        return _from_lines(
+            [
+                OcrLine(text=text, confidence=0.0, height=0.0, top=position)
+                for position, text in enumerate(lines)
+            ]
+        )
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Class/Type Description: Kentucky Straight Bourbon Whiskey",
+            "CLASS/TYPE DESIGNATION: Kentucky Straight Bourbon Whiskey",
+            "Class or Type Description - Kentucky Straight Bourbon Whiskey",
+        ],
+    )
+    def test_each_caption_shape_yields_the_designation_alone(self, line):
+        assert self._read([line]).values["class_type"] == "Kentucky Straight Bourbon Whiskey"
+
+    def test_a_brand_name_is_not_touched(self):
+        assert self._read(["Brand Name: STONE'S THROW"]).values["brand_name"] == "STONE'S THROW"
+
+    def test_a_value_that_merely_contains_a_caption_word_keeps_it(self):
+        """Anchored, so only a leading residue is removed."""
+        parsed = self._read(["Class/Type Description: Whisky Specialty, Code Named"])
+        assert parsed.values["class_type"] == "Whisky Specialty, Code Named"
+
+    def test_the_code_line_is_not_read_as_the_designation(self):
+        """It is printed first, so without the rule it would win the caption."""
+        parsed = self._read(
+            [
+                "Class/Type Code: 141",
+                "Class/Type Description: Kentucky Straight Bourbon Whiskey",
+            ]
+        )
+        assert parsed.values["class_type"] == "Kentucky Straight Bourbon Whiskey"
+        assert parsed.class_type_code == "141"
+
+    def test_the_joined_form_still_splits_the_code_from_the_description(self):
+        parsed = self._read(["CLASS/TYPE: 141 - BOURBON WHISKY"])
+        assert parsed.class_type_code == "141"
+        assert parsed.values["class_type"] == "BOURBON WHISKY"
+
+    def test_a_caption_wrapped_onto_a_second_line_is_read_the_same_way(self):
+        parsed = self._read(["CLASS/TYPE", "Description: Kentucky Straight Bourbon Whiskey"])
+        assert parsed.values["class_type"] == "Kentucky Straight Bourbon Whiskey"
+
+    def test_a_caption_carrying_only_residue_reports_not_found(self):
+        """An empty box is not found, not the caption word (FR-1)."""
+        assert self._read(["Class/Type Description:"]).values["class_type"] is None
+
+
 class TestAFilledInFillableForm:
     """An applicant's filled copy keeps its values in AcroForm fields."""
 
