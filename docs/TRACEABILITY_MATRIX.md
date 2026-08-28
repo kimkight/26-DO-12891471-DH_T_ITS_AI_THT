@@ -103,7 +103,7 @@ The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9 and FR-11,
 NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 264 backend tests.
 The agent-facing interface (FR-10, FR-11, NFR-4, NFR-5) is built and covered by
-141 component tests, a computed-contrast test over the palette, and an axe-core
+155 component tests, a computed-contrast test over the palette, and an axe-core
 run with a keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
 Application Load Balancer in `us-east-1`, deployed by image digest.
 
