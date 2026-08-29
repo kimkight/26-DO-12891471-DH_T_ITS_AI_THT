@@ -171,6 +171,44 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
   `POST /api/read-application` does: the parsed values have to reach the agent as
   editable fields before the comparison runs.
 
+### Documented, not built
+
+- **A judged scope line on bottle photography**
+  ([02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6), answering the
+  author's question: "Should I even be contemplating a label on a bottle, or is
+  everything coming through COLA?"
+  - **The input that works is flat label artwork**: the images filed with the
+    COLA application, and photographs of flat labels or of a label lying flat.
+    Every measured performance and accuracy figure in this repository came from
+    that input.
+  - **The input that does not work reliably is a photograph of a label still
+    wrapped on a round bottle**, with three findings from the 2026-08-29 mezcal
+    test stated as evidence: the GOVERNMENT WARNING block is printed at 90
+    degrees to the body copy so no single global rotation makes both upright; a
+    4 by 5 rotation and page-segmentation sweep over the isolated warning crop
+    returned `4 AANDVW 1AG` at 2.1 percent similarity; and the real COLA gives
+    Brand `DEL MAGUEY` and Fanciful `VIDA` while the largest text is "Vida
+    Clasico", so the type-size heuristic is wrong on a real product even with
+    perfect OCR.
+  - **The decision:** bottle photography stays in the prototype as a best-effort
+    path with honest failure reporting, and is not claimed as a supported
+    capability. It is not removed, because an agent standing at a bottling line
+    has nothing else; it is not promised, because the evidence says that would be
+    a false promise.
+  - The four things that would make it work are named with their costs:
+    per-text-block orientation detection, cylindrical dewarp, multi-photo
+    stitching (ADR 0007 exists, stitching does not), or a vision model, which is
+    SG-2 and carries the FedRAMP and data-handling questions already recorded
+    there.
+  - Cross-linked from assumption SG-1's discussion in
+    [ASSUMPTIONS.md](docs/ASSUMPTIONS.md) and from the traceability matrix. **No
+    code changed and no capability is claimed.**
+- **ADR 0009 answers the batch question this release raises.** A batch row still
+  requires its label image, because rows are enumerated from the images so the
+  stream can report a total before any document is read. What a batch does get:
+  a paired document's embedded artwork now fills application values its text
+  layer left empty. The simplification left on the table is named as such.
+
 ### Known limits
 
 - The size floor is a judgement about what a filing looks like, not a
