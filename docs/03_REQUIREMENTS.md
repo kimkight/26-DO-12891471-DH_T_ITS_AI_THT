@@ -182,12 +182,43 @@ normalization, against the text quoted in section 1.
 - Given no warning found on the label, then the outcome is mismatch and the
   result says the statement was not found.
 - Fuzzy tolerance under FR-4 is not applied to the warning body.
+- **Given a warning differing from 27 CFR 16.21 by at most
+  `TTB_WARNING_NEAR_MISS_EDITS` single characters, then the outcome is needs
+  human review, the exact character-level difference is shown, and the result
+  states that this is not a match.** It is never a pass.
+- Given a warning whose prefix fails the FR-6 capitalization check, then the
+  outcome is mismatch whatever the size of any difference in the body.
+- Given any difference at all, then the character-level difference is reported,
+  because it is what an agent needs in order to judge either outcome.
+
+**The comparison is exact, and a near miss is routed to a person rather than
+auto-passed. This is not a fuzzy match, and the distinction has to be read as
+load-bearing rather than as a hedge.** A fuzzy match would let a label through
+on a similarity score. Nothing here lets anything through: a near miss is one of
+the two **failing** outcomes, and what separates it from a mismatch is which
+sentence the agent reads and whether they are handed the difference to look at.
+The comparison that decides a match is unchanged and still requires identical
+text after whitespace normalization.
+
+**Why the distinction matters enough to be in the requirement.** The author's
+own COLA artwork, read on 2026-08-29, OCRs the statement with exactly one
+character wrong: `MPAIRS` for `IMPAIRS`. "The statement text does not match
+27 CFR 16.21 word for word" is equally true of that and of a missing clause, and
+the difference between those two is the whole of the agent's decision. Reporting
+the first as a flat mismatch tells an agent their label is defective when the
+truth is that the scan is imperfect, which is the tool overstating what it knows
+in the direction OOS-8 and FR-6 exist to prevent. Loosening the comparison
+instead would be the same error in the other direction. The threshold, the
+reasoning behind the number, and the alternatives rejected are in
+[ADR 0012](adr/0012-warning-near-miss.md).
 
 Jenny's constraint: "It has to be exact. Like, word-for-word." She also notes
 the failure modes she sees in practice: "people try to get creative with the
 warning all the time. Smaller font, different wording, burying it in tiny text."
 [Source: Jenny Park interview] Of those, this prototype detects different
-wording only; font size and prominence are OOS-5.
+wording only; font size and prominence are OOS-5. Nothing in the near-miss
+routing weakens the first of those: a creative rewording is a difference of many
+characters, and it is still a mismatch.
 
 ### FR-6 Government warning capitalization check
 

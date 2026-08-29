@@ -91,6 +91,21 @@ class Settings(BaseSettings):
     match_threshold: int = 95
     review_threshold: int = 80
 
+    # How many single-character edits between the government warning as printed
+    # and 27 CFR 16.21 are treated as a near miss rather than as a mismatch
+    # (FR-5, ADR 0012). A near miss is routed to human review with the exact
+    # character-level difference shown; it is never passed.
+    #
+    # Two, and the reasoning is in ADR 0012. The short version: the author's own
+    # COLA artwork OCRs the statement with exactly one character wrong, so one
+    # is the observed case and two is one character of headroom for the double
+    # substitutions OCR also produces. Neither outcome passes, so the cost of
+    # this number being slightly wrong is which sentence an agent reads, not
+    # whether a defective label ships. Raising it much further would start to
+    # admit substituted short words, which is where the wording of the sentence
+    # begins to change rather than its rendering.
+    warning_near_miss_edits: int = 2
+
     # Allowed difference between the label ABV and the application ABV, in
     # percentage points. 0.0 is a compliance position rather than a tuning
     # starting point: the regulatory tolerances in 27 CFR 5.65, 4.36 and 7.65

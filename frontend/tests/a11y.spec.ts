@@ -558,6 +558,11 @@ const RESULT = {
     body_matches_regulation: true,
     bold_type_checked: false,
     bold_type_note: WARNING_NOTE,
+    // The body is word for word correct here; only the prefix fails. So there
+    // is no difference to show, and no near miss (FR-5, FR-6, ADR 0012).
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
   },
   photos: [
     {

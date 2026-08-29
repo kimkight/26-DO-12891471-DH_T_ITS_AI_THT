@@ -212,6 +212,7 @@ find out why it exists.
 | `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
 | `batch.py` | The filename-stem pairing of images with COLA documents, the per-row pairing errors, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, FR-11, NFR-2, NFR-6 | `tests/test_batch.py` |
 | `classify.py` | Decide what each uploaded file is from the file itself: a PDF by its header, an image by whether its text reads as a COLA form. Returns the OCR result alongside the verdict, so the side it lands on reads it no second time | FR-12, FR-11, FR-1, FR-9, NFR-6, ADR 0011 | `tests/test_one_upload.py` |
+| `warning.py` | The 27 CFR 16.21 statement, the exact body comparison, the separate capitalization check, and the character-level difference plus the near-miss routing that sends a one or two character difference to human judgement rather than to a mismatch | FR-5, FR-6, OOS-4, ADR 0012 | `tests/test_warning.py`, `tests/test_warning_near_miss.py` |
 | `api.py` | `POST /api/verify`, `POST /api/classify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, FR-12, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_one_upload.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
 
 Two implementation notes that are not obvious from the table:
@@ -530,6 +531,7 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_MAX_DOCUMENT_PAGES` | `3` | How many pages of an uploaded COLA document are read (FR-11, ADR 0008). The application side of TTB F 5100.31 is page 1 and a Registry printout runs to one or two, so this is a bound on cost rather than a limit anyone should meet. It bounds text reading only; embedded artwork is searched for on every page. |
 | `TTB_MIN_ARTWORK_EDGE_PX` | `400` | The shortest edge an embedded image must have to be treated as label artwork (ADR 0010). It is what rejects a long thin barcode or signature strip. |
 | `TTB_MIN_ARTWORK_PIXELS` | `250000` | The total pixels an embedded image must have, a 500 by 500 square. It is what rejects a small seal or logo. Both halves of the floor must be met. |
+| `TTB_WARNING_NEAR_MISS_EDITS` | `2` | How many single-character edits between the government warning as printed and 27 CFR 16.21 are reported as needing human review rather than as a mismatch (FR-5, ADR 0012). A near miss is never a pass; the comparison that decides a match is unchanged and still exact. |
 | `TTB_MAX_ARTWORK_IMAGES` | `4` | How many surviving embedded images are read. Each costs a full OCR read, so this is a latency bound in the same sense `TTB_MAX_DOCUMENT_PAGES` is. |
 | `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |

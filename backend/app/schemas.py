@@ -100,6 +100,24 @@ class FieldResult(BaseModel):
     )
 
 
+class WarningDiffSegment(BaseModel):
+    """One run of the character-level difference against 27 CFR 16.21 (FR-5).
+
+    Reported so that an agent looking at a near miss can see at a glance whether
+    it is an artifact of reading or a real defect. ``kind`` reads from the
+    label's point of view, because that is what the agent is looking at.
+    """
+
+    kind: Literal["same", "added", "missing"] = Field(
+        description=(
+            "'same' is text the label and the regulation agree on, 'added' is "
+            "text on the label the regulation does not have, and 'missing' is "
+            "text the regulation requires that the label does not show."
+        )
+    )
+    text: str
+
+
 class WarningResult(BaseModel):
     """The warning field's two checks, reported separately (FR-6)."""
 
@@ -120,6 +138,32 @@ class WarningResult(BaseModel):
         description="Always false. This prototype does not check bold type (OOS-4).",
     )
     bold_type_note: str = BOLD_TYPE_NOTE
+    edit_distance: int | None = Field(
+        default=None,
+        description=(
+            "How many single-character edits separate the statement as printed "
+            "from 27 CFR 16.21. Zero when they match; null when no statement "
+            "was found (FR-5, ADR 0012)."
+        ),
+    )
+    near_miss: bool = Field(
+        default=False,
+        description=(
+            "Whether the difference is small enough to be routed to human "
+            "judgement rather than reported as a flat mismatch. **Never a "
+            "pass.** The comparison itself is still exact: "
+            "`body_matches_regulation` is false here, and a near miss is one of "
+            "the two failing outcomes, not a third kind of success (FR-5, "
+            "ADR 0012)."
+        ),
+    )
+    diff: list[WarningDiffSegment] = Field(
+        default_factory=list,
+        description=(
+            "The character-level difference against 27 CFR 16.21, in reading "
+            "order. Empty when the statement matches, and when none was found."
+        ),
+    )
 
 
 class ParsedApplicationField(BaseModel):
