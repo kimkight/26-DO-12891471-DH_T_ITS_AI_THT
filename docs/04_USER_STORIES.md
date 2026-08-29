@@ -1150,3 +1150,74 @@ file is the fact. The rule, and the cases where it can still be wrong, are in
 [ADR 0011](adr/0011-one-upload.md); the label side that makes an
 application-only submission possible at all is
 [ADR 0010](adr/0010-embedded-label-artwork.md).
+
+---
+
+### US-26 Show me what is left, not what you already did
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | FR-13, FR-11, FR-3, FR-2, NFR-4, NFR-5 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's own use of the deployed prototype, 2026-08-29 |
+
+**As a** compliance agent who has just uploaded a COLA document,
+**I want** the fields to show me only what the tool could not read,
+**So that** the one thing left to do is the one thing in front of me.
+
+**Acceptance criteria**
+
+```
+Given an upload that answered every value
+When  it has been read
+Then  no editable box is shown at all
+And   each value is one line saying what it is and where it came from
+And   one collapsed control holds the boxes, in case I disagree with one
+```
+
+```
+Given an upload that answered all but one value
+When  it has been read
+Then  exactly one editable field is shown
+And   my cursor is in it
+And   I am told which value is missing and that I can enter it or upload a
+      clearer image
+```
+
+```
+Given a value the tool read and I disagree with
+When  I open the control that holds the values
+Then  I can change it
+And   what I typed is what gets checked
+```
+
+```
+Given the beverage type
+When  the document did not state it
+Then  I am told that the product-type boxes are check marks and cannot be read
+      from the text, rather than being left to wonder
+And   the selector is right there
+```
+
+```
+Given I have uploaded nothing yet
+When  I look at the page
+Then  it is exactly as it was: one collapsed control, and no summaries of
+      values that do not exist
+```
+
+The author's instruction on 2026-08-29: "Collapse the form fields and only
+expand if there is something that isn't read in from the application or
+picture." US-24 collapsed the fields on load. This is the step after: once
+something has been read, a value the tool found should not come back as a box,
+and a value it could not find should be the only thing that looks like work.
+
+**Where the missing field lives, and why not behind the disclosure.** Showing it
+directly is the same outcome with one fewer moving part: one box, in the place a
+box belongs, rather than a panel opening onto five of which one matters. What is
+kept from the disclosure idea is everything that made it good, and it is in the
+acceptance criteria above: focus lands on the missing field, the view scrolls to
+it, and a live region says which one and why.

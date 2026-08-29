@@ -123,6 +123,25 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
   photograph is refused with a message naming the missing piece and offering the
   photo upload, which is an FR-9 message rather than a validation error on a
   field.
+- **The values that were read go quiet; the ones that were not go loud** (FR-13,
+  US-26). Once an upload has been read, each value it supplied is a read-only
+  line carrying the value and where it came from, and each compared value it did
+  not supply is an editable field, shown. If it supplied all of them, no
+  editable field is shown at all and one collapsed disclosure, "Review the
+  values", holds them.
+  - A gap takes focus, scrolls into view, and is announced: "Alcohol content was
+    not found in your upload. Enter it, or upload a clearer image."
+  - The two sections are decided when the upload is read, not from what is
+    currently in the boxes. A field that moved between them as the agent typed
+    would remount under them and drop focus after the first keystroke.
+  - Beverage type keeps its own line with the ADR 0008 truth: read where the
+    document states it in text, and otherwise reported as not read from the form
+    because the product-type boxes are check marks, which a text layer cannot
+    report. It is never compared, so it never takes focus and is never counted
+    as a gap.
+  - Before anything is uploaded the view is exactly what Session 10 left: one
+    collapsed disclosure, no summaries of values that do not exist.
+  - The result panel is unchanged. This is the input side only.
 - `POST /api/classify` sorts an upload and reads the application side without
   comparing anything. It exists for the interface, in the same sense
   `POST /api/read-application` does: the parsed values have to reach the agent as

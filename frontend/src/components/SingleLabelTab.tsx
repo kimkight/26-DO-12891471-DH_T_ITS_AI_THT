@@ -87,6 +87,7 @@
  * reason line rather than inferred from this control.
  */
 import { useState } from 'react'
+import { ApplicationFields } from './ApplicationFields'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
 import { ResultCard } from './ResultCard'
@@ -94,70 +95,72 @@ import { Kicker } from './Ui'
 import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
-import { ARTWORK_LABEL_LINE } from '../lib/applicationSources'
+import type { SourceMap } from '../lib/applicationFields'
+import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { announcement } from '../lib/outcomes'
 import { EMPTY_APPLICATION } from '../types'
 import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
 /**
- * The mark on a field whose value was read off the uploaded application.
+ * Keep only the values the agent typed themselves.
  *
- * Text rather than colour alone, and bound to the input through
- * `aria-describedby`, so it reaches a screen reader and survives greyscale
- * (NFR-5). It says "change it if it is wrong" because an agent who cannot tell
- * whether they are allowed to edit a filled field will not edit it.
+ * Used when the document goes away: what an agent typed is still theirs, and
+ * what a document supplied is no longer attributable to anything, so it stops
+ * claiming a source it no longer has.
  */
-function FromFormMark({ name }: { name: string }) {
-  return (
-    <p className="field__source" id={`${name}-from-form`}>
-      Read from the application form. Change it if it is wrong.
-    </p>
-  )
-}
-
 /**
- * Join names the way a sentence does, so the announcement reads as English
- * rather than as a comma-separated list. Used only in the live region, where a
- * screen reader speaks the punctuation it is given.
+ * The five application-side values, in the order the interface shows them.
+ *
+ * The four compared ones plus the beverage type, which is never compared and
+ * is why it is last (A-12, A-13).
  */
-function names(items: string[]): string {
-  if (items.length <= 1) return items.join('')
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-}
-
-/** The three classes 27 CFR names. Kept in the words a label reviewer uses. */
-const BEVERAGE_TYPES = [
-  { value: '', label: 'Choose one' },
-  { value: 'distilled spirits', label: 'Distilled spirits' },
-  { value: 'wine', label: 'Wine' },
-  { value: 'malt beverage', label: 'Malt beverage' },
+const APPLICATION_FIELDS: (keyof ApplicationData)[] = [
+  'brand_name',
+  'class_type',
+  'alcohol_content',
+  'net_contents',
+  'beverage_type',
 ]
 
-/**
- * The id of the panel the disclosure controls. A constant rather than `useId`
- * because it is referenced from `aria-controls` and from the toggle in the same
- * component, and a stable string is easier to read in a failing test.
- */
-const TYPED_FIELDS_PANEL = 'typed-application-values'
-
-const TEXT_FIELDS: { name: keyof ApplicationData; label: string; hint?: string }[] = [
-  { name: 'brand_name', label: 'Brand name' },
-  { name: 'class_type', label: 'Class or type designation' },
-  { name: 'alcohol_content', label: 'Alcohol content', hint: 'For example 45% or 45' },
-  { name: 'net_contents', label: 'Net contents', hint: 'For example 750 mL' },
-]
+function onlyTyped(previous: SourceMap, application: ApplicationData): SourceMap {
+  const next: SourceMap = {}
+  for (const [name, source] of Object.entries(previous) as [
+    keyof ApplicationData,
+    SourceMap[keyof ApplicationData],
+  ][]) {
+    if (source === 'typed' && application[name].trim()) next[name] = 'typed'
+  }
+  return next
+}
 
 export function SingleLabelTab() {
   // Everything the agent uploaded for this label, in the order they chose it.
   // One list, not two: what each file is, is the server's judgement (FR-12).
   const [files, setFiles] = useState<File[]>([])
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION)
-  // Which fields currently hold a value read off an uploaded application, so
-  // each one can say so. A field the agent then edits leaves this set.
-  const [fromForm, setFromForm] = useState<Set<keyof ApplicationData>>(new Set())
-  // The disclosure over the typed fields. Collapsed on load; opened by the
-  // agent, or by one of the two document cases below, and never closed by
-  // anything but the agent.
+  /*
+   * Where each value came from (ADR 0010, ADR 0011). A map rather than the set
+   * of "read from the form" names it replaces, because there are now three
+   * document-side sources and an agent looking at a prefilled field is entitled
+   * to know which one they are looking at: a value read out of a text layer
+   * cannot be misread, and a value recognized off a picture can.
+   */
+  const [sources, setSources] = useState<SourceMap>({})
+  /*
+   * Whether anything has been uploaded and read yet. It is what separates the
+   * two layouts: before it, the Session 10 disclosure over five empty boxes;
+   * after it, summary lines for what was read and visible fields for what was
+   * not (US-26).
+   */
+  const [processed, setProcessed] = useState(false)
+  /*
+   * Which values the upload did not supply. Decided when the upload is read and
+   * not recomputed as the agent types, because a field that moved between the
+   * two sections mid-edit would remount under them and drop focus.
+   */
+  const [gaps, setGaps] = useState<(keyof ApplicationData)[]>([])
+  // The disclosure. Collapsed on load; opened by the agent, or by a document
+  // that failed to parse, and never closed by anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
@@ -165,40 +168,40 @@ export function SingleLabelTab() {
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
-    // The agent has taken this field over. The mark goes, so the interface
-    // never tells them a value came off the form when it did not.
-    setFromForm((previous) => {
-      if (!previous.has(name)) return previous
-      const next = new Set(previous)
-      next.delete(name)
-      return next
-    })
+    // The agent has taken this field over. The source becomes theirs, so the
+    // interface never tells them a value came off a document when it did not.
+    setSources((previous) => ({ ...previous, [name]: value.trim() ? 'typed' : 'absent' }))
   }
 
   /**
-   * Fill the fields from an uploaded application (FR-11).
-   *
-   * Every value the document supplied is written into its field, including over
-   * something already typed there: attaching the form is a deliberate act and
-   * the agent is asking for what it says. Nothing is lost that cannot be typed
-   * back, every field stays editable, and the live region in ApplicationUpload
-   * names what was filled.
-   */
-  /**
    * Fill the fields from what the server read off the uploaded application.
    *
-   * Called with the whole classification, because the gaps that open the
-   * disclosure are a property of the application that was found, and a
-   * submission carrying only label pictures found none.
+   * Called with the whole classification, because a submission carrying only
+   * label pictures found no application at all and still counts as processed:
+   * the fields section has to stop showing five empty boxes either way.
    */
   function fillFromClassification(result: ClassificationResult) {
+    setProcessed(true)
     if (!result.application_document) {
-      setFromForm(new Set())
+      // Nothing on the application side: a label picture and nothing else. What
+      // the agent typed stays theirs; everything they did not type is a gap,
+      // because nothing supplied it.
+      setSources((previous) => onlyTyped(previous, application))
+      setGaps(APPLICATION_FIELDS.filter((name) => !application[name].trim()))
       return
     }
     fillFromDocument(result.application_document)
   }
 
+  /**
+   * Write what the document said into the fields it answers (FR-11).
+   *
+   * Every value the document supplied is written into its field, including over
+   * something already typed there: uploading the application is a deliberate
+   * act and the agent is asking for what it says. Nothing is lost that cannot
+   * be typed back, every value stays editable, and the source is recorded per
+   * field so the interface can say where each one came from.
+   */
   function fillFromDocument(document: ApplicationDocumentResult) {
     const filled = document.fields.filter((entry) => entry.found_on_document)
     setApplication((previous) => {
@@ -210,46 +213,47 @@ export function SingleLabelTab() {
       }
       return next
     })
-    setFromForm(new Set(filled.map((entry) => entry.name as keyof ApplicationData)))
+    setSources(() => {
+      const next: SourceMap = {}
+      for (const entry of document.fields) {
+        next[entry.name as keyof ApplicationData] = entry.found_on_document
+          ? documentSource(entry.source)
+          : 'absent'
+      }
+      return next
+    })
 
-    /*
-     * The second auto-expansion case: the document was read and left gaps.
-     * Gaps are normal rather than exceptional, because the form proper carries
-     * no class or type, alcohol content or net contents boxes at all (A-17),
-     * so this is the common path for a real TTB F 5100.31 and the rare one for
-     * a Registry printout. The fields open with the parsed values in place and
-     * the gaps empty, so the agent sees exactly what is left to do.
-     */
-    const gaps = document.fields.filter((entry) => !entry.found_on_document)
-    if (!gaps.length) return
-    setFieldsOpen(true)
-    setFieldsNews(
-      `The application values are open below, because this form did not carry ${names(
-        gaps.map((entry) => entry.display_name.toLowerCase()),
-      )}. What it did carry is already filled in.`,
+    // A gap is a compared value neither the document nor the agent supplied.
+    // Something already typed is not a gap: the agent answered it.
+    const supplied = new Set(
+      filled.map((entry) => entry.name).filter((name) => name in EMPTY_APPLICATION),
     )
+    setGaps(APPLICATION_FIELDS.filter((name) => !supplied.has(name) && !application[name].trim()))
   }
 
-  /** Taking every file back off clears only the marks, not the values. */
+  /** Taking every file back off returns the view to its unprocessed state. */
   function clearFormMarks() {
-    setFromForm(new Set())
+    setSources((previous) => onlyTyped(previous, application))
+    setProcessed(false)
+    setGaps([])
   }
 
   /**
-   * The third auto-expansion case: a document was attached and could not be
-   * read (FR-9). The agent meant to supply the application and it did not
-   * arrive, so the boxes open as the fallback the error message promises. The
-   * error itself is rendered and announced by `ApplicationUpload`; this only
-   * says that the fields are now open, so the two live regions do not say the
-   * same thing twice.
+   * A document was uploaded and could not be read (FR-9).
+   *
+   * The agent meant to supply the application and it did not arrive, so the
+   * boxes open as the fallback the error message promises. The error itself is
+   * rendered and announced by `UploadPanel`; this only says that the fields are
+   * now open, so the two live regions do not say the same thing twice.
    */
   function openFieldsAfterFailure() {
-    setFromForm(new Set())
+    setSources((previous) => onlyTyped(previous, application))
+    setProcessed(false)
+    setGaps([])
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
 
-  /** The first auto-expansion case, and the only one that can also close. */
   function toggleFields() {
     // The button's own aria-expanded announces this one, so the live region is
     // cleared rather than written to: an agent who pressed the control does not
@@ -304,113 +308,30 @@ export function SingleLabelTab() {
             onUnreadable={openFieldsAfterFailure}
           />
 
+          <ApplicationFields
+            application={application}
+            sources={sources}
+            processed={processed}
+            gaps={gaps}
+            open={fieldsOpen}
+            onToggle={toggleFields}
+            onChange={update}
+            onGapNews={setFieldsNews}
+          />
+
           {/*
-            The typed values, behind a disclosure (US-24). A button with
-            aria-expanded and aria-controls rather than <details>, because the
-            open state has to be settable from the two document cases as well as
-            from the control, and a controlled native disclosure is harder to
-            reason about than an explicit one.
-
-            The panel keeps its contents in the DOM when collapsed and hides
-            them with the `hidden` attribute, so the fields leave the tab order
-            and the accessibility tree together rather than one without the
-            other.
+            Its own region, for the same reason the uploads have one. It carries
+            what the fields section has to say for itself: which value was not
+            read and what to do about it, or that the boxes were opened as the
+            fallback after a document failed to parse.
           */}
-          <div className="disclosure">
-            <button
-              className="button button--quiet disclosure__toggle"
-              type="button"
-              aria-expanded={fieldsOpen}
-              aria-controls={TYPED_FIELDS_PANEL}
-              onClick={toggleFields}
-            >
-              <span className="disclosure__marker" aria-hidden="true" />
-              Or type the application values
-            </button>
-
-            <div className="disclosure__panel" id={TYPED_FIELDS_PANEL} hidden={!fieldsOpen}>
-              <p className="field__hint">
-                The check runs on whatever is in these boxes. A value you type here is used instead
-                of the one read off the application. Leave a box empty and that field is not
-                compared.
-              </p>
-
-              {TEXT_FIELDS.map((field) => {
-                const marked = fromForm.has(field.name)
-                const describedBy = [
-                  field.hint ? `${field.name}-hint` : null,
-                  marked ? `${field.name}-from-form` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' ')
-                return (
-                  <div className="field" key={field.name}>
-                    <label htmlFor={field.name}>{field.label}</label>
-                    {marked ? <FromFormMark name={field.name} /> : null}
-                    {field.hint ? (
-                      <p className="field__hint" id={`${field.name}-hint`}>
-                        {field.hint}
-                      </p>
-                    ) : null}
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      autoComplete="off"
-                      aria-describedby={describedBy || undefined}
-                      value={application[field.name]}
-                      onChange={(event) => update(field.name, event.target.value)}
-                    />
-                  </div>
-                )
-              })}
-
-              {/*
-                Last, and no longer the first field an agent meets. It is never
-                compared: it only says which numeric rule to expect, and the
-                result's own reason line names the rule that actually ran.
-              */}
-              <div className="field">
-                <label htmlFor="beverage_type">Beverage type</label>
-                {fromForm.has('beverage_type') ? <FromFormMark name="beverage_type" /> : null}
-                <p className="field__hint" id="beverage_type-hint">
-                  Not compared against the label. It says which numeric rule to expect: the proof
-                  cross-check for spirits, range handling for wine.
-                </p>
-                <select
-                  id="beverage_type"
-                  name="beverage_type"
-                  value={application.beverage_type}
-                  aria-describedby={
-                    fromForm.has('beverage_type')
-                      ? 'beverage_type-hint beverage_type-from-form'
-                      : 'beverage_type-hint'
-                  }
-                  onChange={(event) => update('beverage_type', event.target.value)}
-                >
-                  {BEVERAGE_TYPES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/*
-              Its own region, for the same reason the photo list has one. It is
-              written to only when something other than the agent opened the
-              panel, because the button's aria-expanded already reports the
-              agent's own press.
-            */}
-            <div
-              className="visually-hidden"
-              role="status"
-              aria-live="polite"
-              aria-label="Application values"
-            >
-              {fieldsNews}
-            </div>
+          <div
+            className="visually-hidden"
+            role="status"
+            aria-live="polite"
+            aria-label="Application values"
+          >
+            {fieldsNews}
           </div>
 
           <button className="button button--primary" type="submit" disabled={!canCheck}>

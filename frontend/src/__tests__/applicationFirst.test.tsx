@@ -30,6 +30,8 @@ import {
 import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
 const TOGGLE = /Or type the application values/i
+/** What the same disclosure is called once something has been read (US-26). */
+const REVIEW = /Review the values/i
 
 function pdfFile(name = 'application.pdf') {
   return new File([new Uint8Array([37, 80, 68, 70])], name, { type: 'application/pdf' })
@@ -62,7 +64,9 @@ async function attachApplication(user: ReturnType<typeof userEvent.setup>) {
 
 /** The panel the disclosure controls, found the way assistive technology does. */
 function panel() {
-  const id = screen.getByRole('button', { name: TOGGLE }).getAttribute('aria-controls')
+  const toggle =
+    screen.queryByRole('button', { name: TOGGLE }) ?? screen.getByRole('button', { name: REVIEW })
+  const id = toggle.getAttribute('aria-controls')
   const found = id ? window.document.getElementById(id) : null
   if (!found) throw new Error('The disclosure names no panel through aria-controls.')
   return found
@@ -160,47 +164,53 @@ describe('expansion case 1: the agent opens the disclosure', () => {
   })
 })
 
-describe('expansion case 2: a parsed document leaves gaps', () => {
-  it('opens the fields when the form did not carry every value', async () => {
+describe('case 2: a parsed document leaves gaps (US-26)', () => {
+  /*
+   * Session 10 opened the disclosure here. US-26 goes further: the missing
+   * field is shown directly, because that is the same outcome with one fewer
+   * moving part, and everything that was read becomes a summary line rather
+   * than a box. The behaviour these tests pinned is now pinned in
+   * quietFields.test.tsx; what is kept here is that a gap is still loud.
+   */
+  it('shows the missing values as fields, not behind anything', async () => {
     const user = userEvent.setup()
     stubApi(documentOnly(applicationDocument()))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'true'),
-    )
-    expect(panel()).toBeVisible()
-  })
-
-  it('shows the parsed values filled and the gaps empty', async () => {
-    const user = userEvent.setup()
-    stubApi(documentOnly(applicationDocument()))
-    render(<SingleLabelTab />)
-    await attachApplication(user)
-
-    await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
-    expect(screen.getByLabelText('Brand name')).toBeVisible()
     // The three the form proper has no boxes for at all (A-17).
-    expect(screen.getByLabelText('Class or type designation')).toHaveValue('')
+    await waitFor(() => expect(screen.getByLabelText('Class or type designation')).toBeVisible())
+    expect(screen.getByLabelText('Alcohol content')).toBeVisible()
+    expect(screen.getByLabelText('Net contents')).toBeVisible()
     expect(screen.getByLabelText('Alcohol content')).toHaveValue('')
-    expect(screen.getByLabelText('Net contents')).toHaveValue('')
   })
 
-  it('announces the expansion and names the gaps that caused it', async () => {
+  it('summarises what was read rather than putting it back in a box', async () => {
+    const user = userEvent.setup()
+    stubApi(documentOnly(applicationDocument()))
+    render(<SingleLabelTab />)
+    await attachApplication(user)
+
+    await waitFor(() => expect(screen.getByText('Read from your upload')).toBeVisible())
+    expect(screen.getByText("STONE'S THROW")).toBeVisible()
+    // And the box for it is behind the disclosure, still there to correct.
+    expect(screen.getByLabelText('Brand name')).not.toBeVisible()
+  })
+
+  it('announces which value is missing and what to do about it', async () => {
     const user = userEvent.setup()
     stubApi(documentOnly(applicationDocument()))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
     const region = screen.getByLabelText('Application values')
-    await waitFor(() => expect(region).toHaveTextContent(/The application values are open below/i))
-    expect(region).toHaveTextContent(/class type/i)
+    await waitFor(() => expect(region).toHaveTextContent(/not found in your upload/i))
+    expect(region).toHaveTextContent(/alcohol content/i)
     expect(region).toHaveTextContent(/net contents/i)
-    expect(region).toHaveTextContent(/What it did carry is already filled in/i)
+    expect(region).toHaveTextContent(/Enter them, or upload a clearer image/i)
   })
 
-  it('leaves the fields collapsed when the document carried every value', async () => {
+  it('shows no editable field at all when the document carried every value', async () => {
     const user = userEvent.setup()
     stubApi(documentOnly(FULL_DOCUMENT))
     render(<SingleLabelTab />)
@@ -209,7 +219,7 @@ describe('expansion case 2: a parsed document leaves gaps', () => {
     // The parse has landed: the values are in the fields.
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
     // And nothing opened, because there is nothing left for the agent to enter.
-    expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: REVIEW })).toHaveAttribute('aria-expanded', 'false')
     expect(panel()).not.toBeVisible()
     expect(screen.getByLabelText('Application values')).toHaveTextContent('')
   })
@@ -334,9 +344,10 @@ describe('beverage type is demoted (A-12, A-13)', () => {
     await waitFor(() =>
       expect(screen.getByLabelText('Beverage type')).toHaveValue('distilled spirits'),
     )
-    await user.click(screen.getByRole('button', { name: TOGGLE }))
-    expect(screen.getByLabelText('Beverage type')).toHaveAccessibleDescription(
-      /Read from the application form/i,
-    )
+    // It was read, so it is a summary line saying where it came from, and its
+    // control is behind the disclosure for an agent who wants to change it.
+    expect(screen.getAllByText('Application form').length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: REVIEW }))
+    expect(screen.getByLabelText('Beverage type')).toBeVisible()
   })
 })

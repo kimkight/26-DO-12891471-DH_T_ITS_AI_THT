@@ -450,6 +450,16 @@ reads records the application emitted rather than what CloudWatch received.
 | 62 | Deliberately put the COLA PDF where a photo would have gone, and the photo where the application would have gone | Both are still used on the correct side, because the classification is made from the file rather than from the control. **A COLA form read as label artwork is a failure of this test.** | The author's evidence, 2026-08-29; FR-12 |
 | 63 | Work the upload from the keyboard alone, with a screen reader | One labelled control, reachable by Tab and operable by Enter or Space; each accepted file announced with what it was taken to be; drag and drop offered on top of that rather than instead of it | FR-12; NFR-5 |
 
+| 64 | Upload a document that answers every compared value, then look at the fields section | Every value is one read-only line saying what it is and where it came from. **A single editable box on screen is a failure of this test.** One collapsed control, "Review the values", holds the boxes for an agent who disagrees with one | The author's evidence, 2026-08-29; FR-13; US-26 |
+| 65 | Upload a document that answers all but one, without touching the keyboard | Exactly one editable field is on screen, the cursor is in it, and a screen reader says which value is missing and that it can be entered or a clearer image uploaded | The author's evidence, 2026-08-29; FR-13; NFR-5 |
+| 66 | Load the page and look at it before uploading anything | Unchanged from Session 10: one collapsed disclosure over the five boxes, and no summaries of values that do not exist yet | FR-13; US-24 |
+
+Rows 64 to 66 come from the author's design instruction of 2026-08-29:
+"Collapse the form fields and only expand if there is something that isn't read
+in from the application or picture." Row 66 is the regression half: US-24's
+behaviour before an upload is what it was, and this row exists so that making
+the fields quieter afterwards cannot make them louder beforehand.
+
 Rows 61 to 63 come from the author's third report of 2026-08-29, the design
 instruction: "these should be combined; just one upload; simplify the interface.
 You should be able to upload (pdfs or images)." Row 62 is the one worth running
