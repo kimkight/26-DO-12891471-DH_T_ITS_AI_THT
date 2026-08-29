@@ -235,9 +235,11 @@ fixed is what is released rather than what is next; it carries the version bump
 and the changelog section itself, since there is no `develop` in its path to
 carry them; and it merges to `main`, is tagged and published from there, and is
 then merged back into `develop` by a second pull request so the fix is not lost
-at the next release. That second pull request cannot be opened until the first
-has merged, because until then the two branches have no commits between them.
-v1.0.1 is the first release to take this path.
+at the next release. That second pull request is raised from `main` itself
+rather than from a branch, so it can be opened alongside the first and picks the
+hotfix up automatically when the first merges. It must not be merged before
+then, or it back-merges nothing. v1.0.1 is the first release to take this path,
+as pull requests #78 and #79.
 
 Every commit on `main` is a release. That is the whole point of keeping it
 separate from `develop`.
