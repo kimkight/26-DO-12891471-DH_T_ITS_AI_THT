@@ -131,6 +131,26 @@ per-field accuracy against the sample set is required work; see
   was set in a narrow column with printer's hyphens that the exact comparison
   read as altered wording (now rejoined). Both are recorded as assumption A-15.
 
+  **Realized again, and differently, 2026-08-28.** A photograph of a Ketel One
+  back label, crisp and flat and with the government warning in clear capitals,
+  returned the brand as `Sal.`, the class as shrapnel from the bottom fine
+  print, and the warning as not found. This one was not the artwork. It was the
+  preprocessing this ADR calls the project's responsibility, and it failed in
+  the way that consequence predicts: adaptive thresholding at a 31-pixel block
+  suits rendered type and destroys a soft-contrast photograph. Because the
+  orientation call was being made on the thresholded image, it was being made on
+  noise, and over the twelve-label set degraded into a photograph-like fixture
+  it was right in 0 of 48 cases against 44 of 48 on the plain grayscale. v1.0.1
+  moves the call to the grayscale and stops trusting preprocessing to be an
+  improvement: both the preprocessed and the plain image are read and the higher
+  scoring result is kept.
+
+  The lesson is narrower than "Tesseract is insufficient" and worth stating
+  exactly. Every figure this ADR and A-15 quote was measured on artwork rendered
+  by `samples/labelmaker.py`. A measurement taken on rendered type does not
+  transfer to photographs, and the accuracy risk above stays open: one label
+  read correctly is still not a measurement.
+
   The third is not fixed and is this risk in its original form: the label wraps
   a round bottle, so the far edges compress and distort, and no single
   photograph shows the label flat. Perspective and cylinder dewarping are

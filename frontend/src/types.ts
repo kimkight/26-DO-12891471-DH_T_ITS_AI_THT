@@ -63,10 +63,31 @@ export interface ApplicationDocumentResult {
 
 /** How one photograph was turned before it was read (A-15). */
 export interface OrientationDetail {
+  /**
+   * The EXIF orientation tag the file carried, 1 to 8, or null when it carried
+   * none. Reported alongside what was done with it because a tag is a claim
+   * about the pixels rather than a fact: a non-zero `rotation_degrees` on a
+   * file that carried a tag means the tag was wrong and the quarter-turn check
+   * corrected it.
+   */
+  exif_orientation: number | null
   exif_transposed: boolean
   rotation_degrees: number
   method: 'osd' | 'unavailable' | 'disabled'
   confidence: number | null
+}
+
+/**
+ * Whether preprocessing helped this photograph (v1.0.1).
+ *
+ * The pipeline reads the preprocessed image and, unless that read comes back
+ * confident, reads the plain upright grayscale too and keeps whichever scored
+ * higher. `plain_confidence` is null when the second read never ran.
+ */
+export interface ReadPathDetail {
+  variant: 'preprocessed' | 'plain'
+  preprocessed_confidence: number
+  plain_confidence: number | null
 }
 
 /**
@@ -81,6 +102,7 @@ export interface PhotoResult {
   index: number
   orientation: OrientationDetail
   ocr_confidence: number
+  read_path: ReadPathDetail
   text_found: boolean
   error: ErrorDetail | null
 }

@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - unreleased until tagged
+
+Hotfix against the released v1.0.0, branched from `main` per the Git Flow path
+in [docs/08_SDLC_PROCESS.md](docs/08_SDLC_PROCESS.md) section 2. It goes to
+`main`, is tagged and published from there, and `main` is then merged back into
+`develop`.
+
+### The evidence
+
+A photograph of a Ketel One vodka back label was submitted to the deployed
+v1.0.0 build on 2026-08-28. The label is crisp and flat and carries the full
+government warning in clear capitals plus `750 mL`. The build returned the brand
+as `Sal.`, the class as shrapnel from the bottom fine print, net contents not
+found, and the government warning not found, on a photograph the interface
+flagged as saved sideways by the camera.
+
+A controlled experiment against the deployed URL, with a screenshot of the same
+label, isolated two behaviours. Upright pixels with no EXIF tag: plain Tesseract
+on the file read the warning nearly perfectly, and the deployed build reported it
+not found. The identical pixels turned 90 degrees counter-clockwise carrying
+EXIF orientation 6, which is what a phone stores and what every browser displays
+upright: the deployed build found no text at all.
+
+### What was actually wrong, and what was not
+
+**The EXIF transform was not wrong.** v1.0.0 already delegated the tag to
+`PIL.ImageOps.exif_transpose`, and it is correct for all eight orientation
+values: measured here on 2026-08-29, a fixture stored the way a file carrying
+each value stores its pixels decodes to an array identical to the upright
+original, for every value from 1 to 8. That is now asserted rather than assumed.
+The report that orientation 6 was transposed wrongly is not reproducible, and
+the blackout it describes has a different cause.
+
+**The preprocessing was wrong.** Adaptive thresholding at a 31-pixel block
+suits the printed artwork the sample set is built from and destroys a
+soft-contrast photograph. Two consequences, and together they are the whole
+failure. Tesseract's orientation detection was being asked about the thresholded
+image, so on a photograph it was being asked about noise: over the twelve-label
+sample set degraded into a photograph-like fixture and turned to all four
+cardinal rotations, it answered correctly in 0 of 48 cases against 44 of 48 on
+the grayscale. Having been turned wrongly, the destroyed image then read as
+nothing. The EXIF-6 variant blacked out where the upright one merely read badly
+because a re-encode after turning is enough to push a marginal image over that
+edge.
+
+### Fixed
+
+- The orientation call is made on the upright grayscale rather than on the
+  thresholded image. On rendered artwork the two are level, 45 of 48 against
+  46 of 48; on anything resembling a photograph they are not.
+- Preprocessing can no longer make a read worse than no preprocessing.
+  `extract_text` reads the preprocessed image and, unless that read comes back
+  at 85 or better, reads the plain upright grayscale too and keeps whichever
+  scored higher. On the degraded sample label the preprocessed read scores 0.0
+  and returns nothing where the plain read scores 90.9 and returns all
+  sixty-two words including the full warning.
+- The quarter-turn confidence check now demonstrably runs whether or not an EXIF
+  tag was applied, and there is a test that fails if it stops. A tag is a claim
+  about pixels that any edit can invalidate, so a file whose tag lies about its
+  own contents is rescued by the same net that catches an untagged sideways
+  photograph.
+
+### Added
+
+- `orientation.exif_orientation` on every photograph in the response: the tag
+  value found in the file, 1 to 8, or null when none was carried. Reported
+  beside `exif_transposed` and `rotation_degrees` so that all three figures are
+  visible and their disagreement is legible. A non-zero `rotation_degrees` on a
+  file that carried a tag now reads as what it is: the tag was wrong and the
+  check corrected it.
+- `read_path` on every photograph: which of the two reads was kept, and what
+  each scored. `plain_confidence` is null when the preprocessed read scored well
+  enough that the second one never ran.
+- Tests, all generated at test time and none committed as a binary. A legible
+  fixture stored under every EXIF orientation value 1 to 8, at the unit tier
+  compared pixel for pixel against the upright original and at the integration
+  tier asserted to find the government warning. A fixture whose tag lies about
+  its pixels, rescued by the confidence check. A photograph-like fixture, soft
+  contrast and slight blur and a little sensor noise, where the plain read beats
+  the preprocessed one and the better result is kept, with a companion test
+  asserting that the preprocessed image alone would have lost the warning. The
+  existing synthetic set is unchanged.
+- UAT rows 54 to 57 and traceability row 28h, recording the 2026-08-28
+  submission and what it did and did not settle.
+
+### Cost
+
+The second read is skipped when the first scores 85 or better, which is eleven
+of the twelve sample labels, so the ordinary per-label figure is roughly
+unchanged: median 1,086 ms on v1.0.0 against 1,153 ms here. Where preprocessing
+loses on every image, the photograph-like set, the median goes from 383 ms to
+1,589 ms, about 1.5 times rather than double, because decode, scaling and the
+orientation call are shared between the two reads. v1.0.0's 383 ms there is the
+cost of returning nothing. Both are inside NFR-1's roughly five seconds. The
+batch path inherits the cost, once per row.
+
+### Deliberately not fixed
+
+- **The blackletter logotype.** The brand on the front label of this product is
+  a brand mark rather than type, and OCR does not read it. The front label also
+  carries the brand in plain type, which is what ADR 0007's multi-photo path
+  exists for. UAT row 57 tests the limit rather than a fix: the brand should
+  report not found rather than shrapnel from nearby fine print.
+- **Perspective and cylinder dewarp.** A label wrapped on round glass is
+  SG-1 and is unchanged by this hotfix.
+- **ABV on this label side.** The alcohol statement is on the front label of
+  this product. Not found was the correct answer for the back label, and it
+  stays the correct answer.
+
 ## [1.0.0] - unreleased until tagged
 
 **This section collects everything below it and is the release the author cuts
@@ -1130,6 +1239,7 @@ advisories against the transitive `starlette` version they resolved to.
 See OQ-3.
 - Container base images are pinned by tag rather than by digest.
 
-[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v1.0.0...develop
+[Unreleased]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v1.0.1...develop
+[1.0.1]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/releases/tag/v0.1.0

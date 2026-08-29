@@ -229,6 +229,18 @@ was created in the Releases interface, tagged at `79d5ac7` on `main`. This is
 the normal path for this repository, not a one-time workaround. Recorded as
 OQ-18 in [OPEN_QUESTIONS.md](OPEN_QUESTIONS.md).
 
+**A hotfix takes the same procedure from a different starting point.** The
+branch is cut from `main` rather than from `develop`, because the thing being
+fixed is what is released rather than what is next; it carries the version bump
+and the changelog section itself, since there is no `develop` in its path to
+carry them; and it merges to `main`, is tagged and published from there, and is
+then merged back into `develop` by a second pull request so the fix is not lost
+at the next release. That second pull request is raised from `main` itself
+rather than from a branch, so it can be opened alongside the first and picks the
+hotfix up automatically when the first merges. It must not be merged before
+then, or it back-merges nothing. v1.0.1 is the first release to take this path,
+as pull requests #78 and #79.
+
 Every commit on `main` is a release. That is the whole point of keeping it
 separate from `develop`.
 
