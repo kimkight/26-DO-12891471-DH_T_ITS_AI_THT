@@ -49,6 +49,8 @@ from app.schemas import (
     VerificationResult,
 )
 from app.verify import (
+    NO_LABEL_MESSAGE,
+    LabelSource,
     VerificationError,
     build_result,
     check_document_media_type,
@@ -189,10 +191,16 @@ async def verify(
         File(
             description=(
                 "Label artwork. One part, or the same part repeated for up to "
-                "TTB_MAX_LABEL_PHOTOS photographs of the same label (ADR 0007)."
+                "TTB_MAX_LABEL_PHOTOS photographs of the same label (ADR 0007). "
+                "Optional when `application_document` carries its own label "
+                "artwork, which is then used as the label side (ADR 0010)."
             )
         ),
-    ],
+        # Defaulted rather than required, so that a submission carrying only an
+        # application document reaches the route and is checked against the
+        # artwork inside it (ADR 0010). The default is never mutated; FastAPI
+        # reads it and builds a new list.
+    ] = [],  # noqa: B006
     application_document: Annotated[
         UploadFile | None,
         File(
@@ -210,11 +218,19 @@ async def verify(
     net_contents: Annotated[str, Form()] = "",
     beverage_type: Annotated[str, Form()] = "",
 ) -> JSONResponse:
-    """Verify one label from one to three photographs of it.
+    """Verify one label from one to three photographs of it, or from the application.
 
     One `image` part behaves exactly as it always did. More than one is ADR
     0007: a label wraps a round bottle, so no single photograph shows all of it
     flat, and the photographs are read independently and their fields merged.
+
+    **No `image` part at all is ADR 0010.** An applicant affixes the label
+    artwork to the application, so a filed COLA document carries pictures of the
+    labels. When none is uploaded and the document carries readable artwork, the
+    largest such picture becomes the label side, and the response says so in
+    `label_source` and carries the self-consistency note. When it carries none,
+    the request is refused with a message naming the missing piece, which is an
+    FR-9 message rather than a validation error on a field.
 
     The application values may be typed, or read from an uploaded COLA document
     in the `application_document` part, or both: a typed value overrides the
@@ -269,6 +285,17 @@ async def verify(
                     code="unreadable_application_document", message=str(exc)
                 ) from exc
 
+        # The label side, decided before anything is compared. Photographs the
+        # agent supplied always win: a picture of the bottle in front of them is
+        # evidence about that bottle, and the artwork on file is not.
+        label_source: LabelSource = "uploaded_photographs"
+        if not contents:
+            artwork = parsed_application.label_artwork if parsed_application else None
+            if artwork is None:
+                raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
+            contents = [artwork.content]
+            label_source = "application_artwork"
+
         application, sources = resolve_application(
             {
                 "brand_name": brand_name,
@@ -286,6 +313,7 @@ async def verify(
             application_document=(
                 document_result(parsed_application) if parsed_application else None
             ),
+            label_source=label_source,
         )
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
@@ -305,6 +333,10 @@ async def verify(
             "application_document_path": (
                 result.application_document.extraction_path if result.application_document else None
             ),
+            # A source name, not a value (NFR-6). It is here because an operator
+            # reading latency needs to know which submissions paid for reading
+            # the pictures inside a document (ADR 0010).
+            "label_source": result.label_source,
         },
     )
     return JSONResponse(status_code=200, content=result.model_dump())

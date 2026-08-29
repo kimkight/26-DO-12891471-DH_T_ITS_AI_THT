@@ -480,6 +480,36 @@ apply to a label image. The note under OOS-1 in
   anything is decoded, with the accepted types named (NFR-7).
 - No outbound network call is made to read the document (NFR-3), and nothing
   about it is persisted or logged beyond a byte count and the path used (NFR-6).
+- Given a document carrying embedded raster images at or above the size floor,
+  then each is read through the same local OCR pipeline label artwork is read
+  through, and what it says fills any application value the document's text
+  layer left empty (ADR 0010).
+- Given a value present in both the text layer and the embedded artwork, then
+  the text-layer value is used. The precedence, end to end, is: typed by the
+  agent, then the document's text layer or form fields, then the embedded
+  artwork, then absent, and the response says which of the four supplied each
+  value.
+- Given a document carrying no embedded images, or none above the size floor,
+  then it behaves exactly as it did before: the values the text layer does not
+  carry are reported as not found, with the reason.
+- Given an agent who uploaded the application and no photograph, and a document
+  whose embedded artwork could be read, then the largest such image is the label
+  side of the check, and the response says so.
+- Given the same submission with no readable artwork in the document, then the
+  verification does not run, the response names the missing piece and offers the
+  photograph upload, and no field reports an outcome. This is an FR-9 message
+  rather than a validation error on a form field.
+
+**The artwork path is a self-consistency check, and the requirement says so.**
+Where the label being checked came out of the application document, what has
+been established is that the artwork on file carries the mandatory elements and
+that it agrees with the typed form data. Nothing has been established about a
+physical bottle. Verifying the bottle against the filing still needs a
+photograph of that bottle, and the response and the interface both state this
+whenever it applies. The distinction is a requirement rather than a caveat,
+because a green result read as "this product is compliant" would be the tool
+overstating what it checked, which is the failure OOS-8 and FR-6 both exist to
+prevent.
 
 **On the batch path, this is how every value arrives.** Written when it was not:
 the batch kept the CSV contract in A-14, and per-row COLA documents were called
@@ -487,7 +517,10 @@ a possible future extension. [ADR 0009](adr/0009-batch-cola-documents.md) built
 them on 2026-08-28 and removed the CSV. A batch row is one label image paired
 with one COLA document by filename stem, nothing is typed, and each row's result
 carries the parsed block and the per-field source exactly as a single-label
-submission with an attached document does.
+submission with an attached document does. A row's document now fills values
+from its own embedded artwork too; the row still requires its label image,
+because batch rows are enumerated from the images so that the stream can report
+a total before any document is read (ADR 0010, "Effect on the batch path").
 
 ## 4. Non-functional requirements
 

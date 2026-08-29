@@ -442,6 +442,19 @@ reads records the application emitted rather than what CloudWatch received.
 | 56 | Submit a photograph whose EXIF tag disagrees with its pixels, for example an upright image saved with orientation 6 by an editor that turned the pixels and left the tag | The label still reads, because the quarter-turn check runs whether or not a tag was applied. The result shows the disagreement: a tag was found and applied, and a further turn was needed | Deployed-target evidence, 2026-08-28; A-15 |
 | 57 | Submit a front label whose brand is set in a blackletter logotype | The brand reports not found rather than a misreading of the logotype. **Reporting shrapnel from nearby fine print as the brand name is a failure of this test.** Out of scope to solve: see SG-1 and the v1.0.1 changelog entry | Deployed-target evidence, 2026-08-28; FR-1; OOS |
 
+| 58 | Upload the author's own mezcal COLA PDF and nothing else: no photograph, no typed values | All five compared fields reconcile, from that one file. The brand name and the class or type come from the document's text; the alcohol content and the net contents come from the label artwork embedded in it, and each field says which. **Two of five reconciling, which is what v1.0.1 returned, is a failure of this test.** | The author's evidence, 2026-08-29; FR-11; ADR 0010; A-17 |
+| 59 | Read the result of row 58 | It states, once, that the label checked was the artwork inside the application rather than a photo of a bottle, and that checking the bottle still needs a photo of the bottle. **A result that reads as a check of the product is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; OOS-8 |
+| 60 | Upload a COLA document whose only embedded pictures are a seal, a barcode and a signature block | The artwork values report not found with the reasons A-17 gives, nothing crashes, and the submission is refused with a message naming the missing piece and offering the photo upload. **A field outcome on that refusal is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; FR-9 |
+
+Rows 58 to 60 come from the author's second problem report of 2026-08-29 and
+are the first of the two problems reported that day. The document was a real
+TTB Form 5100.31, OMB No. 1513-0020, three pages, and the deployed v1.0.1 build
+reconciled two of its five fields. The values were not missing from the file:
+the alcohol content and the net contents were printed on the flat label artwork
+embedded on page 3 at 1750 by 1150 pixels, which the parser never looked at.
+Row 60 is the honest other half, because a filing that embeds only furniture has
+to fail visibly rather than by reporting a label side that is a signature block.
+
 Rows 54 to 57 come from one submission, on 2026-08-28, of a photograph of a
 Ketel One vodka back label: crisp, flat, the full government warning in clear
 capitals, and `750 mL`. The deployed v1.0.0 build returned the brand as `Sal.`,

@@ -51,12 +51,26 @@ function toUiError(body: unknown): UiError {
 export async function verifyLabel(
   images: File[],
   application: ApplicationData,
+  applicationDocument?: File | null,
 ): Promise<SingleOutcome> {
   const body = new FormData()
   // One `image` part per photograph of the same label (ADR 0007). One part is
   // exactly the request this function always sent, so a single-photograph
   // submission is unchanged on the wire.
   for (const image of images) body.append('image', image)
+  /*
+   * The application document goes with the request only when there is no
+   * photograph (ADR 0010). The label side then comes from the artwork embedded
+   * in that document, and the server needs the file to get at it.
+   *
+   * It is deliberately not sent when a photograph was chosen. The document has
+   * already been read once through `/api/read-application`, its values are in
+   * the fields being submitted, and sending it again would make the server
+   * parse it a second time for values the request already carries.
+   */
+  if (applicationDocument && !images.length) {
+    body.append('application_document', applicationDocument)
+  }
   for (const [key, value] of Object.entries(application)) {
     body.append(key, value)
   }

@@ -21,6 +21,12 @@ three ways in and each has to be exercised on artwork it did not also produce:
 * ``as_png_bytes`` draws the same lines as pixels, which is what a scan or a
   photograph of a printed form is. It carries no text layer at all.
 
+``as_pdf_bytes`` also takes ``images``: raster artwork embedded into the file as
+image XObjects on pages of their own, which is what a real filed application
+carries. The applicant affixes the label artwork to the application, so the
+values that are not items on the form are in those pictures rather than in the
+text layer. See [ADR 0010](../docs/adr/0010-embedded-label-artwork.md).
+
 Nothing here imports the application. It writes documents; it makes no claim
 about what the parser should find in them.
 
@@ -164,28 +170,94 @@ def registry_printout_lines(spec: ApplicationSpec, *, captions: str = "compact")
     return lines
 
 
-def as_pdf_bytes(lines: list[str], *, font_size: int = 9) -> bytes:
-    """Write the lines into a one-page PDF with a real text layer.
+def as_pdf_bytes(
+    lines: list[str], *, font_size: int = 9, images: list[bytes] | None = None
+) -> bytes:
+    """Write the lines into a PDF with a real text layer, plus any images given.
 
     Helvetica is one of the fourteen fonts every PDF reader carries, so nothing
     has to be embedded and the file has no dependency on a font being installed.
+
+    ``images`` are PNG bytes, each embedded as an image XObject on a page of its
+    own after the text page. That is the shape a real filed application has: the
+    applicant affixes the label artwork, so the application carries pictures of
+    the labels alongside the typed items. They are re-encoded to JPEG and
+    embedded with ``/DCTDecode``, which every PDF reader decodes without an
+    external filter, so the fixture depends on nothing but Pillow.
     """
-    content = _content_stream(lines, font_size)
-    objects = [
+    pages = [_text_page_content(lines, font_size)]
+    embedded = [_as_jpeg(image) for image in (images or [])]
+
+    # Object numbers are assigned by position in the list below, from 1.
+    # 1 catalog, 2 pages, 3 font, then one page object and one content stream
+    # per page, then one XObject per embedded image.
+    font_number = 3
+    first_page = 4
+    page_count = 1 + len(embedded)
+    first_image = first_page + page_count * 2
+    page_refs = [f"{first_page + index * 2} 0 R" for index in range(page_count)]
+
+    objects: list[bytes] = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
-        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
-            "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
-        ).encode("ascii"),
+        ("<< /Type /Pages /Kids [" + " ".join(page_refs) + f"] /Count {page_count} >>").encode(
+            "ascii"
+        ),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+    ]
+
+    for index in range(page_count):
+        content_number = first_page + index * 2 + 1
+        if index == 0:
+            resources = f"<< /Font << /F1 {font_number} 0 R >> >>"
+        else:
+            resources = f"<< /XObject << /Im0 {first_image + index - 1} 0 R >> >>"
+        objects.append(
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
+                f"/Resources {resources} /Contents {content_number} 0 R >>"
+            ).encode("ascii")
+        )
+        objects.append(_stream_object(pages[index] if index == 0 else _image_page_content()))
+
+    for jpeg, width, height in embedded:
+        objects.append(
+            (
+                f"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} "
+                "/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "
+                f"{len(jpeg)} >>\nstream\n"
+            ).encode("ascii")
+            + jpeg
+            + b"\nendstream"
+        )
+    return _assemble(objects, root=1)
+
+
+def _as_jpeg(png: bytes) -> tuple[bytes, int, int]:
+    """Re-encode PNG bytes as JPEG, which is what ``/DCTDecode`` embeds.
+
+    Quality 95 rather than the default, because the point of embedding the
+    artwork is that it keeps the resolution the page render loses, and a fixture
+    that quietly degraded it would test something other than what ships.
+    """
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=95)
+    return buffer.getvalue(), image.width, image.height
+
+
+def _image_page_content() -> bytes:
+    """Draw the page's single image XObject across the whole page."""
+    return (f"q\n{PAGE_WIDTH} 0 0 {PAGE_HEIGHT} 0 0 cm\n/Im0 Do\nQ").encode("ascii")
+
+
+def _stream_object(content: bytes) -> bytes:
+    return (
         b"<< /Length "
         + str(len(content)).encode("ascii")
         + b" >>\nstream\n"
         + content
-        + b"\nendstream",
-        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
-    ]
-    return _assemble(objects, root=1)
+        + b"\nendstream"
+    )
 
 
 def as_fillable_pdf_bytes(spec: ApplicationSpec, *, font_size: int = 9) -> bytes:
@@ -296,6 +368,11 @@ def as_png_bytes(lines: list[str], *, font_size: int = 22) -> bytes | None:
 def _escape(text: str) -> str:
     """Escape the three characters that are syntax inside a PDF string."""
     return text.replace("\\", r"\\").replace("(", r"\(").replace(")", r"\)")
+
+
+def _text_page_content(lines: list[str], font_size: int) -> bytes:
+    """The text page's content stream. A thin name for what ``as_pdf_bytes`` needs."""
+    return _content_stream(lines, font_size)
 
 
 def _content_stream(lines: list[str], font_size: int) -> bytes:

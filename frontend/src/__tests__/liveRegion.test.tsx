@@ -155,9 +155,17 @@ describe('the form', () => {
     }
   })
 
-  it('keeps the check off until a label image is chosen, and says why', () => {
+  it('keeps the check off until there is something to check, and says why', () => {
+    // Two things now turn it on: a photograph, or an application carrying its
+    // own label artwork (ADR 0010). The hint names both, because an agent
+    // holding only the COLA document should not be told to go and find a
+    // bottle.
     render(<SingleLabelTab />)
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
-    expect(screen.getByText('Choose a label image to turn on the check.')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Choose a label image, or attach an application that carries the label artwork/i,
+      ),
+    ).toBeInTheDocument()
   })
 })

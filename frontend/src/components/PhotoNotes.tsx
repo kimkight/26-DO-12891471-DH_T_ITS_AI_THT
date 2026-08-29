@@ -13,7 +13,7 @@
  * every check is noise, and NFR-4's benchmark is an agent who should not have
  * to read past anything.
  */
-import { hasPhotoNotes, photoNote } from '../lib/photos'
+import { hasPhotoNotes, photoItemLabel, photoListHeading, photoNote } from '../lib/photos'
 import type { PhotoResult } from '../types'
 
 export function PhotoNotes({ photos }: { photos: PhotoResult[] }) {
@@ -22,14 +22,14 @@ export function PhotoNotes({ photos }: { photos: PhotoResult[] }) {
   return (
     <section className="photo-notes" aria-labelledby="photo-notes-heading">
       <h3 className="card__subtitle" id="photo-notes-heading">
-        {photos.length === 1 ? 'Your photo' : `Your ${photos.length} photos`}
+        {photoListHeading(photos)}
       </h3>
       <ul className="photo-notes__list">
         {photos.map((photo) => {
           const note = photoNote(photo)
           return (
             <li key={photo.index} className={photo.text_found ? '' : 'photo-notes__item--failed'}>
-              <strong>Photo {photo.index}</strong>
+              <strong>{photoItemLabel(photo)}</strong>
               {note ? <> {note}</> : <> We read this one as it arrived.</>}
             </li>
           )

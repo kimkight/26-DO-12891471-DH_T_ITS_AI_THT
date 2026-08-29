@@ -27,7 +27,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-14](#a-14) | ~~Batch application data arrives as one CSV keyed by image filename~~ **Superseded** by [ADR 0009](adr/0009-batch-cola-documents.md) | FR-8, US-9 | Was medium; it was wrong |
 | [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
 | [A-16](#a-16) | Three photographs of one label is enough, and no source states a number | FR-1, US-22 | Low |
-| [A-17](#a-17) | The COLA form field map, and that three of the five compared values are not items on the form | FR-11, US-23 | Medium |
+| [A-17](#a-17) | The COLA form field map; three of the five compared values are not items on the form, and two of those three are recoverable from the label artwork embedded in a filing (ADR 0010) | FR-11, US-23 | Medium |
 
 ---
 
@@ -592,6 +592,42 @@ them (NFR-6, OOS-6).
    and the form itself says previous editions are obsolete without saying what
    they contained. Tracked as OQ-22.
 
+**What the evidence corrected again, 2026-08-29: two of those three values are
+recoverable after all.**
+
+The author put a real filing through the deployed v1.0.1 build: TTB Form
+5100.31, OMB No. 1513-0020, three pages. Two of the five fields reconciled, and
+the reason was not that the values were missing from the document. The alcohol
+content and the net contents are absent from the **text layer**, exactly as the
+map above says. They are not absent from the **file**: pages 2 and 3 each carry
+an embedded raster image, and page 3 is the complete flat label artwork at
+1750 by 1150 pixels, carrying the brand, the class or type, `42% ALC BY VOL`,
+`750 ML` and the full government warning. The parser was reading only the text
+and never looked at the pictures.
+
+So the map above stands as a map of the **form's items**, and this correction is
+added to it: **where a filing embeds its label artwork, the class or type
+designation, the alcohol content and the net contents are recoverable from that
+artwork by OCR**, and they are now read from it.
+[ADR 0010](adr/0010-embedded-label-artwork.md) records how, and the precedence:
+typed by the agent, then the document's text layer or form fields, then the
+embedded artwork, then absent. Artwork never overrides text, because a value the
+file states is read and a value off a picture is recognized, and the two are not
+equal evidence.
+
+Two things this correction does **not** change. The beverage type is still item
+5's three check boxes and is still not readable: a label does not print a form
+answer, so the artwork cannot supply it either. And a label lifted out of an
+application and compared against that same application is a self-consistency
+check rather than an independent verification of a bottle; ADR 0010 states that
+in the response and on screen, not only here.
+
+What is now assumed rather than read is which filings embed their artwork at
+all, and how large those images typically are. One document establishes that the
+practice exists and that the form's item 15 speaks of "THE LABELS AFFIXED
+BELOW". It does not establish the distribution. Tracked as
+[OQ-24](OPEN_QUESTIONS.md#oq-24).
+
 **Confirmed or falsified by:** running the parser against a real filed
 application and a real Registry printout, which the author could not do without
 using an applicant's record. Ask Sarah Chen or Jenny Park which of the two
@@ -605,3 +641,17 @@ who accepted the prefill would have compared against the label. In both cases
 every parsed value is shown for confirmation in an editable field before the
 check runs (ADR 0008), so the agent can see and correct it; that is the control,
 and it is a control that depends on the agent reading what was prefilled.
+
+The artwork path added on 2026-08-29 carries its own version of the same risk,
+one step weaker: a value recognized off a picture can be misread where a value
+read out of a text layer cannot. The control is the same and is made visible
+rather than assumed: every value says which of the four sources it came from,
+and the artwork case carries a line telling the agent to check it.
+
+**Traceability:** Source: TTB F 5100.31 (04/2023) as downloaded; the author's
+use of the deployed prototype, 2026-08-27, 2026-08-28 and 2026-08-29. Affects
+FR-11 and US-23. Recorded in [ADR 0008](adr/0008-cola-form-as-application-input.md)
+and [ADR 0010](adr/0010-embedded-label-artwork.md). Tested by
+`backend/tests/test_application_form.py` and
+`backend/tests/test_embedded_artwork.py`. Opens
+[OQ-22](OPEN_QUESTIONS.md#oq-22) and [OQ-24](OPEN_QUESTIONS.md#oq-24).
