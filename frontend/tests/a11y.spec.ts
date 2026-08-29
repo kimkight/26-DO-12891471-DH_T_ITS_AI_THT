@@ -531,24 +531,28 @@ const RESULT = {
     {
       index: 1,
       orientation: {
+        exif_orientation: null,
         exif_transposed: false,
         rotation_degrees: 90,
         method: 'osd',
         confidence: 13.4,
       },
       ocr_confidence: 94.1,
+      read_path: { variant: 'preprocessed', preprocessed_confidence: 94.1, plain_confidence: null },
       text_found: true,
       error: null,
     },
     {
       index: 2,
       orientation: {
+        exif_orientation: 6,
         exif_transposed: true,
         rotation_degrees: 0,
         method: 'osd',
         confidence: 12.8,
       },
       ocr_confidence: 91.7,
+      read_path: { variant: 'plain', preprocessed_confidence: 40.2, plain_confidence: 91.7 },
       text_found: true,
       error: null,
     },

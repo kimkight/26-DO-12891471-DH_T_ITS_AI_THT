@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from app.application_form import APPLICATION_FIELDS, ParsedApplication
 from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
-from app.ocr import Orientation, UndecodableImageError, extract_text
+from app.ocr import Orientation, ReadPath, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
 from app.schemas import (
     FIELD_LABELS,
@@ -38,6 +38,7 @@ from app.schemas import (
     OrientationDetail,
     ParsedApplicationField,
     PhotoResult,
+    ReadPathDetail,
     VerificationResult,
     WarningResult,
 )
@@ -229,6 +230,7 @@ class _Read:
     orientation: Orientation
     confidence: float
     ocr_ms: float
+    read_path: ReadPath = ReadPath()
     error: VerificationError | None = None
 
 
@@ -305,6 +307,7 @@ def _read_one(index: int, content: bytes) -> _Read:
             orientation=ocr.orientation,
             confidence=ocr.mean_confidence,
             ocr_ms=ocr.elapsed_ms,
+            read_path=ocr.read_path,
             error=VerificationError(code="no_text_found", message=NO_TEXT_MESSAGE),
         )
 
@@ -314,6 +317,7 @@ def _read_one(index: int, content: bytes) -> _Read:
         orientation=ocr.orientation,
         confidence=ocr.mean_confidence,
         ocr_ms=ocr.elapsed_ms,
+        read_path=ocr.read_path,
     )
 
 
@@ -451,12 +455,18 @@ def _photo_result(read: _Read) -> PhotoResult:
     return PhotoResult(
         index=read.index,
         orientation=OrientationDetail(
+            exif_orientation=read.orientation.exif_orientation,
             exif_transposed=read.orientation.exif_transposed,
             rotation_degrees=read.orientation.rotation_degrees,
             method=read.orientation.method,
             confidence=read.orientation.confidence,
         ),
         ocr_confidence=read.confidence,
+        read_path=ReadPathDetail(
+            variant=read.read_path.variant,
+            preprocessed_confidence=read.read_path.preprocessed_confidence,
+            plain_confidence=read.read_path.plain_confidence,
+        ),
         text_found=read.parsed is not None,
         error=None
         if read.error is None
@@ -534,9 +544,18 @@ def build_result(
             PhotoResult(
                 index=1,
                 orientation=OrientationDetail(
-                    exif_transposed=False, rotation_degrees=0, method="disabled", confidence=None
+                    exif_orientation=None,
+                    exif_transposed=False,
+                    rotation_degrees=0,
+                    method="disabled",
+                    confidence=None,
                 ),
                 ocr_confidence=ocr_confidence,
+                read_path=ReadPathDetail(
+                    variant="preprocessed",
+                    preprocessed_confidence=ocr_confidence,
+                    plain_confidence=None,
+                ),
                 text_found=True,
             )
         ],
