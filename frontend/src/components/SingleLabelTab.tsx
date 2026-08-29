@@ -14,8 +14,8 @@
  * normal case is that the agent is holding the COLA document, and then the five
  * boxes are a confirmation surface rather than a data-entry task. The layout
  * used to say the opposite, greeting the agent with five empty text boxes and
- * styling the upload as the alternative, so it is inverted: photos, then the
- * application, then check.
+ * styling the upload as the alternative, so it is inverted: upload, then check,
+ * with the boxes behind a disclosure.
  *
  * The typed fields open in exactly three cases, and never close themselves:
  *
@@ -23,7 +23,8 @@
  *    off another screen.
  * 2. A parsed document leaves gaps. The form proper carries no class or type,
  *    alcohol content or net contents boxes (A-17), so gaps are the normal
- *    outcome rather than an error; the fields appear with the parsed values
+ *    outcome rather than an error, though the artwork embedded in the document
+ *    may now close them (ADR 0010); the fields appear with the parsed values
  *    filled and the gaps empty.
  * 3. A document fails to parse. FR-9's message names the problem and the fields
  *    open as the fallback.
@@ -44,12 +45,28 @@
  * is a legitimate submission and blocking it in the browser would contradict
  * the requirement the API implements.
  *
- * **More than one photograph of the same label (ADR 0007).** A label wraps a
- * round bottle, so no single photograph shows all of it flat. The form starts
- * with one photo slot, which is the case almost every check will be, and an
- * agent who needs a second or a third adds them one at a time. It is one label
- * throughout: one set of application values, one result, one set of five field
- * cards. The batch tab is still the place for many different labels.
+ * **One upload, for everything (FR-12, ADR 0011).** There is one file picker.
+ * It takes the label application, photographs of the label, or any mix, as PDFs
+ * or images, and the server decides what each file is from the file rather than
+ * from which control it arrived in. Two pickers asked the agent to sort their
+ * own files before the tool had looked at them, and an agent who guessed wrong
+ * got a COLA form read as label artwork. The classification comes back per file
+ * and is shown, so a wrong one is visible rather than silent.
+ *
+ * The check turns on as soon as anything is uploaded. Three submissions are
+ * valid and all three complete: the application alone, where its own embedded
+ * artwork is the label side (ADR 0010); a photograph plus typed values; or
+ * both. An application with no readable artwork and no photograph is refused
+ * with a message naming the missing piece, which is an FR-9 message rather than
+ * a validation error on a field.
+ *
+ * **More than one photograph of the same label (ADR 0007) still applies.** A
+ * label wraps a round bottle, so no single photograph shows all of it flat, and
+ * up to TTB_MAX_LABEL_PHOTOS pictures of one label are still read independently
+ * and merged. What has gone is the row of numbered slots: an agent adds files
+ * and the server counts them. It is one label throughout: one set of
+ * application values, one result, one set of five field cards. The batch tab is
+ * still the place for many different labels.
  *
  * **The application, uploaded rather than typed (FR-11, ADR 0008).** The five
  * values are the values the applicant already submitted on TTB F 5100.31, so
@@ -69,19 +86,18 @@
  * the disclosure otherwise, and the rule that ran is named in the result's own
  * reason line rather than inferred from this control.
  */
-import { useEffect, useRef, useState } from 'react'
-import { ApplicationUpload } from './ApplicationUpload'
-import { DropZone } from './DropZone'
+import { useState } from 'react'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
 import { ResultCard } from './ResultCard'
-import { Chip, Kicker } from './Ui'
+import { Kicker } from './Ui'
+import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import { ARTWORK_LABEL_LINE } from '../lib/applicationSources'
 import { announcement } from '../lib/outcomes'
 import { EMPTY_APPLICATION } from '../types'
-import type { ApplicationData, ApplicationDocumentResult } from '../types'
+import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
 /**
  * The mark on a field whose value was read off the uploaded application.
@@ -131,21 +147,10 @@ const TEXT_FIELDS: { name: keyof ApplicationData; label: string; hint?: string }
   { name: 'net_contents', label: 'Net contents', hint: 'For example 750 mL' },
 ]
 
-/**
- * Mirrors TTB_MAX_LABEL_PHOTOS. The API refuses more than this and names the
- * limit; this stops an agent reaching that refusal by hiding the control that
- * would cause it, which is the shape NFR-4 asks for.
- */
-const MAX_PHOTOS = 3
-
-const ACCEPTED = 'image/jpeg,image/png,image/webp,image/tiff'
-
 export function SingleLabelTab() {
-  // One slot per photograph, in submission order. `null` is an empty slot: an
-  // added slot exists before a file is chosen for it, so the drop zone has
-  // somewhere to be.
-  const [slots, setSlots] = useState<(File | null)[]>([null])
-  const [slotNews, setSlotNews] = useState('')
+  // Everything the agent uploaded for this label, in the order they chose it.
+  // One list, not two: what each file is, is the server's judgement (FR-12).
+  const [files, setFiles] = useState<File[]>([])
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION)
   // Which fields currently hold a value read off an uploaded application, so
   // each one can say so. A field the agent then edits leaves this set.
@@ -154,37 +159,9 @@ export function SingleLabelTab() {
   // agent, or by one of the two document cases below, and never closed by
   // anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
-  /*
-   * The attached application, when it carries label artwork of its own
-   * (ADR 0010). Held here rather than in `ApplicationUpload` because it is the
-   * label side of the check when no photograph was taken, and the check is
-   * submitted from here.
-   */
-  const [artworkDocument, setArtworkDocument] = useState<File | null>(null)
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
-  const addRef = useRef<HTMLButtonElement>(null)
-  /*
-   * Put focus back on "Add another photo of this label" after a slot is
-   * removed. It has to happen after the render rather than in the click
-   * handler: removing the third slot is what brings that button back into the
-   * DOM, so at the moment of the click the ref is still null and focus would
-   * fall to the document body, which is where a keyboard user loses their
-   * place.
-   *
-   * A ref rather than state for the flag, and cleared before the focus call.
-   * State would mean a second render whose only purpose is to unset a boolean
-   * nothing renders, which is the cascading-render shape React warns about.
-   */
-  const returnFocusToAdd = useRef(false)
-  useEffect(() => {
-    if (!returnFocusToAdd.current) return
-    returnFocusToAdd.current = false
-    addRef.current?.focus()
-  }, [slots.length])
-
-  const photos = slots.filter((file): file is File => file !== null)
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
@@ -207,8 +184,22 @@ export function SingleLabelTab() {
    * back, every field stays editable, and the live region in ApplicationUpload
    * names what was filled.
    */
-  function fillFromDocument(document: ApplicationDocumentResult, file: File) {
-    setArtworkDocument(document.label_artwork_available ? file : null)
+  /**
+   * Fill the fields from what the server read off the uploaded application.
+   *
+   * Called with the whole classification, because the gaps that open the
+   * disclosure are a property of the application that was found, and a
+   * submission carrying only label pictures found none.
+   */
+  function fillFromClassification(result: ClassificationResult) {
+    if (!result.application_document) {
+      setFromForm(new Set())
+      return
+    }
+    fillFromDocument(result.application_document)
+  }
+
+  function fillFromDocument(document: ApplicationDocumentResult) {
     const filled = document.fields.filter((entry) => entry.found_on_document)
     setApplication((previous) => {
       const next = { ...previous }
@@ -239,10 +230,9 @@ export function SingleLabelTab() {
     )
   }
 
-  /** Taking the document back off the form clears only the marks, not the values. */
+  /** Taking every file back off clears only the marks, not the values. */
   function clearFormMarks() {
     setFromForm(new Set())
-    setArtworkDocument(null)
   }
 
   /**
@@ -255,7 +245,6 @@ export function SingleLabelTab() {
    */
   function openFieldsAfterFailure() {
     setFromForm(new Set())
-    setArtworkDocument(null)
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
@@ -269,44 +258,24 @@ export function SingleLabelTab() {
     setFieldsOpen((open) => !open)
   }
 
-  function setSlot(position: number, file: File | null) {
-    setSlots((previous) => previous.map((slot, index) => (index === position ? file : slot)))
-  }
-
-  function addSlot() {
-    if (slots.length >= MAX_PHOTOS) return
-    const next = slots.length + 1
-    setSlots((previous) => [...previous, null])
-    setSlotNews(
-      next === MAX_PHOTOS
-        ? `Photo ${next} added. That is the most photos you can add for one label.`
-        : `Photo ${next} added. You can add ${MAX_PHOTOS - next} more.`,
-    )
-  }
-
-  function removeSlot(position: number) {
-    setSlots((previous) => previous.filter((_, index) => index !== position))
-    const remaining = slots.length - 1
-    setSlotNews(
-      `Photo ${position + 1} removed. ${remaining} photo${remaining === 1 ? '' : 's'} left.`,
-    )
-    returnFocusToAdd.current = true
-  }
-
   /*
-   * There is something to check when the agent took a photograph, or when the
-   * application they attached carries its own label artwork (ADR 0010). The
-   * author's words on 2026-08-29: "if COLA is uploaded, I don't also need an
-   * image."
+   * There is something to check as soon as anything has been uploaded. The
+   * label image requirement is gone as a hard gate (FR-12): the author's words
+   * on 2026-08-29 were "if COLA is uploaded, I don't also need an image".
+   *
+   * What cannot be checked is decided by the server, which has read the files,
+   * and reported as an FR-9 message naming the missing piece. Guessing at it
+   * here would mean this component classifying files it has not read, which is
+   * the thing FR-12 removes.
    */
-  const canCheck = photos.length > 0 || artworkDocument !== null
+  const canCheck = files.length > 0
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
-    setOutcome(await verifyLabel(photos, application, artworkDocument))
+    setOutcome(await verifyLabel(files, application))
     setChecking(false)
   }
 
@@ -327,77 +296,10 @@ export function SingleLabelTab() {
         <h2 id="submit-heading">Point. Upload. Check.</h2>
 
         <form onSubmit={submit} noValidate>
-          <fieldset className="photos">
-            <legend className="photos__legend">
-              Photos of this label{' '}
-              <span className="photos__count">
-                <Chip>
-                  {photos.length} of {MAX_PHOTOS} chosen
-                </Chip>
-              </span>
-            </legend>
-            <p className="field__hint" id="photos-hint">
-              One photo is usually enough. A label wraps around the bottle, so add a second or a
-              third if one photo cannot show all of it.
-            </p>
-
-            {slots.map((file, position) => (
-              <div className="photos__slot" key={position}>
-                <DropZone
-                  label={position === 0 ? 'Label image' : `Label image, photo ${position + 1}`}
-                  hint="Drag a file here, or choose one. JPEG, PNG, WebP or TIFF."
-                  accept={ACCEPTED}
-                  preview
-                  files={file ? [file] : []}
-                  onFiles={(chosen) => setSlot(position, chosen[0] ?? null)}
-                />
-                {position > 0 ? (
-                  <button
-                    className="button button--quiet"
-                    type="button"
-                    onClick={() => removeSlot(position)}
-                  >
-                    Remove photo {position + 1}
-                  </button>
-                ) : null}
-              </div>
-            ))}
-
-            {slots.length < MAX_PHOTOS ? (
-              <button
-                ref={addRef}
-                className="button button--quiet"
-                type="button"
-                onClick={addSlot}
-                aria-describedby="photos-hint"
-              >
-                Add another photo of this label
-              </button>
-            ) : (
-              <p className="field__hint">
-                That is the most photos you can add for one label. Remove one to add a different
-                one.
-              </p>
-            )}
-
-            {/*
-              Adding and removing a slot changes the form without moving focus
-              anywhere that announces it, so the change is spoken here. Its own
-              region rather than the results one, which would be clobbered by
-              whichever text was written last.
-            */}
-            <div
-              className="visually-hidden"
-              role="status"
-              aria-live="polite"
-              aria-label="Photo list"
-            >
-              {slotNews}
-            </div>
-          </fieldset>
-
-          <ApplicationUpload
-            onParsed={fillFromDocument}
+          <UploadPanel
+            files={files}
+            onFilesChange={setFiles}
+            onClassified={fillFromClassification}
             onCleared={clearFormMarks}
             onUnreadable={openFieldsAfterFailure}
           />
@@ -516,14 +418,8 @@ export function SingleLabelTab() {
           </button>
           {!canCheck ? (
             <p className="field__hint">
-              Choose a label image, or attach an application that carries the label artwork, to turn
-              on the check.
-            </p>
-          ) : null}
-          {!photos.length && artworkDocument ? (
-            <p className="field__hint">
-              We will check the label artwork inside the application you attached. Add a photo if
-              you want to check a bottle instead.
+              Upload something to turn on the check: the label application, a photo of the label, or
+              both.
             </p>
           ) : null}
         </form>
@@ -586,9 +482,10 @@ export function SingleLabelTab() {
 
         {!result && !outcome?.error && !checking ? (
           <p className="placeholder">
-            Take your photos, attach the label application, and select
-            <strong> Check this label</strong>. The five results appear here. No application to
-            attach? Open <strong>Or type the application values</strong> and type them instead.
+            Upload the label application, a photo of the label, or both, then select
+            <strong> Check this label</strong>. The five results appear here. Nothing to upload for
+            the application side? Open <strong>Or type the application values</strong> and type them
+            instead.
           </p>
         ) : null}
       </section>

@@ -41,20 +41,24 @@ from starlette.responses import Response
 
 from app import batch
 from app.application_form import UnreadableDocumentError, parse_application_document
+from app.classify import ClassifiedFile, SubmittedFile, classify, describe
 from app.config import settings
+from app.ocr import OcrResult
 from app.schemas import (
     ApplicationDocumentResult,
+    ClassificationResult,
     ErrorDetail,
     ErrorResponse,
+    FileClassification,
     VerificationResult,
 )
 from app.verify import (
+    NO_FILES_MESSAGE,
     NO_LABEL_MESSAGE,
     LabelSource,
     VerificationError,
     build_result,
     check_document_media_type,
-    check_media_type,
     check_size,
     document_result,
     resolve_application,
@@ -103,6 +107,11 @@ def _envelope_limit(path: str) -> int | None:
         return settings.effective_max_verify_bytes
     if path == "/api/read-application":
         return settings.max_upload_bytes
+    if path == "/api/classify":
+        # The same envelope the single-label check accepts, because it is the
+        # same pile of files: the agent chooses them once and both routes see
+        # the whole set (FR-12, ADR 0011).
+        return settings.effective_max_verify_bytes
     if path == "/api/verify-batch":
         return settings.effective_max_batch_bytes
     return None
@@ -186,14 +195,28 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
     summary="Verify one label against its application data",
 )
 async def verify(
+    files: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "Everything being submitted for one label, in one repeated "
+                "part: the label application as a PDF or an image of one, "
+                "photographs of the label, or any mix of the two. The server "
+                "decides what each file is from the file rather than from the "
+                "part it arrived in, and reports that per file in `files` "
+                "(FR-12, ADR 0011)."
+            )
+        ),
+    ] = [],  # noqa: B006
     image: Annotated[
         list[UploadFile],
         File(
             description=(
-                "Label artwork. One part, or the same part repeated for up to "
-                "TTB_MAX_LABEL_PHOTOS photographs of the same label (ADR 0007). "
-                "Optional when `application_document` carries its own label "
-                "artwork, which is then used as the label side (ADR 0010)."
+                "Label artwork, under the older name. One part, or the same "
+                "part repeated for up to TTB_MAX_LABEL_PHOTOS photographs of "
+                "the same label (ADR 0007). Kept so that a caller written "
+                "against v1.0 keeps working; a file sent here still goes "
+                "through the same classifier."
             )
         ),
         # Defaulted rather than required, so that a submission carrying only an
@@ -205,10 +228,11 @@ async def verify(
         UploadFile | None,
         File(
             description=(
-                "The label application, as an alternative to typing the values: "
-                "a COLA document (PDF, or a scan or photograph of one). Read "
-                "locally, with no call to the COLA system (FR-11, ADR 0008, "
-                "OOS-1)."
+                "The label application, under the older name: a COLA document "
+                "(PDF, or a scan or photograph of one). Read locally, with no "
+                "call to the COLA system (FR-11, ADR 0008, OOS-1). Kept for the "
+                "same reason `image` is; a file sent here goes through the same "
+                "classifier."
             )
         ),
     ] = None,
@@ -218,13 +242,20 @@ async def verify(
     net_contents: Annotated[str, Form()] = "",
     beverage_type: Annotated[str, Form()] = "",
 ) -> JSONResponse:
-    """Verify one label from one to three photographs of it, or from the application.
+    """Verify one label from whatever was uploaded for it.
 
-    One `image` part behaves exactly as it always did. More than one is ADR
-    0007: a label wraps a round bottle, so no single photograph shows all of it
-    flat, and the photographs are read independently and their fields merged.
+    **One repeated `files` part is the contract** (FR-12, ADR 0011): the label
+    application, photographs of the label, or any mix, and the server decides
+    what each file is from the file itself. `image` and `application_document`
+    are the older names for the same two things and still work; whatever arrives
+    in them goes through the same classifier, so a COLA PDF dropped into the
+    photo part is still read as the application.
 
-    **No `image` part at all is ADR 0010.** An applicant affixes the label
+    More than one label picture is ADR 0007: a label wraps a round bottle, so no
+    single photograph shows all of it flat, and the photographs are read
+    independently and their fields merged.
+
+    **No label picture at all is ADR 0010.** An applicant affixes the label
     artwork to the application, so a filed COLA document carries pictures of the
     labels. When none is uploaded and the document carries readable artwork, the
     largest such picture becomes the label side, and the response says so in
@@ -232,60 +263,84 @@ async def verify(
     the request is refused with a message naming the missing piece, which is an
     FR-9 message rather than a validation error on a field.
 
-    The application values may be typed, or read from an uploaded COLA document
-    in the `application_document` part, or both: a typed value overrides the
-    parsed one field by field, and the response says which source each value
-    came from (FR-11, ADR 0008). Reading that document is document parsing, not
+    The application values may be typed, or read from the uploaded COLA
+    document, or both: a typed value overrides the parsed one field by field,
+    and the response says which of the four sources each value came from
+    (FR-11, ADR 0008, ADR 0010). Reading that document is document parsing, not
     the COLA system integration OOS-1 excludes: it opens no socket and needs no
     credentials.
 
     Nothing is persisted and nothing is logged about it.
     """
-    # Counted before anything is read, decoded or compared, and named in the
+    try:
+        submitted = await _read_parts(files, image, application_document)
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+
+    # Classification happens before anything is compared, and reads each image
+    # exactly once; the read is handed on to whichever side the file lands on
+    # (ADR 0011).
+    if not submitted:
+        # Distinct from "your document carried no artwork" below, because the
+        # agent's next action differs: one needs a file, the other needs a
+        # different file (FR-9).
+        return _error(422, "no_files", NO_FILES_MESSAGE)
+
+    sorted_files = classify(submitted)
+    documents = [entry for entry in sorted_files if entry.side == "application_document"]
+    labels = [entry for entry in sorted_files if entry.side == "label_image"]
+
+    # Counted after sorting and before anything is compared, and named in the
     # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
     # parses the multipart form while resolving these parameters; the guarantee
-    # kept here is that no photograph is processed.
-    if len(image) > settings.max_label_photos:
+    # kept here is that no photograph is verified.
+    if len(labels) > settings.max_label_photos:
         return _error(
             413,
             "too_many_photos",
             (
-                f"{len(image)} photographs were submitted for one label. Send at "
-                f"most {settings.max_label_photos} photographs of the same label, "
+                f"{len(labels)} pictures of the label were submitted. Send at "
+                f"most {settings.max_label_photos} pictures of the same label, "
                 "or use the batch tab for many different labels."
             ),
             limit=f"maximum photographs of one label: {settings.max_label_photos}",
         )
+    if len(documents) > 1:
+        return _error(
+            413,
+            "too_many_application_documents",
+            (
+                f"{len(documents)} of the files you sent read as label "
+                "applications. Send one application for one label, plus any "
+                "photos of that label."
+            ),
+            limit="maximum application documents for one label: 1",
+        )
 
-    contents: list[bytes] = []
     document_bytes = 0
     try:
-        for part in image:
-            # Checked before any byte is decoded (NFR-7, second criterion).
-            check_media_type(part.content_type)
-            content = await part.read()
-            check_size(content)
-            contents.append(content)
-
         parsed_application = None
-        if application_document is not None:
-            check_document_media_type(application_document.content_type)
-            document = await application_document.read()
-            check_size(document)
-            document_bytes = len(document)
+        if documents:
+            document = documents[0]
+            document_bytes = len(document.file.content)
             try:
                 parsed_application = parse_application_document(
-                    document, application_document.content_type
+                    document.file.content,
+                    document.file.content_type,
+                    pre_read=document.read,
                 )
             except UnreadableDocumentError as exc:
-                # FR-9 applied to the second upload: the message names the
+                # FR-9 applied to the application side: the message names the
                 # problem and the response carries no field outcomes at all. The
                 # typed path is still open, and the message says so.
                 raise VerificationError(
                     code="unreadable_application_document", message=str(exc)
                 ) from exc
 
-        # The label side, decided before anything is compared. Photographs the
+        contents = [entry.file.content for entry in labels]
+        pre_read: list[OcrResult | None] = [entry.read for entry in labels]
+
+        # The label side, decided before anything is compared. Pictures the
         # agent supplied always win: a picture of the bottle in front of them is
         # evidence about that bottle, and the artwork on file is not.
         label_source: LabelSource = "uploaded_photographs"
@@ -294,6 +349,7 @@ async def verify(
             if artwork is None:
                 raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
             contents = [artwork.content]
+            pre_read = [None]
             label_source = "application_artwork"
 
         application, sources = resolve_application(
@@ -314,7 +370,9 @@ async def verify(
                 document_result(parsed_application) if parsed_application else None
             ),
             label_source=label_source,
+            pre_read=pre_read,
         )
+        result.files = [_classification(entry) for entry in sorted_files]
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
 
@@ -323,8 +381,12 @@ async def verify(
     logger.info(
         "verification completed",
         extra={
-            "bytes_received": sum(len(content) for content in contents),
+            "bytes_received": sum(len(entry.file.content) for entry in sorted_files),
             "photos_received": len(contents),
+            # A count of files and a count of each side. No filename, no
+            # content, nothing either one said (NFR-6).
+            "files_received": len(sorted_files),
+            "documents_classified": len(documents),
             "ocr_ms": result.ocr_ms,
             "beverage_type_supplied": bool(beverage_type.strip()),
             # Counts and a path name only. No item value, no filename, nothing
@@ -393,6 +455,132 @@ async def read_application(
         },
     )
     return JSONResponse(status_code=200, content=document_result(parsed).model_dump())
+
+
+async def _read_parts(
+    files: list[UploadFile],
+    image: list[UploadFile],
+    application_document: UploadFile | None,
+) -> list[SubmittedFile]:
+    """Read every uploaded part into memory, checking each before it is decoded.
+
+    The three parts are folded into one list here and sorted by the classifier
+    afterwards, which is the whole of FR-12 on the server: the part a file
+    arrived in stops meaning anything the moment it has been read.
+
+    The media-type check happens per file and before anything is decoded
+    (NFR-7). It is the document list, PDF plus the image types, because the one
+    part now accepts both; a file whose type is not on that list is refused with
+    the accepted set named.
+    """
+    parts = [*files, *image, *([application_document] if application_document else [])]
+    submitted: list[SubmittedFile] = []
+    for position, part in enumerate(parts, start=1):
+        check_document_media_type(part.content_type)
+        content = await part.read()
+        check_size(content)
+        submitted.append(
+            SubmittedFile(
+                filename=part.filename or f"file-{position}",
+                content_type=part.content_type,
+                content=content,
+            )
+        )
+    return submitted
+
+
+def _classification(entry: ClassifiedFile, used: bool = True) -> FileClassification:
+    """One sorted file, as the response reports it (FR-12)."""
+    return FileClassification(
+        filename=entry.filename,
+        classified_as=entry.side,
+        basis=entry.basis,
+        reason=describe(entry),
+        used=used,
+    )
+
+
+@router.post(
+    "/classify",
+    response_model=ClassificationResult,
+    responses={
+        413: {"model": ErrorResponse},
+        415: {"model": ErrorResponse},
+        422: {"model": ErrorResponse},
+    },
+    summary="Say what each uploaded file is, and read the application side",
+)
+async def classify_uploads(
+    files: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "The files an agent has chosen for one label: the application, "
+                "photographs of the label, or any mix."
+            )
+        ),
+    ] = [],  # noqa: B006
+) -> JSONResponse:
+    """Sort the uploaded files and read the application side, verifying nothing.
+
+    **This exists for the interface, not to give the API a second way in**, in
+    exactly the sense `POST /api/read-application` does (ADR 0008). An agent
+    dropping files into one control has to be told what each one was taken to
+    be, and has to see the application values before a check runs so they can
+    confirm or correct them. A caller with no interface should send everything
+    to `POST /api/verify` in one request instead, which classifies the same way
+    and reads each image once.
+
+    Nothing is compared, nothing is persisted (NFR-6), and no outbound call is
+    made (NFR-3).
+    """
+    try:
+        submitted = await _read_parts(files, [], None)
+    except VerificationError as exc:
+        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+
+    if not submitted:
+        return _error(422, "no_files", NO_FILES_MESSAGE)
+
+    sorted_files = classify(submitted)
+    documents = [entry for entry in sorted_files if entry.side == "application_document"]
+    labels = [entry for entry in sorted_files if entry.side == "label_image"]
+
+    parsed = None
+    application_error = None
+    if documents:
+        try:
+            parsed = parse_application_document(
+                documents[0].file.content,
+                documents[0].file.content_type,
+                pre_read=documents[0].read,
+            )
+        except UnreadableDocumentError as exc:
+            # The classification stands and is reported; what failed is reading
+            # the file, and the message says so (FR-9).
+            application_error = ErrorDetail(
+                code="unreadable_application_document", message=str(exc), limit=None
+            )
+
+    payload = ClassificationResult(
+        # Only the first application-side file is read, so any further one is
+        # reported as classified and not used rather than silently dropped.
+        files=[_classification(entry, used=entry not in documents[1:]) for entry in sorted_files],
+        application_document=document_result(parsed) if parsed else None,
+        label_images=len(labels),
+        application_error=application_error,
+    )
+
+    # NFR-6: counts only. No filename, no content, nothing any file said.
+    logger.info(
+        "uploads classified",
+        extra={
+            "files_received": len(sorted_files),
+            "documents_classified": len(documents),
+            "labels_classified": len(labels),
+        },
+    )
+    return JSONResponse(status_code=200, content=payload.model_dump())
 
 
 def _oversize_response(limit: int | None = None) -> JSONResponse:

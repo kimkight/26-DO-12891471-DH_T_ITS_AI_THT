@@ -20,7 +20,15 @@ import { ResultCard } from '../components/ResultCard'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import { ARTWORK_LABEL_LINE, sourceChipLabel } from '../lib/applicationSources'
 import { photoItemLabel, photoListHeading } from '../lib/photos'
-import { applicationDocument, field, parsedField, photo, verification } from './fixtures'
+import {
+  applicationDocument,
+  classification,
+  field,
+  fileClassification,
+  parsedField,
+  photo,
+  verification,
+} from './fixtures'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -85,20 +93,27 @@ describe('the four sources a value can come from', () => {
   })
 })
 
+/** The classification a lone application carrying its own artwork produces. */
+const ARTWORK_CLASSIFICATION = classification({
+  files: [fileClassification('application.pdf', 'application_document')],
+  application_document: ARTWORK_DOCUMENT,
+  label_images: 0,
+})
+
 describe('the upload tells the agent what came out of the pictures', () => {
   it('names the artwork values and says no photo is needed', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url === '/api/read-application'
-          ? ({ ok: true, status: 200, json: async () => ARTWORK_DOCUMENT } as Response)
+        url === '/api/classify'
+          ? ({ ok: true, status: 200, json: async () => ARTWORK_CLASSIFICATION } as Response)
           : ({ ok: true, status: 200, json: async () => verification() } as Response),
       ),
     )
     const user = userEvent.setup()
     render(<SingleLabelTab />)
 
-    await user.upload(screen.getByLabelText('Label application'), pdfFile())
+    await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
 
     await waitFor(() =>
       expect(
@@ -123,15 +138,15 @@ describe('a result checked against the application’s own artwork', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
-        url === '/api/read-application'
-          ? ({ ok: true, status: 200, json: async () => ARTWORK_DOCUMENT } as Response)
+        url === '/api/classify'
+          ? ({ ok: true, status: 200, json: async () => ARTWORK_CLASSIFICATION } as Response)
           : ({ ok: true, status: 200, json: async () => result } as Response),
       ),
     )
     const user = userEvent.setup()
     render(<SingleLabelTab />)
 
-    await user.upload(screen.getByLabelText('Label application'), pdfFile())
+    await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
     await waitFor(() => expect(screen.getByText(/you do not have to add a photo/i)).toBeVisible())
     await user.click(screen.getByRole('button', { name: /check this label/i }))
 

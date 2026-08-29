@@ -1,18 +1,35 @@
 /**
- * Uploading the label application instead of typing it (FR-11, ADR 0008).
+ * One upload, sorted by the server (FR-12, ADR 0011, US-25).
  *
- * Requirements: FR-11 (the application is accepted as an alternative to typing
- * the same values), FR-3 (the parsed values are surfaced for confirmation and
- * the agent's correction wins), FR-9 (an unreadable document names the problem
- * and leaves the typed path open), NFR-4 (the alternative is on the same screen
- * as the fields it replaces), NFR-5 (labelled, keyboard reachable, announced).
- * Story: US-23.
+ * The author's words on 2026-08-29: "these should be combined; just one upload;
+ * simplify the interface. You should be able to upload (pdfs or images)." So
+ * there is one picker, it takes both, and the server decides what each file is
+ * from the file rather than from which control it arrived in.
+ *
+ * These were the FR-11 upload tests. Everything they asserted about what a
+ * parsed application does to the form is still asserted here, because none of
+ * that changed; what changed is the control the file goes into and the endpoint
+ * that sorts it.
+ *
+ * Requirements: FR-12 (one control, PDFs and images, classification reported
+ * per file), FR-11 (the application as an input, precedence unchanged), FR-3
+ * (the parsed values are surfaced for confirmation and the agent's correction
+ * wins), FR-9 (an unreadable document names the problem and leaves the typed
+ * path open), NFR-4, NFR-5 (labelled, keyboard reachable, announced with its
+ * classification). Stories: US-23, US-25.
  */
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SingleLabelTab } from '../components/SingleLabelTab'
-import { applicationDocument, parsedField, verification } from './fixtures'
+import {
+  applicationDocument,
+  classification,
+  fileClassification,
+  parsedField,
+  verification,
+} from './fixtures'
+import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
 function pdfFile(name = 'application.pdf') {
   return new File([new Uint8Array([37, 80, 68, 70])], name, { type: 'application/pdf' })
@@ -22,11 +39,20 @@ function pngFile(name = 'label.png') {
   return new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' })
 }
 
+/** The classification a single uploaded application produces. */
+function documentOnly(document: ApplicationDocumentResult): ClassificationResult {
+  return classification({
+    files: [fileClassification('application.pdf', 'application_document')],
+    application_document: document,
+    label_images: 0,
+  })
+}
+
 /** Route each request by URL, so one stub serves both endpoints. */
-function stubApi(document: unknown, ok = true, status = 200) {
+function stubApi(result: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (url: string) => {
-    if (url === '/api/read-application') {
-      return { ok, status, json: async () => document } as Response
+    if (url === '/api/classify') {
+      return { ok, status, json: async () => result } as Response
     }
     return { ok: true, status: 200, json: async () => verification() } as Response
   })
@@ -34,14 +60,20 @@ function stubApi(document: unknown, ok = true, status = 200) {
   return fetchMock
 }
 
+/** Stub the classify call with a document, which is the ordinary case here. */
+function stubDocument(document: ApplicationDocumentResult) {
+  return stubApi(documentOnly(document))
+}
+
 async function attachApplication(user: ReturnType<typeof userEvent.setup>) {
-  await user.upload(screen.getByLabelText('Label application'), pdfFile())
+  await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** Every value present on TTB F 5100.31 and on a Registry printout. */
 const FULL_DOCUMENT = applicationDocument({
   fields: [
     parsedField('brand_name', "STONE'S THROW"),
@@ -54,34 +86,86 @@ const FULL_DOCUMENT = applicationDocument({
   notes: [],
 })
 
-describe('the alternative to typing the application values', () => {
-  it('offers the upload on the same screen as the fields it replaces', () => {
+describe('one control for everything', () => {
+  it('offers a single labelled picker on the same screen as the fields it replaces', () => {
     render(<SingleLabelTab />)
     expect(
-      screen.getByRole('heading', { name: /Upload the label application/i }),
+      screen.getByRole('heading', {
+        name: /Upload the label application, a photo of the label, or both/i,
+      }),
     ).toBeInTheDocument()
-    expect(screen.getByLabelText('Label application')).toBeInTheDocument()
+    expect(screen.getByLabelText('Files for this label')).toBeInTheDocument()
+    // The two separate pickers are gone. That is the change.
+    expect(screen.queryByLabelText('Label application')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Label image')).not.toBeInTheDocument()
   })
 
-  it('says the file is read here and not sent to TTB', () => {
+  it('accepts PDFs and images through that one control', () => {
+    render(<SingleLabelTab />)
+    const input = screen.getByLabelText('Files for this label')
+    expect(input).toHaveAttribute(
+      'accept',
+      'application/pdf,image/jpeg,image/png,image/webp,image/tiff',
+    )
+    expect(input).toHaveAttribute('multiple')
+  })
+
+  it('says the files are read here and not sent to TTB', () => {
     render(<SingleLabelTab />)
     expect(screen.getByText(/not sent to TTB or kept/i)).toBeInTheDocument()
   })
 
-  it('sends the document to the read endpoint, not to the check', async () => {
+  it('sends what was uploaded to the classify endpoint, not to the check', async () => {
     const user = userEvent.setup()
-    const fetchMock = stubApi(FULL_DOCUMENT)
+    const fetchMock = stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/read-application')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/classify')
+  })
+
+  it('shows what each file was taken to be, so a wrong call is visible', async () => {
+    const user = userEvent.setup()
+    stubApi(
+      classification({
+        files: [
+          fileClassification('application.pdf', 'application_document'),
+          fileClassification('label.png'),
+        ],
+        application_document: FULL_DOCUMENT,
+        label_images: 1,
+      }),
+    )
+    render(<SingleLabelTab />)
+
+    await user.upload(screen.getByLabelText('Files for this label'), [pdfFile(), pngFile()])
+
+    await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
+    expect(screen.getByText('Label picture')).toBeInTheDocument()
+    expect(
+      screen.getByText('This is a PDF, so we read it as the label application.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText('We read this picture as a label.')).toBeInTheDocument()
+  })
+
+  it('turns the check on as soon as anything is uploaded, with no photo required', async () => {
+    const user = userEvent.setup()
+    stubDocument(FULL_DOCUMENT)
+    render(<SingleLabelTab />)
+    expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
+
+    await attachApplication(user)
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled(),
+    )
   })
 })
 
 describe('what the parsed values do to the form', () => {
   it('fills every field the document supplied', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
@@ -95,7 +179,7 @@ describe('what the parsed values do to the form', () => {
 
   it('marks each filled field as read from the application form', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
@@ -105,7 +189,7 @@ describe('what the parsed values do to the form', () => {
 
   it('binds the mark to its input so a screen reader reads it out', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
@@ -117,7 +201,7 @@ describe('what the parsed values do to the form', () => {
 
   it('leaves every filled field editable, and the edit wins', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     const brand = await screen.findByLabelText('Brand name')
@@ -129,7 +213,7 @@ describe('what the parsed values do to the form', () => {
 
   it('drops the mark from a field the agent edits', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     const brand = await screen.findByLabelText('Brand name')
@@ -142,31 +226,39 @@ describe('what the parsed values do to the form', () => {
 
   it('checks the label with what is in the fields, not with the document', async () => {
     const user = userEvent.setup()
-    const fetchMock = stubApi(FULL_DOCUMENT)
+    const fetchMock = stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
     const brand = screen.getByLabelText('Brand name')
     await user.clear(brand)
     await user.type(brand, 'Corrected Brand')
-    await user.upload(screen.getByLabelText('Label image'), pngFile())
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
-    const [url, init] = fetchMock.mock.calls[1] as unknown as [string, RequestInit]
-    expect(url).toBe('/api/verify')
-    expect((init.body as FormData).get('brand_name')).toBe('Corrected Brand')
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => url === '/api/verify')).toBe(true),
+    )
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/verify') as unknown as [
+      string,
+      RequestInit,
+    ]
+    expect((call[1].body as FormData).get('brand_name')).toBe('Corrected Brand')
+    // And the file itself still goes with the check, because the label side may
+    // be the artwork inside it (ADR 0010).
+    expect((call[1].body as FormData).getAll('files')).toHaveLength(1)
   })
 })
 
 describe('what the form does not carry', () => {
   it('names the values the agent still has to enter, and why', async () => {
     const user = userEvent.setup()
-    stubApi(applicationDocument())
+    stubDocument(applicationDocument())
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
-      expect(screen.getByText(/Not on this form, so you will need to enter/i)).toBeInTheDocument(),
+      expect(
+        screen.getByText(/Not on this application, so you will need to enter/i),
+      ).toBeInTheDocument(),
     )
     expect(
       screen.getByText(/class or type designation is not an item on TTB F 5100.31/i),
@@ -175,7 +267,7 @@ describe('what the form does not carry', () => {
 
   it('leaves a value the document did not carry blank rather than guessing', async () => {
     const user = userEvent.setup()
-    stubApi(applicationDocument())
+    stubDocument(applicationDocument())
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
@@ -185,7 +277,7 @@ describe('what the form does not carry', () => {
 
   it("says how the document was read, in the agent's words", async () => {
     const user = userEvent.setup()
-    stubApi(applicationDocument({ extraction_path: 'ocr', pages_read: 2 }))
+    stubDocument(applicationDocument({ extraction_path: 'ocr', pages_read: 2 }))
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
@@ -195,7 +287,7 @@ describe('what the form does not carry', () => {
 
   it('reports the class or type code without comparing it', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByText(/class or type code as 141/i)).toBeInTheDocument())
@@ -203,17 +295,27 @@ describe('what the form does not carry', () => {
 })
 
 describe('when the document cannot be read (FR-9)', () => {
-  const ERROR_BODY = {
-    error: {
+  /*
+   * The classification still stands: the file is a PDF and was read as the
+   * application side. What failed is opening it. So the classify call succeeds
+   * and carries the failure in `application_error`, which is the honest shape:
+   * "we know what this is and we could not read it" is a different thing for an
+   * agent to act on than "we do not know what this is".
+   */
+  const UNREADABLE = classification({
+    files: [fileClassification('application.pdf', 'application_document')],
+    application_document: null,
+    label_images: 0,
+    application_error: {
       code: 'unreadable_application_document',
       message: 'The uploaded file could not be opened as a PDF.',
       limit: null,
     },
-  }
+  })
 
   it('names the problem and leaves the typed path open', async () => {
     const user = userEvent.setup()
-    stubApi(ERROR_BODY, false, 422)
+    stubApi(UNREADABLE)
     render(<SingleLabelTab />)
     await attachApplication(user)
     const alert = await screen.findByRole('alert')
@@ -227,7 +329,7 @@ describe('when the document cannot be read (FR-9)', () => {
 
   it('fills nothing in from a document it could not read', async () => {
     const user = userEvent.setup()
-    stubApi(ERROR_BODY, false, 422)
+    stubApi(UNREADABLE)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
@@ -237,7 +339,7 @@ describe('when the document cannot be read (FR-9)', () => {
 
   it('interrupts, because it replaces what the agent was waiting for', async () => {
     const user = userEvent.setup()
-    stubApi(ERROR_BODY, false, 422)
+    stubApi(UNREADABLE)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
@@ -247,47 +349,52 @@ describe('when the document cannot be read (FR-9)', () => {
 describe('announcements and keyboard use (NFR-5)', () => {
   it('announces what was filled in, and how many', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
-    const region = screen.getByLabelText('Application form')
+    const region = screen.getByLabelText('Your uploads')
     await waitFor(() => expect(region).toHaveTextContent(/5 of 5 values filled in/i))
     expect(region).toHaveTextContent(/Check them and change anything that is wrong/i)
   })
 
   it('announces into its own region, not the one the result uses', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
-      expect(screen.getByLabelText('Application form')).toHaveTextContent(/filled in/i),
+      expect(screen.getByLabelText('Your uploads')).toHaveTextContent(/filled in/i),
     )
     expect(screen.getByLabelText('Check result')).toHaveTextContent('')
   })
 
-  it('offers a control to take the document back off, which clears the marks', async () => {
+  it('offers a control to take each file back off, which clears the marks', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
       expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(5),
     )
-    await user.click(screen.getByRole('button', { name: 'Remove this application form' }))
+    await user.click(screen.getByRole('button', { name: 'Remove application.pdf' }))
     await waitFor(() =>
       expect(screen.queryByText(/Read from the application form/i)).not.toBeInTheDocument(),
     )
-    // The values stay: removing the document is not an instruction to discard
-    // what it already put in the fields.
+    // The values stay: removing the file is not an instruction to discard what
+    // it already put in the fields.
     expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW")
   })
 
-  it('accepts a PDF or an image of the form', () => {
+  it('names every file it accepted, with what it was taken to be', async () => {
+    const user = userEvent.setup()
+    stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
-    expect(screen.getByLabelText('Label application')).toHaveAttribute(
-      'accept',
-      'application/pdf,image/jpeg,image/png,image/webp,image/tiff',
+    await attachApplication(user)
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Your uploads')).toHaveTextContent(
+        /application\.pdf, read as a label application/i,
+      ),
     )
   })
 })

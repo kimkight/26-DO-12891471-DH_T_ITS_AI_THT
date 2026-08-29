@@ -79,18 +79,54 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
 
 ### Changed
 
-- `POST /api/verify` accepts a submission with no `image` part, when
-  `application_document` carries label artwork. One `image` part behaves exactly
-  as it always did.
+- `POST /api/verify` takes one repeated `files` part. The older `image` and
+  `application_document` parts remain accepted and are routed through the same
+  classifier, so a caller written against v1.0 keeps working and a COLA PDF sent
+  in the `image` part is now read as the application rather than as a label.
+- `POST /api/verify` accepts a submission with no label picture at all, when the
+  application document carries label artwork.
 - The response gains `label_source`, `self_consistency_note`, `photos[].origin`,
   a per-value `source` on the parsed application block, and
   `artwork_images_found`, `artwork_images_read` and `label_artwork_available`.
   `application_value_source` gains `parsed_from_artwork` as a fourth value.
 - Assumption A-17 is amended: two of the three values it records as "not items
   on the form" are recoverable from the artwork embedded in a filing.
+- `frontend/src/components/ApplicationUpload.tsx` is replaced by `UploadPanel.tsx`,
+  and the photograph slots from ADR 0007 are gone from the interface. Up to
+  `TTB_MAX_LABEL_PHOTOS` pictures of one label are still read independently and
+  merged; what has gone is the row of numbered slots and the agent having to say
+  in advance which file is which.
 - `samples/formmaker.py` can embed raster artwork into a synthetic form as an
   image XObject, so the new fixtures are still generated at test time and no
   real applicant's filing is committed.
+
+- **One upload, sorted by the server**
+  ([ADR 0011](docs/adr/0011-one-upload.md)). The single-label view has one file
+  picker. It takes the label application, photographs of the label, or any mix,
+  as PDFs or images, and the server decides what each file is **from the file
+  itself** rather than from which control it arrived in.
+  - The rule: a PDF by its header, or by its declared type; an image by whether
+    its text carries a COLA form or Public COLA Registry marker, or reads as a
+    filled-in form; anything else is a label picture; an image that will not
+    decode is a label picture carrying its error.
+  - The classification is reported per file, in `POST /api/classify` and on
+    every verification response, so a wrong call is visible rather than silent.
+    That was the failure the two pickers actually produced: a COLA PDF dropped
+    into the photo picker was read as label artwork.
+  - Each image is read exactly once. The OCR result from classifying is handed
+    to whichever side the file lands on. Measured on a session runner:
+    single-label verification stayed at about 1.5 seconds end to end.
+- **The label image requirement is gone as a hard gate.** The check turns on as
+  soon as anything is uploaded. Three submissions are valid and all three
+  complete end to end: the application document alone, a label photograph plus
+  typed values, or both. An application with no readable artwork and no
+  photograph is refused with a message naming the missing piece and offering the
+  photo upload, which is an FR-9 message rather than a validation error on a
+  field.
+- `POST /api/classify` sorts an upload and reads the application side without
+  comparing anything. It exists for the interface, in the same sense
+  `POST /api/read-application` does: the parsed values have to reach the agent as
+  editable fields before the comparison runs.
 
 ### Known limits
 
@@ -100,7 +136,17 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
 - The batch path is unchanged: a row still requires its label image, because
   rows are enumerated from the images so the stream can report a total before
   any document is read. The reason, and what it would take to change, is in
-  ADR 0010 under "Effect on the batch path".
+  ADR 0010 under "Effect on the batch path". The batch also keeps its two named
+  parts rather than folding into one; ADR 0011 records why the two paths differ.
+- A label picture is read twice on the interface path, once to classify it when
+  the agent chooses it and once to check it when they press the button. The
+  agent's wait for the check is unchanged, because the first read happens while
+  they are still working; what it costs is server CPU. An API caller sending
+  everything to `POST /api/verify` in one request pays it once.
+- The classification can be wrong. A photograph of a label that prints "Alcohol
+  and Tobacco Tax and Trade Bureau", which some labels do, would be taken for a
+  form. It is reported per file and the agent can remove it; there is no silent
+  path.
 
 ## [1.0.1] - 2026-08-29
 

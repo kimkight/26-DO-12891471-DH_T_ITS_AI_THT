@@ -842,6 +842,77 @@ main {
  * typing rather than as a further required step, and reads that way in
  * greyscale too (NFR-5).
  */
+/*
+ * The one upload (FR-12, ADR 0011).
+ *
+ * The rules the two pickers used are kept under their old names because the
+ * batch view still uses the same shapes; what is added here is the list of
+ * chosen files, which is new: an agent has to be able to see, per file, what
+ * the server took it to be. The chip carries that as text, so it survives
+ * greyscale (NFR-5), and the reason under it is the sentence rather than a
+ * code.
+ */
+.upload-panel {
+  margin: 0 0 1.5rem;
+}
+
+.upload-panel__heading {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.upload-panel__files {
+  margin: 0.875rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.upload-panel__file {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 0.5rem);
+  background: var(--surface);
+}
+
+.upload-panel__name {
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.upload-panel__reason {
+  flex: 1 1 12rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.upload-panel__result {
+  margin-top: 0.875rem;
+}
+
+.upload-panel__summary {
+  margin: 0 0 0.5rem;
+  font-size: 0.875rem;
+}
+
+.upload-panel__notes {
+  margin: 0.375rem 0 0;
+  padding-left: 1.125rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.upload-panel__notes li {
+  margin-bottom: 0.375rem;
+}
+
 .application-upload {
   margin: 0 0 1.5rem;
   padding: 1.25rem;

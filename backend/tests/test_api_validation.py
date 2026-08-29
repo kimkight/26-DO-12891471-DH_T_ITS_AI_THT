@@ -57,13 +57,38 @@ class TestNoErrorPathReturnsAMatch:
 
 
 class TestDisallowedType:
-    def test_a_pdf_is_rejected_before_decoding_and_names_the_accepted_types(self):
-        response = post(blank_png(), filename="label.pdf", content_type="application/pdf")
+    """What the one upload accepts, and what it still refuses (FR-12, NFR-7).
+
+    **A PDF is no longer a disallowed type here, and that is the change.**
+    Before FR-12 the single-label route took label images in one part and the
+    application in another, so a PDF arriving in the image part was refused as
+    the wrong kind of file. There is now one part that takes both, and the
+    server decides what a file is from the file (ADR 0011). What is still
+    refused, before anything is decoded, is a type on neither list.
+    """
+
+    def test_a_type_on_neither_list_is_rejected_and_names_the_accepted_set(self):
+        response = post(b"plain text", filename="notes.txt", content_type="text/plain")
         assert response.status_code == 415
         error = response.json()["error"]
-        assert error["code"] == "unsupported_media_type"
-        for mime_type in settings.allowed_mime_types:
+        assert error["code"] == "unsupported_application_document"
+        for mime_type in (*settings.allowed_mime_types, "application/pdf"):
             assert mime_type in error["limit"]
+
+    def test_a_pdf_is_accepted_and_read_as_the_application(self):
+        """Not a rejection any more. It is a file that failed to open as a PDF.
+
+        The bytes here are a PNG declared as `application/pdf`, so the
+        classifier takes the declared type at its word, the application parser
+        tries to open it, and it fails. The message is about a document that
+        could not be read rather than about a type that is not accepted, which
+        is the honest one: the type is accepted now.
+        """
+        response = post(blank_png(), filename="label.pdf", content_type="application/pdf")
+        assert response.status_code == 422
+        error = response.json()["error"]
+        assert error["code"] == "unreadable_application_document"
+        assert "fields" not in response.json()
 
 
 class TestOversize:

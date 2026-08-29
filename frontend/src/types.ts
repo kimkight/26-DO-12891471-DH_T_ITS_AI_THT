@@ -154,6 +154,8 @@ export interface VerificationResult {
   ocr_ms: number
   external_call_made: boolean
   application_document: ApplicationDocumentResult | null
+  /** What each submitted file was taken to be, in submission order (FR-12). */
+  files: FileClassification[]
   /**
    * What the label side was read from (ADR 0010). `application_artwork` means
    * no photograph was uploaded and the artwork inside the application document
@@ -163,6 +165,36 @@ export interface VerificationResult {
   label_source: 'uploaded_photographs' | 'application_artwork'
   /** Set only when `label_source` is `application_artwork`. */
   self_consistency_note: string | null
+}
+
+/**
+ * What one uploaded file was taken to be, and why (FR-12, ADR 0011).
+ *
+ * Reported so a misclassification is visible rather than silent. The single
+ * upload decides what each file is from the file itself rather than from which
+ * control it arrived in, which is right far more often than trusting the
+ * control was; when it is wrong, the agent has to be able to see it.
+ */
+export interface FileClassification {
+  filename: string
+  classified_as: 'application_document' | 'label_image'
+  basis:
+    | 'pdf_header'
+    | 'declared_pdf'
+    | 'form_markers'
+    | 'form_values'
+    | 'no_form_markers'
+    | 'undecodable'
+  reason: string
+  used: boolean
+}
+
+/** What POST /api/classify returns: the sorting, plus the application read. */
+export interface ClassificationResult {
+  files: FileClassification[]
+  application_document: ApplicationDocumentResult | null
+  label_images: number
+  application_error: ErrorDetail | null
 }
 
 /** An error body (FR-9). It carries no field outcomes at all. */
