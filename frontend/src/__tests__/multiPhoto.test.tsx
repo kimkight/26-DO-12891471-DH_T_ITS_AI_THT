@@ -218,21 +218,39 @@ describe('the note for one photo', () => {
 
   it('says the photo was turned, and by how much', () => {
     const turned = photo(1, {
-      orientation: { exif_transposed: false, rotation_degrees: 90, method: 'osd', confidence: 13 },
+      orientation: {
+        exif_orientation: null,
+        exif_transposed: false,
+        rotation_degrees: 90,
+        method: 'osd',
+        confidence: 13,
+      },
     })
     expect(photoNote(turned)).toBe('We turned it 90 degrees to read it.')
   })
 
   it('says the camera saved it sideways', () => {
     const tagged = photo(1, {
-      orientation: { exif_transposed: true, rotation_degrees: 0, method: 'osd', confidence: 13 },
+      orientation: {
+        exif_orientation: 6,
+        exif_transposed: true,
+        rotation_degrees: 0,
+        method: 'osd',
+        confidence: 13,
+      },
     })
     expect(photoNote(tagged)).toBe('It was saved sideways by the camera.')
   })
 
   it('says both when both happened', () => {
     const both = photo(1, {
-      orientation: { exif_transposed: true, rotation_degrees: 180, method: 'osd', confidence: 13 },
+      orientation: {
+        exif_orientation: 6,
+        exif_transposed: true,
+        rotation_degrees: 180,
+        method: 'osd',
+        confidence: 13,
+      },
     })
     expect(photoNote(both)).toBe(
       'It was saved sideways by the camera, and we turned it 180 degrees to read it.',
@@ -259,6 +277,7 @@ describe('the note for one photo', () => {
         photos={[
           photo(1, {
             orientation: {
+              exif_orientation: null,
               exif_transposed: false,
               rotation_degrees: 270,
               method: 'osd',

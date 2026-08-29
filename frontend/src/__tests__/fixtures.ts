@@ -34,12 +34,18 @@ export function photo(index = 1, overrides: Partial<PhotoResult> = {}): PhotoRes
   return {
     index,
     orientation: {
+      exif_orientation: null,
       exif_transposed: false,
       rotation_degrees: 0,
       method: 'osd',
       confidence: 13.7,
     },
     ocr_confidence: 95.4,
+    read_path: {
+      variant: 'preprocessed',
+      preprocessed_confidence: 95.4,
+      plain_confidence: null,
+    },
     text_found: true,
     error: null,
     ...overrides,

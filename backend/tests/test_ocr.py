@@ -10,12 +10,14 @@ import io
 
 import cv2
 import numpy as np
+import pytesseract
 import pytest
 from PIL import Image
 from samples.labelmaker import render_png_bytes
 from samples.specs import SAMPLE_LABEL
 
 from app.ocr import (
+    PREPROCESS_SHORT_CIRCUIT_CONFIDENCE,
     DecodedImage,
     UndecodableImageError,
     decode,
@@ -27,7 +29,15 @@ from app.ocr import (
     resize_long_edge,
     rotate_cardinal,
 )
-from tests.conftest import requires_fonts, requires_tesseract
+from tests.conftest import (
+    photographic,
+    png_bytes,
+    png_with_exif_orientation,
+    requires_fonts,
+    requires_tesseract,
+    stored_as_exif,
+    upright_rgb,
+)
 
 
 def rendered_text_image(rotate_degrees: float = 0.0) -> np.ndarray:
@@ -124,7 +134,36 @@ class TestExifOrientation:
 
     This is the first of the two things that went wrong on the first real
     photograph. It is a unit-tier test: Pillow and OpenCV only, no Tesseract.
+
+    ``decode`` delegates the tag to ``PIL.ImageOps.exif_transpose`` rather than
+    mapping the eight values here. ``test_every_orientation_value_decodes_to_the
+    _displayed_pixels`` is what holds that delegation to account: for each of the
+    eight it builds the file a camera writing that tag would write, decodes it,
+    and compares the array pixel for pixel against the upright original, which is
+    what a browser puts on screen. Nothing about the mapping is taken on trust.
     """
+
+    @pytest.mark.parametrize("orientation", [1, 2, 3, 4, 5, 6, 7, 8])
+    @requires_fonts
+    def test_every_orientation_value_decodes_to_the_displayed_pixels(self, orientation):
+        upright = upright_rgb(render_png_bytes(SAMPLE_LABEL))
+        stored = stored_as_exif(upright, orientation)
+
+        decoded = decode(png_with_exif_orientation(stored, orientation))
+
+        expected = cv2.cvtColor(np.asarray(upright), cv2.COLOR_RGB2BGR)
+        assert decoded.pixels.shape == expected.shape
+        assert np.array_equal(decoded.pixels, expected)
+        assert decoded.exif_orientation == orientation
+        assert decoded.exif_transposed is (orientation != 1)
+
+    def test_a_file_with_no_tag_reports_no_tag_rather_than_orientation_one(self):
+        """Null and 1 are different facts: no claim made, against a claim of upright."""
+        buffer = io.BytesIO()
+        Image.new("RGB", (200, 100), (255, 255, 255)).save(buffer, format="PNG")
+        decoded = decode(buffer.getvalue())
+        assert decoded.exif_orientation is None
+        assert decoded.exif_transposed is False
 
     def test_a_sideways_file_with_an_orientation_tag_decodes_upright(self):
         # 400 wide by 900 tall as stored, tagged 6, which means "the camera was
@@ -243,6 +282,153 @@ class TestCardinalOrientation:
         degrees, _, method = detect_orientation(blank)
         assert method == "unavailable"
         assert degrees == 0
+
+
+@requires_tesseract
+@requires_fonts
+class TestEveryExifOrientationReadsItsLabel:
+    """The hotfix's first claim: all eight tag values, end to end through OCR.
+
+    v1.0.0 shipped one EXIF fixture at one orientation value, and the pixels in
+    it were upright rather than stored the way a camera writing that tag stores
+    them. So the suite covered neither the transform for seven of the eight
+    values nor the case the 2026-08-28 submission actually was. Eight fixtures,
+    all generated at test time, each stored the way a file carrying that value
+    stores its pixels, each read the whole way through.
+    """
+
+    @pytest.mark.parametrize("orientation", [1, 2, 3, 4, 5, 6, 7, 8])
+    def test_the_warning_is_found_whatever_the_tag_says(self, orientation):
+        upright = upright_rgb(render_png_bytes(SAMPLE_LABEL))
+        stored = stored_as_exif(upright, orientation)
+
+        result = extract_text(png_with_exif_orientation(stored, orientation))
+
+        assert "GOVERNMENT WARNING" in result.text.upper()
+        assert result.orientation.exif_orientation == orientation
+        assert result.orientation.exif_transposed is (orientation != 1)
+        # The transform did the whole job, so the quarter-turn check found
+        # nothing left to correct.
+        assert result.orientation.rotation_degrees == 0
+
+
+@requires_tesseract
+@requires_fonts
+class TestATagThatLiesAboutItsPixels:
+    """The hotfix's second claim: EXIF is evidence, not proof.
+
+    A tag survives an edit that turned the pixels, so a file can arrive claiming
+    to be sideways while holding an upright photograph. Applying the tag then
+    makes things worse rather than better, and the only thing that can catch it
+    is the same quarter-turn check that catches a photograph carrying no tag at
+    all. Which is why that check runs whether or not a tag was applied.
+    """
+
+    def test_the_quarter_turn_check_rescues_an_image_the_tag_turned_wrongly(self):
+        # Upright pixels, tagged 6. Applying the tag turns them a quarter-turn
+        # clockwise, which is exactly wrong.
+        upright = upright_rgb(render_png_bytes(SAMPLE_LABEL))
+
+        result = extract_text(png_with_exif_orientation(upright, orientation=6))
+
+        assert result.orientation.exif_orientation == 6
+        assert result.orientation.exif_transposed is True
+        # 270 clockwise undoes the 90 clockwise the tag asked for. A non-zero
+        # figure here on a tagged file is the honest report of a tag that lied.
+        assert result.orientation.rotation_degrees == 270
+        assert result.orientation.method == "osd"
+        assert "GOVERNMENT WARNING" in result.text.upper()
+        assert "STONE'S" in result.text
+
+
+@requires_tesseract
+@requires_fonts
+class TestPreprocessingHasToEarnItsRead:
+    """The hotfix's third claim: preprocessing must not be able to make it worse.
+
+    Adaptive thresholding is right for the printed artwork the sample set is
+    built from and wrong for a soft-contrast photograph, and on the 2026-08-28
+    submission it was wrong badly enough to return no text at all from an image
+    plain Tesseract reads almost perfectly. So both images are read and the
+    better one is kept, and the result says which.
+    """
+
+    def test_a_photograph_like_fixture_keeps_the_plain_read(self):
+        soft = photographic(upright_rgb(render_png_bytes(SAMPLE_LABEL)))
+
+        result = extract_text(png_bytes(soft))
+
+        assert result.read_path.variant == "plain"
+        assert result.read_path.plain_confidence is not None
+        assert result.read_path.plain_confidence > result.read_path.preprocessed_confidence
+        assert result.mean_confidence == result.read_path.plain_confidence
+        # The point of keeping it: the field the deployed build could not find.
+        assert "GOVERNMENT WARNING" in result.text.upper()
+        assert "750 mL" in result.text
+
+    def test_the_preprocessed_read_alone_would_have_lost_the_text(self):
+        """The failure this exists to prevent, asserted rather than described."""
+        soft = photographic(upright_rgb(render_png_bytes(SAMPLE_LABEL)))
+        prepared = preprocess(decode(png_bytes(soft)))
+
+        binary_only = pytesseract.image_to_string(prepared.binary)
+
+        assert "GOVERNMENT WARNING" not in binary_only.upper()
+
+    def test_clean_artwork_keeps_the_preprocessed_read_and_pays_for_one(self, sample_label_png):
+        """Eleven of the twelve sample labels take this path, so batch cost is unchanged."""
+        result = extract_text(sample_label_png)
+
+        assert result.read_path.variant == "preprocessed"
+        assert result.read_path.preprocessed_confidence >= PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+        # Null is the evidence that the second read never ran.
+        assert result.read_path.plain_confidence is None
+
+    def test_the_exif_variant_of_a_photograph_reads_the_same_as_the_upright_one(self):
+        """The controlled experiment from the evidence, as a test.
+
+        Identical pixels, one upright and one stored the way a phone holding the
+        camera sideways stores them. The deployed build returned the warning from
+        neither and no text at all from the second.
+        """
+        soft = photographic(upright_rgb(render_png_bytes(SAMPLE_LABEL)))
+
+        straight = extract_text(png_bytes(soft))
+        tagged = extract_text(png_with_exif_orientation(stored_as_exif(soft, 6), 6))
+
+        assert "GOVERNMENT WARNING" in straight.text.upper()
+        assert "GOVERNMENT WARNING" in tagged.text.upper()
+        assert tagged.orientation.rotation_degrees == 0
+        assert abs(tagged.mean_confidence - straight.mean_confidence) < 1.0
+
+
+@requires_tesseract
+@requires_fonts
+class TestWhyOrientationIsJudgedOnTheGrayscale:
+    """The mechanism behind the blackout, asserted so it cannot come back.
+
+    Until v1.0.1 the orientation call was made on the thresholded image. That is
+    level with the grayscale on printed artwork and useless on a photograph:
+    over the twelve-label set degraded and turned to all four cardinal
+    rotations, 0 of 48 against 44 of 48. One case of that measurement is enough
+    to hold the choice in place.
+    """
+
+    def test_the_thresholded_image_cannot_be_judged_where_the_grayscale_can(self):
+        soft = photographic(upright_rgb(render_png_bytes(SAMPLE_LABEL)))
+        pixels = decode(png_bytes(soft)).pixels
+        sideways = np.ascontiguousarray(np.rot90(pixels, 1))
+        gray = cv2.cvtColor(resize_long_edge(sideways), cv2.COLOR_BGR2GRAY)
+
+        from_gray, _, gray_method = detect_orientation(gray)
+        from_binary, _, _ = detect_orientation(binarize(resize_long_edge(sideways)))
+
+        assert gray_method == "osd"
+        assert from_gray == 90, "the grayscale is what the pipeline asks, and it answers"
+        assert from_binary != 90, (
+            "if the thresholded image ever answers this correctly, the reason "
+            "recorded in detect_orientation should be re-measured"
+        )
 
 
 @requires_tesseract

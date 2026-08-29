@@ -199,6 +199,16 @@ class OrientationDetail(BaseModel):
     agent to wonder why a sideways photograph worked.
     """
 
+    exif_orientation: int | None = Field(
+        default=None,
+        description=(
+            "The EXIF orientation tag found in the file, 1 to 8, or null when "
+            "the file carried none. Reported alongside what was done with it, "
+            "because a tag is a claim about the pixels rather than a fact: a "
+            "non-zero `rotation_degrees` on a file that carried a tag means the "
+            "tag was wrong and the quarter-turn check corrected it."
+        ),
+    )
     exif_transposed: bool = Field(
         description=(
             "Whether the EXIF orientation tag was applied. True means the file "
@@ -228,6 +238,37 @@ class OrientationDetail(BaseModel):
     )
 
 
+class ReadPathDetail(BaseModel):
+    """Whether preprocessing helped this photograph, and by how much.
+
+    Reported for the same reason the orientation is: the choice is invisible in
+    the result otherwise. The pipeline reads the preprocessed image and, unless
+    that read comes back confident, reads the plain upright grayscale as well
+    and keeps whichever scored higher. An agent looking at a poor result is
+    entitled to know that preprocessing was tried and lost, and an operator
+    reading batch latency is entitled to know which images paid for two reads.
+    """
+
+    variant: Literal["preprocessed", "plain"] = Field(
+        description=(
+            "Which image the reported text came from. 'preprocessed' is the "
+            "adaptively thresholded and deskewed image; 'plain' is the upright "
+            "grayscale with no preprocessing, which wins on soft-contrast "
+            "photographs where thresholding destroys the text."
+        )
+    )
+    preprocessed_confidence: float = Field(
+        description="Mean word confidence of the preprocessed read, which always runs."
+    )
+    plain_confidence: float | None = Field(
+        default=None,
+        description=(
+            "Mean word confidence of the plain read, or null when the "
+            "preprocessed read scored well enough that the plain one was not run."
+        ),
+    )
+
+
 class PhotoResult(BaseModel):
     """One submitted photograph of the label, and how it read (ADR 0007).
 
@@ -248,6 +289,9 @@ class PhotoResult(BaseModel):
     )
     ocr_confidence: float = Field(
         description="Mean Tesseract word confidence from 0 to 100 for this photograph."
+    )
+    read_path: ReadPathDetail = Field(
+        description="Whether preprocessing or the plain grayscale produced the text kept."
     )
     text_found: bool = Field(description="Whether any text was read from this photograph.")
     error: ErrorDetail | None = Field(

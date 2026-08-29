@@ -424,6 +424,34 @@ photograph of the same label; the second is what
 [ADR 0007](adr/0007-multi-photo-single-label.md) does instead. Recorded here so
 that the orientation fix is not mistaken for a general imperfect-image fix.
 
+### What v1.0.1 corrected in the orientation rule
+
+The 2026-08-26 measurement above was taken entirely on artwork rendered by
+`samples/labelmaker.py`, and it recorded which strategy to use without recording
+which image to ask. Both were asked of the adaptively thresholded image, and on
+rendered type that is invisible. The 2026-08-28 Ketel One submission made it
+visible. Re-measured on 2026-08-29 over the same twelve labels degraded into a
+photograph-like fixture, at all four cardinal rotations:
+
+| Image OSD is asked about | Correct, rendered artwork | Correct, photograph-like |
+| --- | --- | --- |
+| Adaptively thresholded (v1.0.0) | 46 of 48 | 0 of 48 |
+| Upright grayscale (v1.0.1) | 45 of 48 | 44 of 48 |
+
+The choice of OSD over best-of-four stands, and the reasoning above is
+unchanged. What changed is that OSD is asked about the grayscale. The wider
+lesson is the one recorded here rather than only in the changelog: a measurement
+taken on rendered artwork does not transfer to photographs, and every figure in
+this assumption was taken that way.
+
+Two further things follow, and both are in the code rather than only written
+down. The quarter-turn check runs whether or not an EXIF tag was applied, so a
+tag that lies about its own pixels is caught by the same net; the EXIF transform
+itself was correct at v1.0.0 and is now asserted against all eight orientation
+values rather than one. And preprocessing is no longer trusted to be an
+improvement: both the preprocessed and the plain upright grayscale are read, and
+the higher-scoring result is kept, with the choice reported in `read_path`.
+
 **Confirmed or falsified by:** running the engine over a set of real
 photographed labels rather than one. One bottle establishes that hyphenated
 columns occur; it does not establish how they are typically set, whether other
@@ -443,9 +471,13 @@ deployed URL, 2026-08-26; 27 CFR 16.21 and 16.22 (fetched 2026-08-20);
 [ADR 0003](adr/0003-local-ocr-default-bedrock-optional.md). Affects FR-1 and
 FR-5. Tested by `backend/tests/test_ocr.py::TestExifOrientation`,
 `TestCardinalOrientation`, `TestWhyOrientationUsesOsd`,
+`TestEveryExifOrientationReadsItsLabel`, `TestATagThatLiesAboutItsPixels`,
+`TestPreprocessingHasToEarnItsRead`, `TestWhyOrientationIsJudgedOnTheGrayscale`,
 `backend/tests/test_warning.py::TestHyphenationAcrossLineBreaks`,
 `backend/tests/test_verify_integration.py::TestASidewaysPhotograph`,
-`TestAHyphenatedWarningColumn`; UAT rows 23, 24, 25. Opens OQ-20.
+`TestAHyphenatedWarningColumn`, `TestTheKetelOneHotfix`; UAT rows 23, 24, 25 and
+54 to 57. Opens OQ-20. Revised on 2026-08-29 by the v1.0.1 hotfix; see the
+subsection above.
 
 ## A-16
 **Three photographs of one label is the cap, and every photograph in a

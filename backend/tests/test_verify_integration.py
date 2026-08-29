@@ -24,7 +24,15 @@ from samples.warning_text import WARNING_STATEMENT, hyphenated_column
 
 from app.main import app
 from app.ocr import decode
-from tests.conftest import requires_fonts, requires_tesseract
+from tests.conftest import (
+    photographic,
+    png_bytes,
+    png_with_exif_orientation,
+    requires_fonts,
+    requires_tesseract,
+    stored_as_exif,
+    upright_rgb,
+)
 
 client = TestClient(app)
 
@@ -248,6 +256,104 @@ class TestEgressBlocked:
         response = verify(sample_label_png, SAMPLE_LABEL.application)
         assert response.status_code == 200
         assert response.json()["external_call_made"] is False
+
+
+def exif_tagged_png(image_bytes: bytes, orientation: int) -> bytes:
+    """The artwork stored the way a file carrying ``orientation`` stores it.
+
+    The pixels are put through the inverse of the transform a viewer applies,
+    which makes the fixture the file a camera writing that tag would have
+    written, rather than upright pixels with a tag bolted on.
+    """
+    stored = stored_as_exif(upright_rgb(image_bytes), orientation)
+    return png_with_exif_orientation(stored, orientation)
+
+
+def photographic_png(image_bytes: bytes) -> bytes:
+    """The artwork degraded into something shaped like a phone photograph."""
+    return png_bytes(photographic(upright_rgb(image_bytes)))
+
+
+class TestTheKetelOneHotfix:
+    """The 2026-08-28 submission, reproduced against the API (UAT rows 54 to 56).
+
+    A photograph of a real back label, flagged by the interface as saved
+    sideways by the camera, returned no government warning and brand-name
+    shrapnel from the fine print. A controlled experiment against the deployed
+    URL narrowed it to two things, and this class holds both to account through
+    the HTTP contract rather than only at the unit tier.
+    """
+
+    @pytest.mark.parametrize("orientation", [1, 2, 3, 4, 5, 6, 7, 8])
+    def test_every_exif_orientation_returns_the_same_field_outcomes(
+        self, sample_label_png, orientation
+    ):
+        """UAT row 55. Eight values, and phones write several of them."""
+        body = verify(
+            exif_tagged_png(sample_label_png, orientation),
+            SAMPLE_LABEL.application,
+        ).json()
+
+        photo = body["photos"][0]
+        assert photo["orientation"]["exif_orientation"] == orientation
+        assert photo["orientation"]["exif_transposed"] is (orientation != 1)
+        assert photo["orientation"]["rotation_degrees"] == 0
+        outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
+        assert outcomes["government_warning"] == "match"
+        assert outcomes["brand_name"] == "match"
+        assert outcomes["net_contents"] == "match"
+
+    def test_a_tag_that_lies_about_its_pixels_is_caught_and_reported(self, sample_label_png):
+        """UAT row 56. The tag says sideways, the pixels are upright.
+
+        An edit that turns the pixels can leave the tag behind, so applying the
+        tag is what breaks the image. The quarter-turn check runs regardless of
+        whether a tag was applied, which is what rescues this, and the response
+        reports all three figures so the disagreement is visible rather than
+        silently absorbed.
+        """
+        lying = png_with_exif_orientation(upright_rgb(sample_label_png), orientation=6)
+
+        body = verify(lying, SAMPLE_LABEL.application).json()
+
+        photo = body["photos"][0]
+        assert photo["orientation"]["exif_orientation"] == 6
+        assert photo["orientation"]["exif_transposed"] is True
+        assert photo["orientation"]["rotation_degrees"] == 270
+        outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
+        assert outcomes["government_warning"] == "match"
+
+    def test_a_photograph_like_image_keeps_the_read_preprocessing_would_have_lost(
+        self, sample_label_png
+    ):
+        """UAT row 54. Preprocessing must not be able to make it worse."""
+        body = verify(photographic_png(sample_label_png), SAMPLE_LABEL.application).json()
+
+        photo = body["photos"][0]
+        assert photo["text_found"] is True
+        assert photo["read_path"]["variant"] == "plain"
+        read_path = photo["read_path"]
+        assert read_path["plain_confidence"] > read_path["preprocessed_confidence"]
+        outcomes = {field["name"]: field["outcome"] for field in body["fields"]}
+        assert outcomes["government_warning"] == "match"
+
+    def test_the_exif_variant_matches_the_upright_one_on_the_same_photograph(
+        self, sample_label_png
+    ):
+        """The controlled experiment itself: identical pixels, one of them tagged.
+
+        The deployed build returned no warning from the upright file and no text
+        at all from the tagged one.
+        """
+        soft = photographic_png(sample_label_png)
+        upright_body = verify(soft, SAMPLE_LABEL.application).json()
+        tagged_body = verify(exif_tagged_png(soft, 6), SAMPLE_LABEL.application).json()
+
+        upright_outcomes = {f["name"]: f["outcome"] for f in upright_body["fields"]}
+        tagged_outcomes = {f["name"]: f["outcome"] for f in tagged_body["fields"]}
+        assert upright_outcomes["government_warning"] == "match"
+        assert tagged_outcomes == upright_outcomes
+        assert tagged_body["photos"][0]["orientation"]["rotation_degrees"] == 0
 
 
 class TestASidewaysPhotograph:

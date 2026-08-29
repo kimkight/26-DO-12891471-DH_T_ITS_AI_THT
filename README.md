@@ -56,7 +56,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.0.0","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.0.1","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -318,6 +318,18 @@ five fields did not come back at all.
 
 ### Known limitations
 
+- **A real photograph is not a rendered label, and v1.0.1 is what that cost.**
+  A photograph of a flat, crisp Ketel One back label submitted to the deployed
+  v1.0.0 build on 2026-08-28 returned no government warning and brand-name
+  shrapnel from the fine print. The cause was not the artwork and not the EXIF
+  orientation handling: it was the OpenCV adaptive threshold, which suits
+  rendered type and destroys a soft-contrast photograph. Tesseract's orientation
+  detection was being asked about the destroyed image, and on a photograph-like
+  fixture it answered correctly in 0 of 48 cases against 44 of 48 on the plain
+  grayscale. v1.0.1 asks it on the grayscale, and reads both the preprocessed
+  and the plain image and keeps the better one. What that does not do is make
+  the point below untrue. One label read correctly is not a measurement, and the
+  same degraded fixture still leaves half the sample set unreadable.
 - **Accuracy has been measured against synthetic labels only.** `samples/`
   renders twelve labels from text with Pillow; `scripts/measure.py` scores the
   engine against them. Rendered text is far easier to read than a photographed

@@ -87,6 +87,56 @@ Downscaling the image before the OSD call was measured and rejected: at a
 900-pixel long edge accuracy fell to 38 of 48, and at 600 pixels to 22 of 48,
 for 513 ms and 222 ms respectively.
 
+**What that measurement missed, and what v1.0.1 changed.** Every figure above
+was taken on artwork rendered by `samples/labelmaker.py`: crisp black type on a
+flat white ground. A real photograph is not that, and on 2026-08-28 a
+photograph of a Ketel One back label returned no government warning and
+brand-name shrapnel from the bottom fine print. The two measurements below were
+taken on 2026-08-29 on a session runner with Tesseract 5.3.4, over the same
+twelve-label set degraded into a photograph-like fixture: contrast reduced to
+0.18 with a lift of 30, a 2.0-pixel Gaussian blur, and Gaussian sensor noise at
+sigma 4, all generated deterministically at test time from a fixed seed.
+
+| Where OSD is asked | Correct, undegraded set | Correct, photograph-like set |
+| --- | --- | --- |
+| The adaptively thresholded image (v1.0.0) | 46 of 48 | 0 of 48 |
+| The upright grayscale (v1.0.1) | 45 of 48 | 44 of 48 |
+
+The two are level on rendered artwork and not remotely level on anything
+resembling a photograph, because adaptive thresholding at a 31-pixel block on a
+soft-contrast image produces noise rather than glyphs, and OSD cannot judge
+noise. That is the whole of the reported blackout: the EXIF tag was applied
+correctly, the threshold destroyed the image, OSD turned what was left the wrong
+way, and the read came back empty.
+
+**Preprocessing is compared against no preprocessing, per image.** The same
+degradation shows that thresholding can be worse than nothing at the read as
+well as at the orientation call. Over the twelve labels:
+
+| Pass | Warning found, undegraded set | Warning found, photograph-like set |
+| --- | --- | --- |
+| v1.0.0, preprocessed only | 11 of 12 | 0 of 12 |
+| v1.0.1, better of the two reads | 11 of 12 | 6 of 12 |
+
+Eleven is the ceiling on the undegraded set, because `05-spirits-no-warning`
+carries no warning to find. Six of twelve on the degraded set is not a
+restoration of accuracy and is not offered as one: the fixture is deliberately
+harsh, and half of it stays unreadable. What changed is that a read
+preprocessing would have thrown away is now kept. On the sample label
+specifically, the preprocessed read scores 0.0 and returns nothing where the
+plain read scores 90.9 and returns all sixty-two words including the full
+warning.
+
+The choice between the two is by mean word confidence, which is the ranking
+A-15 rejected for rotation. The two cases are not the same. Tesseract's layout
+analysis silently corrects a quarter-turn, so it returns identical scores for
+the two rotations that have to be told apart; it does nothing of the kind for
+thresholding, so the two images score differently and the score separates them.
+The threshold for skipping the second read is 85, set from the measurement: over
+the sample set every label where preprocessing was the right choice scored 95.1
+or better, the one where it was not scored 41.4, and over the degraded set the
+highest a losing preprocessed read reached was 68.4.
+
 **Cases:**
 
 - `POST /api/verify` with a clean label and matching application data returns
@@ -119,6 +169,23 @@ for 513 ms and 222 ms respectively.
 - A photograph whose turn is recorded only in its EXIF orientation tag, with the
   pixels stored sideways, reads the same as an upright one (A-15).
   **Implemented**, as UAT row 24.
+- A legible label stored under each of the eight EXIF orientation values, with
+  the pixels stored the way a camera writing that value stores them, returns the
+  same field outcomes and finds the government warning. **Implemented**, as UAT
+  row 54, in `test_verify_integration.py::TestTheKetelOneHotfix` and at the unit
+  tier in `test_ocr.py::TestEveryExifOrientationReadsItsLabel`. The decode is
+  additionally compared pixel for pixel against the upright original in
+  `test_ocr.py::TestExifOrientation`, so the delegation to
+  `PIL.ImageOps.exif_transpose` is proved rather than assumed.
+- A file whose EXIF tag lies about its own pixels, tag sideways and pixels
+  upright, is rescued by the quarter-turn check and the response reports the
+  disagreement. **Implemented**, as UAT row 55, in the same two classes. This is
+  what makes the check run whether or not a tag was applied.
+- A photograph-like image where the plain read beats the preprocessed one keeps
+  the plain read, and says so in `read_path`. **Implemented**, as UAT row 56, in
+  `test_verify_integration.py::TestTheKetelOneHotfix` and
+  `test_ocr.py::TestPreprocessingHasToEarnItsRead`, which also asserts that the
+  preprocessed image alone would have lost the warning.
 - A warning set in a narrow column with printer's hyphens across line breaks
   reports a match, and the same column with one word altered still reports a
   mismatch (A-15, FR-5). **Implemented**, as UAT row 25, in
@@ -229,6 +296,26 @@ target and the turned case is asserted against that target in
 `test_verify_integration.py`. It is a real cost on the batch path, where it is
 paid once per row, and `TTB_CORRECT_ORIENTATION=false` turns it off for a
 submission known to be upright. No batch latency target exists (OQ-6).
+
+**The second read costs what it costs, and only when it runs (v1.0.1).** The
+plain read is skipped when the preprocessed one scores 85 or better, which is
+eleven of the twelve sample labels. Median per-label figures over the sample
+set, same session runner, `extract_text` end to end including decode:
+
+| Set | v1.0.0 | v1.0.1 | Labels taking a second read |
+| --- | --- | --- | --- |
+| Twelve labels as rendered | 1,086 ms | 1,153 ms | 1 of 12 |
+| The same set, photograph-like | 383 ms | 1,589 ms | 12 of 12 |
+
+The first row is the ordinary case and it is roughly unchanged: one label pays
+the second read and the rest short-circuit. The second row is the honest cost
+when preprocessing loses on every image, about 1.5 times rather than exactly
+double, because decode, scaling and the orientation call are done once and
+shared, and because the plain read of a degraded image is itself cheaper.
+v1.0.0's 383 ms on that row is not a good number: it is the cost of returning
+nothing. Both figures are inside NFR-1. The cost is paid once per row on the
+batch path, and `TTB_CORRECT_ORIENTATION=false` does not turn it off, because it
+is a read rather than an orientation call.
 
 **More than one photograph multiplies that figure**, and it was measured rather
 than extrapolated. ADR 0007 accepts up to three photographs of one label, read
@@ -350,6 +437,20 @@ reads records the application emitted rather than what CloudWatch received.
 | 51 | Attach a document, then open the disclosure and correct one filled value | The corrected value is what is compared, and the result says that value was typed. FR-11's precedence is unchanged by the disclosure | US-24; FR-11 |
 | 52 | Look for the beverage type | It is inside the disclosure, after the four text fields, and says it is not compared against the label. **Meeting it as the first field is a failure of this test.** | US-24; A-12; A-13 |
 | 53 | Open the batch view after doing all of the above | It is unchanged: documents only, no typing, the pairing rule on screen | US-24; ADR 0009 |
+| 54 | Re-submit the 2026-08-28 Ketel One back label photograph, the one the interface flagged as saved sideways by the camera | The government warning is found and reports match, and the net contents report `750 mL`. **A not-found government warning on a label whose warning is legible in the photograph is a failure of this test.** The brand name is not part of this row; see row 57 | Deployed-target evidence, 2026-08-28; FR-1; FR-6; A-15 |
+| 55 | Submit the same label as an upright screenshot with no EXIF tag, and again as identical pixels turned 90 degrees counter-clockwise carrying EXIF orientation 6 | Both are read, and the second returns the same field outcomes as the first. **Any text found on one and not the other is a failure of this test.** The result reports the tag that was found, whether it was applied, and any further turn the confidence check chose | Deployed-target evidence, 2026-08-28; A-15 |
+| 56 | Submit a photograph whose EXIF tag disagrees with its pixels, for example an upright image saved with orientation 6 by an editor that turned the pixels and left the tag | The label still reads, because the quarter-turn check runs whether or not a tag was applied. The result shows the disagreement: a tag was found and applied, and a further turn was needed | Deployed-target evidence, 2026-08-28; A-15 |
+| 57 | Submit a front label whose brand is set in a blackletter logotype | The brand reports not found rather than a misreading of the logotype. **Reporting shrapnel from nearby fine print as the brand name is a failure of this test.** Out of scope to solve: see SG-1 and the v1.0.1 changelog entry | Deployed-target evidence, 2026-08-28; FR-1; OOS |
+
+Rows 54 to 57 come from one submission, on 2026-08-28, of a photograph of a
+Ketel One vodka back label: crisp, flat, the full government warning in clear
+capitals, and `750 mL`. The deployed v1.0.0 build returned the brand as `Sal.`,
+the class as shrapnel from the bottom fine print, net contents not found, and
+the government warning not found. Rows 54 to 56 are what v1.0.1 fixes. Row 57 is
+what it does not: a brand set in a blackletter logotype is not something OCR
+reads, and the front label carries the brand in plain type, which is what
+ADR 0007's multi-photo path is for. The row exists so the limit is tested rather
+than assumed.
 
 Row 14 is Sarah's actual acceptance test, restated as a procedure: something
 her mother, "73 and just learned to video call her grandkids," could figure out.
