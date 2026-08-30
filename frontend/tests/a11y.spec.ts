@@ -209,6 +209,55 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
+
+  /*
+   * The fifth outcome state (FR-14, ADR 0013). Its own test rather than a sixth
+   * row on the fixture above, because the whole point of the state is the
+   * submission it appears in: the agent uploaded the application document and
+   * nothing else, so the artwork inside it is standing in as the label side.
+   *
+   * axe is the half of the gate that matters here. `contrast.test.ts` proves
+   * the violet clears 4.5:1 against the tokens it is declared beside; only a
+   * real layout engine can prove it clears 4.5:1 as actually rendered, which
+   * is why the chip is put on the page rather than only in a unit test.
+   */
+  test('the artwork-derived state, on a document-only submission', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(ARTWORK_DERIVED_RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'cola.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+
+    // The count says what is true rather than five of five, on screen and in
+    // the live region alike. Both are asserted: the sentence an agent reads and
+    // the sentence an agent hears have to be one sentence, and a locator that
+    // matched either would not prove it.
+    const line = '2 of 2 verifiable fields match; 3 read from the artwork only'
+    await expect(page.locator('.summary-line')).toHaveText(line)
+    await expect(page.getByRole('status', { name: 'Check result' })).toContainText(line)
+    // And the row says why it is different, on the row.
+    await expect(page.getByText('Label artwork (same source as the label)').first()).toBeVisible()
+    await expect(page.getByText('Read from the artwork').first()).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
 })
 
 test.describe('what axe cannot check', () => {
