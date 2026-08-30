@@ -97,7 +97,7 @@ import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
-import { announcement } from '../lib/outcomes'
+import { announcement, summary } from '../lib/outcomes'
 import { readingNote, spans, timingSummary } from '../lib/timing'
 import { EMPTY_APPLICATION } from '../types'
 import type {
@@ -393,6 +393,15 @@ export function SingleLabelTab() {
               the honest limitation, stated where the agent is reading the
               result rather than left to a document.
             */}
+            {/*
+              The summary line, and the reason it is not "5 of 5 fields match"
+              (FR-14, ADR 0013). Where some of the five rows compared a value
+              against the artwork it was read from, saying five would count
+              fields that could not have come out any other way. The line says
+              what is true instead: how many of the verifiable ones match, and
+              how many were only read.
+            */}
+            <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
             {result.label_source === 'application_artwork' ? (
               <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
             ) : null}

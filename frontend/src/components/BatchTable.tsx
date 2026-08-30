@@ -35,7 +35,11 @@ const SEVERITY: Record<string, number> = {
   mismatch: 1,
   needs_review: 2,
   not_compared: 3,
-  match: 4,
+  // Below the two absences and above a match, because a row carrying one has
+  // evidence that could not have disagreed rather than no evidence at all, and
+  // it is still not a row an agent can wave through (FR-14, ADR 0013).
+  artwork_derived: 4,
+  match: 5,
 }
 
 export function BatchTable({ lines }: { lines: BatchLine[] }) {

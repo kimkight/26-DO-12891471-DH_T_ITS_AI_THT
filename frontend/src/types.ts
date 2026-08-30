@@ -8,8 +8,16 @@
  * next person can reverse it deliberately: if these drift, generate them.
  */
 
-/** FR-3's three outcomes, plus FR-2's "the application did not supply this". */
-export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared'
+/**
+ * FR-3's three outcomes, plus FR-2's "the application did not supply this",
+ * plus FR-14's "this was read off the artwork and could not have disagreed".
+ *
+ * `artwork_derived` is not a verdict about agreement (ADR 0013). It marks a row
+ * whose application value was read off the same label artwork that supplied the
+ * label side, so the two values compared are one reading of one picture. It is
+ * excluded from every count of fields that match, and it never carries a score.
+ */
+export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared' | 'artwork_derived'
 
 /**
  * Where an application value came from (FR-11, ADR 0008, ADR 0010).

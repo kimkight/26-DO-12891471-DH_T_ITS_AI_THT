@@ -79,7 +79,17 @@ class FieldResult(BaseModel):
             "different units under A-13."
         ),
     )
-    outcome: Outcome = Field(description="match, needs_review, mismatch, or not_compared.")
+    outcome: Outcome = Field(
+        description=(
+            "match, needs_review, mismatch, not_compared, or artwork_derived. "
+            "The last is not a verdict about agreement (FR-14, ADR 0013): it "
+            "marks a row whose application value was read off the same label "
+            "artwork that supplied the label side, so the two values compared "
+            "are one reading of one picture and could not have disagreed. It is "
+            "excluded from any count of fields that match, and it never carries "
+            "a score."
+        )
+    )
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
     source_photo: int | None = Field(
         default=None,

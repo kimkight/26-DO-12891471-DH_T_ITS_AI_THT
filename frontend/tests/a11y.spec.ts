@@ -160,6 +160,55 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
+
+  /*
+   * The fifth outcome state (FR-14, ADR 0013). Its own test rather than a sixth
+   * row on the fixture above, because the whole point of the state is the
+   * submission it appears in: the agent uploaded the application document and
+   * nothing else, so the artwork inside it is standing in as the label side.
+   *
+   * axe is the half of the gate that matters here. `contrast.test.ts` proves
+   * the violet clears 4.5:1 against the tokens it is declared beside; only a
+   * real layout engine can prove it clears 4.5:1 as actually rendered, which
+   * is why the chip is put on the page rather than only in a unit test.
+   */
+  test('the artwork-derived state, on a document-only submission', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(ARTWORK_DERIVED_RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'cola.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+
+    // The count says what is true rather than five of five, on screen and in
+    // the live region alike. Both are asserted: the sentence an agent reads and
+    // the sentence an agent hears have to be one sentence, and a locator that
+    // matched either would not prove it.
+    const line = '2 of 2 verifiable fields match; 3 read from the artwork only'
+    await expect(page.locator('.summary-line')).toHaveText(line)
+    await expect(page.getByRole('status', { name: 'Check result' })).toContainText(line)
+    // And the row says why it is different, on the row.
+    await expect(page.getByText('Label artwork (same source as the label)').first()).toBeVisible()
+    await expect(page.getByText('Read from the artwork').first()).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
 })
 
 test.describe('what axe cannot check', () => {
@@ -504,6 +553,120 @@ test.describe('what axe cannot check', () => {
 
 const WARNING_NOTE =
   'Bold type was not checked. 27 CFR 16.22(a)(2) also requires the prefix to be in bold, and this prototype does not check typeface.'
+
+/**
+ * The author's own submission, as the API returns it (FR-14, ADR 0013): a COLA
+ * document uploaded alone, its embedded artwork standing in as the label side,
+ * and three of the five rows therefore comparing a value with itself.
+ */
+const ARTWORK_DERIVED_RESULT = {
+  fields: [
+    {
+      name: 'brand_name',
+      display_name: 'Brand name',
+      found_on_label: true,
+      label_value: "STONE'S THROW",
+      application_value: "STONE'S THROW",
+      score: 100,
+      outcome: 'match',
+      reason: 'Scored 100, at or above the match threshold of 95.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_form',
+    },
+    {
+      name: 'class_type',
+      display_name: 'Class or type designation',
+      found_on_label: true,
+      label_value: 'Kentucky Straight Bourbon Whiskey',
+      application_value: 'Kentucky Straight Bourbon Whiskey',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Class or type designation was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'alcohol_content',
+      display_name: 'Alcohol content',
+      found_on_label: true,
+      label_value: '45% Alc./Vol. (90 Proof)',
+      application_value: '45% Alc./Vol. (90 Proof)',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Alcohol content was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'net_contents',
+      display_name: 'Net contents',
+      found_on_label: true,
+      label_value: '750 mL',
+      application_value: '750 mL',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Net contents was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'government_warning',
+      display_name: 'Government warning statement',
+      found_on_label: true,
+      label_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      application_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      score: null,
+      outcome: 'match',
+      reason: `The statement matches 27 CFR 16.21. ${WARNING_NOTE}`,
+      source_photo: 1,
+      application_value_source: 'typed',
+    },
+  ],
+  warning_detail: {
+    statement_found: true,
+    prefix_as_printed: 'GOVERNMENT WARNING:',
+    prefix_is_capitalized: true,
+    body_matches_regulation: true,
+    bold_type_checked: false,
+    bold_type_note: WARNING_NOTE,
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
+  },
+  photos: [
+    {
+      index: 1,
+      origin: 'application_artwork',
+      orientation: {
+        exif_orientation: null,
+        exif_transposed: false,
+        rotation_degrees: 0,
+        method: 'osd',
+        confidence: 12.4,
+      },
+      ocr_confidence: 91.2,
+      read_path: {
+        variant: 'preprocessed',
+        preprocessed_confidence: 91.2,
+        plain_confidence: null,
+      },
+      text_found: true,
+      error: null,
+    },
+  ],
+  ocr_confidence: 91.2,
+  elapsed_ms: 3300,
+  ocr_ms: 3280,
+  external_call_made: false,
+  files: [],
+  label_source: 'application_artwork',
+  self_consistency_note:
+    'Some of this was read from the label artwork inside the application document.',
+  application_document: null,
+}
 
 const RESULT = {
   fields: [

@@ -91,6 +91,52 @@ application or picture."
     at. The existing FR-5 fixtures are unchanged in outcome, and that is
     asserted.
 
+- **A value read off the artwork is filled in, and never called a match**
+  ([ADR 0013](docs/adr/0013-artwork-derived-values.md), FR-14). ADR 0010 put the
+  artwork into the application side and let it stand in as the label side. Both
+  are right on their own; together they produce a row that compares a value
+  against the picture it was read from, and such a row always agrees.
+  - The values are still filled, because asking an agent to hand-type what the
+    tool has already read puts back the data entry the tool exists to remove,
+    and on the batch path there is nobody there to type it.
+  - A row whose application value came off the same artwork that supplied the
+    label side reports a fifth outcome, `artwork_derived`, carrying no score. It
+    is not a verdict about agreement; it says the value was read and that there
+    was nothing independent to check it against.
+  - The summary line stops saying "5 of 5 fields match" and says what is true:
+    "3 of 3 verifiable fields match; 2 read from the artwork only". Where no row
+    is artwork-derived the qualifier disappears and the line reads as before.
+  - The state carries a word, "Read from the artwork", and a picture-frame
+    silhouette no other outcome uses, before any colour (NFR-5). The row states
+    its own source, "Label artwork (same source as the label)", on the row
+    rather than in a footnote.
+  - **The rule keys on provenance, not on a field name.** It covers whatever
+    fields fell that way on a given filing, and it does not fire when the agent
+    supplied a photograph: comparing that photograph against the filed artwork
+    is two pictures and is reported as the real comparison it is. A batch row
+    pairs a document with a label image (ADR 0009), so no batch row is
+    artwork-derived.
+  - **Only an agreement is relabelled.** Reading one picture twice can
+    manufacture agreement; it cannot manufacture a mismatch, a review or a
+    not-found. Every other outcome on such a row is left exactly as the
+    comparison found it.
+- **Presence is reported as a finding rather than as "not compared"**
+  (FR-14, FR-1). 27 CFR 5.63(a)(3) and 4.32(b)(3) require alcohol content on the
+  label and 5.63(b)(2), 4.32(b)(2) and 7.63(a)(5) require net contents, whatever
+  the application form says. A label that carries neither the value nor a form
+  value used to report "nothing to compare"; it now reports the finding, and the
+  reason names the section and its carve-outs, including that net contents may
+  be "blown, embossed, or molded into the container". All three sections fetched
+  from eCFR on 2026-08-30.
+- **The proof cross-check reads the label on its own** (FR-14, FR-7, A-12). A
+  spirits label stating both a percentage and a proof states the same number
+  twice, and whether they agree is a property of that label. The check now runs
+  before the application side is considered, so a label that contradicts itself
+  is reported whether or not anything was declared against it; it used to be
+  silenced by a row that had nothing to compare. Its outcome is unchanged and
+  still needs human review, as FR-7 and A-12 fix it; see
+  [OQ-25](docs/OPEN_QUESTIONS.md).
+
 ### The limitation, stated rather than implied
 
 Checking a label lifted out of an application against that same application is
