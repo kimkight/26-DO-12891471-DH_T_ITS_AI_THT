@@ -83,6 +83,7 @@ import pytesseract  # noqa: E402
 from PIL import Image, ImageOps, UnidentifiedImageError  # noqa: E402
 from pytesseract import Output  # noqa: E402
 
+from app import timing  # noqa: E402
 from app.config import settings  # noqa: E402
 
 # The EXIF tag that records which way up the camera was held. Pillow exposes it
@@ -94,10 +95,42 @@ CARDINAL_ROTATIONS = (0, 90, 180, 270)
 
 # How Tesseract reports a hopeless orientation call. Both of the two misreads in
 # the measurement recorded in ADR 0003 and A-15 came back below this, and every
-# correct answer in that run came back above it, so it is carried on the result
-# as the caveat rather than used to override the answer: there is nothing better
-# to fall back to. See docs/07_TEST_STRATEGY.md section 2.
+# correct answer in that run came back above it. Above it OSD decides alone, and
+# 46 of 48 is the record that earns it. Below it the verdict is not taken on
+# trust: ``_second_opinion_on_180`` scores the chosen rotation against its
+# opposite and keeps the better one. See docs/07_TEST_STRATEGY.md section 2.
 LOW_ORIENTATION_CONFIDENCE = 1.0
+
+# The band inside which two reads are treated as equally confident, in mean
+# word confidence points.
+#
+# **Why a band is needed at all: mean word confidence is blind to omission.**
+# It is the right signal for the comparison v1.0.1 introduced, where
+# thresholding *garbles* text and the garbled words score low. It is the wrong
+# signal on its own for the comparison this release introduces, where
+# converting a colour label to grayscale *drops* an entire ink class. A word
+# that was never read contributes no confidence, so the variant that lost two
+# of the five required fields scores the same as the variant that kept them.
+#
+# Two measurements, and they agree. On the author's mezcal COLA artwork the
+# colour image read 257 words at a mean of 89.1 and the grayscale read 106 at
+# 89.9: the grayscale wins by 0.8 while losing "42% ALC BY VOL" outright. On
+# the three-class fixture in tests/test_colour_arm.py the colour image reads 93
+# words at 95.613 and the grayscale 87 at 95.609, a gap of 0.004 the same way
+# round. In both cases the two reads are, on this signal, the same read.
+#
+# So: mean word confidence ranks, and only a tie on it is broken by how much
+# text was recovered. One point is above both measured gaps and far below every
+# gap the v1.0.1 measurement recorded between a variant that helped and one
+# that did not: over the twelve-label sample set the preprocessed and plain
+# reads were never closer than 26.6 points apart in a case where they
+# disagreed. Nothing that release decided is decided differently here.
+EQUAL_CONFIDENCE_BAND = 1.0
+
+# What counts as colour a grayscale conversion would discard. Both figures are
+# measured; the table is in ``has_colour``.
+_COLOUR_CHROMA = 32
+_COLOUR_PIXEL_SHARE = 0.01
 
 # When the preprocessed read scores at least this, the plain read is not run.
 #
@@ -134,6 +167,37 @@ class OcrLine:
 
 
 @dataclass(frozen=True)
+class RotationScore:
+    """What one candidate rotation scored when the image was actually read."""
+
+    rotation_degrees: int
+    confidence: float
+    words: int
+
+
+@dataclass(frozen=True)
+class OrientationCheck:
+    """The second opinion taken when OSD answered below the floor (FR-1, A-15).
+
+    Reported in full rather than reduced to its outcome. A rotation that
+    overrode Tesseract's own verdict is exactly the kind of decision an agent
+    looking at a poor result has to be able to audit, and "we turned it 180
+    degrees" says nothing about who decided that or on what evidence.
+
+    ``candidates`` holds both scored rotations, always two: the one OSD chose
+    and its 180-degree opposite. It is deliberately not four. See
+    ``_second_opinion_on_180``.
+    """
+
+    osd_rotation_degrees: int
+    osd_confidence: float
+    floor: float
+    candidates: tuple[RotationScore, ...]
+    chosen_rotation_degrees: int
+    overrode_osd: bool
+
+
+@dataclass(frozen=True)
 class Orientation:
     """How the image was turned upright before OCR, and on what evidence.
 
@@ -151,22 +215,30 @@ class Orientation:
     tag means the tag was wrong about its own pixels.
 
     ``method`` says where the quarter-turn came from: ``osd`` when Tesseract's
-    orientation and script detection answered, ``unavailable`` when it could not
-    (too little text to judge, or no ``osd`` training data installed), and
-    ``disabled`` when ``TTB_CORRECT_ORIENTATION`` is off.
+    orientation and script detection answered and was taken at its word,
+    ``osd_180_check`` when it answered below ``LOW_ORIENTATION_CONFIDENCE`` and
+    the answer was put to the second opinion described in ``check``,
+    ``unavailable`` when it could not answer (too little text to judge, or no
+    ``osd`` training data installed), and ``disabled`` when
+    ``TTB_CORRECT_ORIENTATION`` is off.
+
+    ``confidence`` is always Tesseract's own figure for its own verdict, not a
+    score from the second opinion. The second opinion's scores are in ``check``,
+    kept separate so the two are never confused for one another.
     """
 
     exif_orientation: int | None = None
     exif_transposed: bool = False
     rotation_degrees: int = 0
-    method: Literal["osd", "unavailable", "disabled"] = "disabled"
+    method: Literal["osd", "osd_180_check", "unavailable", "disabled"] = "disabled"
     confidence: float | None = None
+    check: OrientationCheck | None = None
 
     @property
     def low_confidence(self) -> bool:
         """True when Tesseract answered but had almost nothing to go on."""
         return (
-            self.method == "osd"
+            self.method in ("osd", "osd_180_check")
             and self.confidence is not None
             and self.confidence < LOW_ORIENTATION_CONFIDENCE
         )
@@ -188,34 +260,52 @@ class DecodedImage:
 
 @dataclass(frozen=True)
 class Prepared:
-    """The two images OCR may read, and how both were turned to get there.
+    """The images OCR may read, and how all of them were turned to get there.
 
     ``binary`` is the preprocessed image: grayscale, scaled, adaptively
     thresholded and deskewed. ``gray`` is the same pixels with none of that
-    done to them, scaled and turned upright and nothing more. Both exist
-    because preprocessing is not reliably an improvement; see the module
-    docstring and ``extract_text``.
+    done to them, scaled and turned upright and nothing more. ``colour`` is the
+    scaled, turned RGB image, which is to say the pixels the file actually
+    holds. All three exist because neither transform is reliably an
+    improvement; see the module docstring and ``extract_text``.
+
+    ``colour`` is None when the source carries no colour to lose, which is
+    every grayscale scan, fax and monochrome render. Reading it would be
+    reading ``gray`` a second time under another name, for the price of a full
+    Tesseract pass.
     """
 
     binary: np.ndarray
     gray: np.ndarray
     orientation: Orientation
+    colour: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
 class ReadPath:
-    """Which of the two images was read, and what each of them scored.
+    """Which of the three images was read, and what each of them scored.
 
     ``variant`` is the one whose words were kept. ``preprocessed_confidence`` is
-    always present because the preprocessed read always runs.
-    ``plain_confidence`` is null when the preprocessed read scored well enough
-    that the plain one was never run, which is the common case and the reason
-    the second read costs nothing on artwork that reads cleanly.
+    always present because the preprocessed read always runs. The other two are
+    null when their read never ran: ``plain_confidence`` when the comparison was
+    already settled, and ``colour_confidence`` on a source that carries no
+    colour at all.
+
+    ``decided_by`` says how the winner was picked, because on this evidence the
+    three cases are not the same claim. ``short_circuit`` means the preprocessed
+    read cleared ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE`` on a monochrome source
+    and nothing else was read. ``confidence`` means the winner scored higher
+    than every other arm by more than ``EQUAL_CONFIDENCE_BAND``. ``coverage``
+    means the leaders were inside that band, which is to say equally confident,
+    and the winner is the one that recovered more text. See the band's own
+    comment for why that last case has to exist.
     """
 
-    variant: Literal["preprocessed", "plain"] = "preprocessed"
+    variant: Literal["preprocessed", "plain", "colour"] = "preprocessed"
     preprocessed_confidence: float = 0.0
     plain_confidence: float | None = None
+    colour_confidence: float | None = None
+    decided_by: Literal["short_circuit", "confidence", "coverage"] = "short_circuit"
 
 
 @dataclass(frozen=True)
@@ -405,6 +495,7 @@ def detect_orientation(binary: np.ndarray) -> tuple[int, float | None, str]:
     the wrong way, and the read came back empty.
     """
     try:
+        timing.tesseract_read()
         osd = pytesseract.image_to_osd(binary, output_type=Output.DICT)
     except (pytesseract.TesseractError, ValueError, KeyError):
         # "Too few characters" for a nearly blank image, or no osd.traineddata
@@ -457,10 +548,17 @@ def preprocess(
 
     resized = resize_long_edge(decoded.pixels)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY) if resized.ndim == 3 else resized
+    colour = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) if has_colour(resized) else None
 
+    check: OrientationCheck | None = None
     if correct:
         degrees, confidence, method = detect_orientation(gray)
+        if method == "osd" and confidence is not None and confidence < LOW_ORIENTATION_CONFIDENCE:
+            degrees, check = _second_opinion_on_180(gray, degrees, confidence)
+            method = "osd_180_check"
         gray = rotate_cardinal(gray, degrees)
+        if colour is not None:
+            colour = rotate_cardinal(colour, degrees)
     else:
         degrees, confidence, method = 0, None, "disabled"
 
@@ -475,13 +573,115 @@ def preprocess(
     return Prepared(
         binary=binary,
         gray=gray,
+        colour=colour,
         orientation=Orientation(
             exif_orientation=decoded.exif_orientation,
             exif_transposed=decoded.exif_transposed,
             rotation_degrees=degrees,
             method=method,
             confidence=None if confidence is None else round(confidence, 2),
+            check=check,
         ),
+    )
+
+
+def has_colour(image: np.ndarray) -> bool:
+    """Whether this array holds colour a grayscale conversion would discard.
+
+    A three-channel array is not the same thing as a colour image, and an exact
+    channel comparison is the wrong test: a photograph of a grayscale document
+    carries independent sensor noise in each channel, so every one of them is a
+    colour image by that reading, and each would buy a full Tesseract pass to
+    learn nothing. What matters is whether enough of the image carries enough
+    chroma that flattening it to luminance could take a whole ink class with it.
+
+    Both numbers are measured rather than chosen. Chroma here is
+    ``max(R,G,B) - min(R,G,B)`` per pixel:
+
+    ============================================  ======  ==============
+    image                                          max     % >= 32
+    ============================================  ======  ==============
+    the twelve rendered sample labels                  0           0.000
+    a sample label degraded to a photograph           30           0.000
+    the three-class colour fixture                   140          84.381
+    ============================================  ======  ==============
+
+    So ``_COLOUR_CHROMA`` is 32: above every pixel the photograph-like fixture
+    produces from sensor noise, and far below the chroma between any ink and
+    ground a label prints. And ``_COLOUR_PIXEL_SHARE`` is one percent, which a
+    coloured ground or a line of coloured type clears many times over and a
+    stray coloured seal in the corner of an otherwise black-and-white label does
+    not. The gap between the two clusters is 0.000 percent against 84 percent,
+    which is not a threshold sitting on a knife edge.
+
+    The consequence is the one that matters for NFR-1: every image in the sample
+    set, and every grayscale scan and fax, takes exactly the v1.0.1 path at
+    exactly the v1.0.1 cost. Nothing pays for this feature that cannot use it.
+    """
+    if image.ndim != 3 or image.shape[2] != 3:
+        return False
+    chroma = image.max(axis=2).astype(np.int16) - image.min(axis=2).astype(np.int16)
+    return float((chroma >= _COLOUR_CHROMA).mean()) >= _COLOUR_PIXEL_SHARE
+
+
+def _second_opinion_on_180(
+    gray: np.ndarray, osd_degrees: int, osd_confidence: float
+) -> tuple[int, OrientationCheck]:
+    """Score the OSD rotation against its opposite, and keep the better one.
+
+    **This is the narrow half of ADR 0003, and it is narrow on purpose.** That
+    decision measured both approaches over the twelve-label sample set at all
+    four cardinal rotations and found OSD right in 46 of 48 cases against 7 for
+    picking the rotation with the highest mean word confidence. Nothing here
+    disputes that number, and above ``LOW_ORIENTATION_CONFIDENCE`` OSD still
+    decides alone.
+
+    What the 7 of 48 hides is *which* cases the sweep loses. It loses the
+    quarter-turns, and for a reason that is a property of Tesseract rather than
+    of the threshold: layout analysis already detects and corrects text rotated
+    a quarter-turn, so an upright image and the same image turned 90 degrees
+    produce byte-identical output. A score that is equal on two cases cannot
+    separate them, and no tuning changes that.
+
+    It says nothing whatever about 0 against 180, where the same score separates
+    the two cleanly. Measured on the author's mezcal COLA artwork: the colour
+    image read 257 words at a mean of 89.1 upright and 254 at 35.3 upside down,
+    and the grayscale 106 at 89.9 against 107 at 30.4. Fifty points and more,
+    on the one axis where OSD had just admitted it was guessing.
+
+    So the fallback is not the sweep ADR 0003 rejected. It is two rotations, not
+    four, chosen so that every case it can decide is a case the score can
+    actually decide. The opposite is the only other candidate offered, and a tie
+    leaves the OSD verdict standing.
+
+    Costs two Tesseract reads, and only on an image where OSD's own confidence
+    fell under the floor. On the twelve-label sample set that is no image at all.
+    """
+    opposite = (osd_degrees + 180) % 360
+    scored: list[RotationScore] = []
+    for degrees in (osd_degrees, opposite):
+        lines, confidence = _read(rotate_cardinal(gray, degrees))
+        scored.append(
+            RotationScore(
+                rotation_degrees=degrees,
+                confidence=round(confidence, 1),
+                words=sum(len(line.text.split()) for line in lines),
+            )
+        )
+
+    chosen, challenger = scored
+    # Strictly greater, so a tie leaves Tesseract's own answer in place. The
+    # OSD verdict is a weak signal here, but it is still a signal, and a
+    # coin-flip is not an improvement on it.
+    overrode = challenger.confidence > chosen.confidence
+    kept = challenger if overrode else chosen
+    return kept.rotation_degrees, OrientationCheck(
+        osd_rotation_degrees=osd_degrees,
+        osd_confidence=round(osd_confidence, 2),
+        floor=LOW_ORIENTATION_CONFIDENCE,
+        candidates=tuple(scored),
+        chosen_rotation_degrees=kept.rotation_degrees,
+        overrode_osd=overrode,
     )
 
 
@@ -494,25 +694,44 @@ def extract_text(
     """Run the full local extraction path and time it.
 
     **Preprocessing has to earn the read it is given.** The preprocessed image is
-    read first. If it comes back at or above
+    read first. On a monochrome source, if it comes back at or above
     ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE`` the answer is kept and nothing else
     runs, which is what happens on eleven of the twelve sample labels. Otherwise
-    the plain upright grayscale is read too and the higher-scoring of the two is
-    kept. Which one won, and what both scored, go out on the result.
+    the plain upright grayscale is read too and the higher-scoring is kept.
 
-    This is the same shape as the rotation decision one level up: do the thing
-    that usually helps, then check that it did. The cost is one extra Tesseract
-    invocation on the images where preprocessing did not score well, roughly
-    doubling the per-label OCR time in that case and leaving it unchanged
-    otherwise. It is paid on the batch path too, per image. Measured figures are
-    in docs/07_TEST_STRATEGY.md section 4.
+    **On a colour source the colour image is read first (v1.1.0).** Everything
+    above describes a source with no colour to lose, and on one it still holds
+    exactly. A coloured label is a different problem. Filed label artwork
+    routinely carries dark-on-light and light-on-dark text on one ground, and a
+    threshold separates two luminance classes, not three, so one ink class
+    dissolves into the background while everything left standing still reads at
+    95. On the three-class fixture in tests/test_colour_arm.py the preprocessed
+    read scores 82.2 and the plain grayscale 95.6, and *both* have already
+    dropped "42% ALC BY VOL" and "750 ML" by the time they score it.
 
-    Ranking by mean word confidence works here where it does not work for
-    rotation (A-15), and for a reason that does not generalize between the two:
-    Tesseract's layout analysis silently corrects a quarter-turn, so it returns
-    identical scores for the two rotations that have to be told apart, but it
-    does nothing of the kind for thresholding, so the two images genuinely score
-    differently.
+    So on a coloured image the untransformed pixels are read first, because they
+    are the only rendering that cannot have lost an ink class before Tesseract
+    sees them, and the transformed ones have to earn their place against it
+    rather than the other way around:
+
+    * colour first, and if it clears ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE``
+      that is the whole read. One Tesseract pass, which is one fewer than the
+      author's mezcal artwork pays today.
+    * otherwise preprocessed and plain are both read and all three are ranked.
+      Three passes, on an image whose own pixels have already read poorly, which
+      is the case where a transform has something to contribute.
+
+    Neither transform gets to end the comparison on a coloured source, and that
+    is deliberate: the failure being guarded against is a confident read of what
+    survived a transform, so a confident read from a transform is not evidence
+    that nothing was lost.
+
+    Ranking is by mean word confidence, with ties inside
+    ``EQUAL_CONFIDENCE_BAND`` broken by how much text the arm recovered. The
+    band exists because this comparison has to detect omission and mean
+    confidence cannot: a word that was never read contributes no confidence to
+    lower. It never overrides a real difference in confidence; see the band's
+    own comment for the two measurements that set it.
 
     The elapsed time is returned rather than logged, because NFR-1 requires the
     latency to be measured and reported rather than asserted, and NFR-6 forbids
@@ -524,38 +743,105 @@ def extract_text(
         decoded, deskew_image=deskew_image, correct_orientation=correct_orientation
     )
 
-    preprocessed_lines, preprocessed_confidence = _read(prepared.binary)
-    if preprocessed_confidence >= PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
-        lines, mean_confidence = preprocessed_lines, preprocessed_confidence
-        read_path = ReadPath(
-            variant="preprocessed",
-            preprocessed_confidence=round(preprocessed_confidence, 1),
-            plain_confidence=None,
-        )
-    else:
-        plain_lines, plain_confidence = _read(prepared.gray)
-        plain_wins = plain_confidence > preprocessed_confidence
-        lines = plain_lines if plain_wins else preprocessed_lines
-        mean_confidence = plain_confidence if plain_wins else preprocessed_confidence
-        read_path = ReadPath(
-            variant="plain" if plain_wins else "preprocessed",
-            preprocessed_confidence=round(preprocessed_confidence, 1),
-            plain_confidence=round(plain_confidence, 1),
-        )
+    arms: list[_Arm] = []
+    if prepared.colour is not None:
+        lines, confidence = _read(prepared.colour)
+        arms.append(_Arm("colour", lines, confidence))
+
+    if not arms or arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
+        lines, confidence = _read(prepared.binary)
+        arms.append(_Arm("preprocessed", lines, confidence))
+
+    if _needs_the_plain_read(arms, colour_read=prepared.colour is not None):
+        lines, confidence = _read(prepared.gray)
+        arms.append(_Arm("plain", lines, confidence))
+
+    winner, decided_by = _rank(arms)
+    scored = {arm.variant: round(arm.confidence, 1) for arm in arms}
 
     elapsed_ms = (time.perf_counter() - started) * 1000
     return OcrResult(
-        text="\n".join(line.text for line in lines),
-        mean_confidence=round(mean_confidence, 1),
+        text="\n".join(line.text for line in winner.lines),
+        mean_confidence=round(winner.confidence, 1),
         elapsed_ms=round(elapsed_ms, 1),
-        lines=lines,
+        lines=winner.lines,
         orientation=prepared.orientation,
-        read_path=read_path,
+        read_path=ReadPath(
+            variant=winner.variant,
+            preprocessed_confidence=scored.get("preprocessed", 0.0),
+            plain_confidence=scored.get("plain"),
+            colour_confidence=scored.get("colour"),
+            decided_by=decided_by,
+        ),
     )
+
+
+def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
+    """Whether the plain upright grayscale still has anything to contribute.
+
+    Two rules, one per kind of source, and they are the two paragraphs of
+    ``extract_text`` in code. On a source with no colour to lose the plain read
+    runs when the preprocessed read fell short of the short-circuit confidence,
+    which is v1.0.1 unchanged. On a coloured source it runs whenever the colour
+    read fell short, whatever the preprocessed read then scored, because a
+    confident read of a thresholded colour image is exactly the evidence this
+    release stopped trusting.
+    """
+    if not colour_read:
+        return arms[-1].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+    return arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+
+
+@dataclass(frozen=True)
+class _Arm:
+    """One rendering of the image, read, with what it scored."""
+
+    variant: Literal["preprocessed", "plain", "colour"]
+    lines: list[OcrLine]
+    confidence: float
+
+    @property
+    def words(self) -> int:
+        return sum(len(line.text.split()) for line in self.lines)
+
+
+def _rank(arms: list[_Arm]) -> tuple[_Arm, Literal["short_circuit", "confidence", "coverage"]]:
+    """Pick the arm to keep, and say what picked it.
+
+    Mean word confidence ranks. Where the leader is clear of every other arm by
+    more than ``EQUAL_CONFIDENCE_BAND`` it wins outright, and that is the rule
+    v1.0.1 set and this release does not change: an arm that recovered more
+    text than the leader but scored materially below it still loses.
+
+    The band is what mean confidence on its own cannot express. Two arms inside
+    it are, on this evidence, equally confident about what each of them read,
+    and the question of which read *more* is then the only question left. That
+    is the case the colour arm exists for, and it is the case where the losing
+    arm dropped an entire ink class without any word it did keep scoring a
+    point lower for it.
+
+    Order is stable: with everything equal the earliest arm wins, and the arms
+    arrive preprocessed first, so nothing v1.0.1 decided is decided differently.
+    """
+    if len(arms) == 1:
+        return arms[0], "short_circuit"
+
+    best = max(arm.confidence for arm in arms)
+    contenders = [arm for arm in arms if best - arm.confidence <= EQUAL_CONFIDENCE_BAND]
+    if len(contenders) == 1:
+        return contenders[0], "confidence"
+
+    leader = max(contenders, key=lambda arm: arm.words)
+    if leader.words == max(arm.words for arm in contenders if arm is not leader):
+        # Equally confident and equally full: confidence is still the reason,
+        # and calling it coverage would claim a distinction nothing measured.
+        return max(contenders, key=lambda arm: arm.confidence), "confidence"
+    return leader, "coverage"
 
 
 def _read(image: np.ndarray) -> tuple[list[OcrLine], float]:
     """Read one prepared image and return its lines and mean word confidence."""
+    timing.tesseract_read()
     data = pytesseract.image_to_data(image, lang="eng", output_type=Output.DICT)
     lines, confidences = _assemble_lines(data)
     mean_confidence = float(sum(confidences) / len(confidences)) if confidences else 0.0

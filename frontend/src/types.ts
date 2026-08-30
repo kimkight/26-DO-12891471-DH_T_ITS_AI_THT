@@ -88,8 +88,25 @@ export interface ApplicationDocumentResult {
    */
   artwork_images_found: number
   artwork_images_read: number
+  /**
+   * Every embedded picture that was not big enough, or was the wrong shape, to
+   * be label artwork, with the reason (v1.1.0). The commonest one on a filed
+   * application is the applicant's own signature. The picture itself never
+   * appears here.
+   */
+  artwork_images_rejected: RejectedImageDetail[]
+  /** The page the chosen label artwork came from, or null when none was chosen. */
+  label_artwork_page: number | null
   /** Whether one of them can stand in as the label side of the check. */
   label_artwork_available: boolean
+}
+
+/** One embedded picture that was not treated as candidate label artwork. */
+export interface RejectedImageDetail {
+  page: number
+  width: number
+  height: number
+  reason: 'short_edge' | 'area' | 'aspect_ratio' | 'unreadable'
 }
 
 /** How one photograph was turned before it was read (A-15). */
@@ -104,8 +121,36 @@ export interface OrientationDetail {
   exif_orientation: number | null
   exif_transposed: boolean
   rotation_degrees: number
-  method: 'osd' | 'unavailable' | 'disabled'
+  method: 'osd' | 'osd_180_check' | 'unavailable' | 'disabled'
   confidence: number | null
+  /**
+   * The second opinion taken when Tesseract's own confidence in the turn fell
+   * under the floor, or null when it did not (v1.1.0).
+   */
+  check: OrientationCheckDetail | null
+}
+
+/** What one candidate rotation scored when the image was actually read. */
+export interface RotationScoreDetail {
+  rotation_degrees: number
+  confidence: number
+  words: number
+}
+
+/**
+ * The second opinion on a low-confidence orientation verdict (A-15).
+ *
+ * `candidates` always holds exactly two entries, and deliberately not four:
+ * Tesseract's layout analysis already corrects a quarter-turn, so a score
+ * cannot separate 0 from 90, and it separates a turn from its opposite cleanly.
+ */
+export interface OrientationCheckDetail {
+  osd_rotation_degrees: number
+  osd_confidence: number
+  floor: number
+  candidates: RotationScoreDetail[]
+  chosen_rotation_degrees: number
+  overrode_osd: boolean
 }
 
 /**
@@ -116,9 +161,21 @@ export interface OrientationDetail {
  * higher. `plain_confidence` is null when the second read never ran.
  */
 export interface ReadPathDetail {
-  variant: 'preprocessed' | 'plain'
+  variant: 'preprocessed' | 'plain' | 'colour'
   preprocessed_confidence: number
   plain_confidence: number | null
+  /**
+   * Mean word confidence of the colour read, or null when the image carried no
+   * colour a grayscale conversion would have discarded (v1.1.0).
+   */
+  colour_confidence: number | null
+  /**
+   * How the winning read was chosen. `coverage` is the case mean confidence
+   * alone cannot decide: two reads equally confident about what each of them
+   * read, one of which read more, because a word that was never read lowers no
+   * score.
+   */
+  decided_by: 'short_circuit' | 'confidence' | 'coverage'
 }
 
 /**
@@ -201,6 +258,8 @@ export interface PhaseTimings {
   /** Every Tesseract pass in the request, and how many there were. */
   ocr_ms: number
   ocr_passes: number
+  /** How many times the engine was invoked inside those passes (v1.1.0). */
+  tesseract_reads: number
   accounted_ms: number
   unaccounted_ms: number
 }

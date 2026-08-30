@@ -269,6 +269,25 @@ class ApplicationDocumentResult(BaseModel):
             "on than a document that carries no pictures at all."
         ),
     )
+    artwork_images_rejected: list[RejectedImageDetail] = Field(
+        default_factory=list,
+        description=(
+            "Every embedded raster image that did not clear the floor, with the "
+            "reason it did not. Reported because the commonest rejection on a "
+            "filed application is the applicant's own handwritten signature, "
+            "and a rejection nobody can see is one nobody can check. The "
+            "picture itself never appears here, or in a log, or on disk."
+        ),
+    )
+    label_artwork_page: int | None = Field(
+        default=None,
+        description=(
+            "The page the chosen label artwork was lifted from, or null when no "
+            "image was chosen. Stated because a document carries several "
+            "pictures and an agent reading a poor result is entitled to know "
+            "which one was read."
+        ),
+    )
     label_artwork_available: bool = Field(
         default=False,
         description=(
@@ -276,6 +295,29 @@ class ApplicationDocumentResult(BaseModel):
             "check when the agent supplied no photograph of their own "
             "(ADR 0010). See VerificationResult.label_source."
         ),
+    )
+
+
+class RejectedImageDetail(BaseModel):
+    """One embedded image that was not treated as candidate label artwork.
+
+    The page, the size, and the named reason. Deliberately not the picture and
+    not a word of what it showed: on a filed application the commonest
+    rejection is the applicant's handwritten signature, which is personal data
+    (NFR-6).
+    """
+
+    page: int = Field(description="The page the image sat on, numbered from 1.")
+    width: int = Field(description="Its width in pixels, as the file stores it.")
+    height: int = Field(description="Its height in pixels, as the file stores it.")
+    reason: Literal["short_edge", "area", "aspect_ratio", "unreadable"] = Field(
+        description=(
+            "Why it was not treated as label artwork. 'short_edge' and 'area' "
+            "are the absolute size floors. 'aspect_ratio' is the shape test, "
+            "which is the one a higher-resolution scan cannot defeat: a "
+            "signature strip is wide and short at any resolution. 'unreadable' "
+            "means it cleared the floor and could not be decoded."
+        )
     )
 
 
@@ -366,6 +408,48 @@ class ErrorResponse(BaseModel):
     error: ErrorDetail
 
 
+class RotationScoreDetail(BaseModel):
+    """What one candidate rotation scored when the image was actually read."""
+
+    rotation_degrees: int = Field(description="The clockwise turn that was scored, in degrees.")
+    confidence: float = Field(description="Mean Tesseract word confidence at that turn.")
+    words: int = Field(description="How many words were read at that turn.")
+
+
+class OrientationCheckDetail(BaseModel):
+    """The second opinion on a low-confidence orientation verdict (FR-1, A-15).
+
+    Tesseract's orientation detection is right in 46 of 48 measured cases and
+    keeps the decision wherever it is confident (ADR 0003). Where it is not, its
+    answer is scored against the opposite turn by mean word confidence and the
+    better one is kept.
+
+    `candidates` always holds exactly two entries, and deliberately not four.
+    Tesseract's own layout analysis already corrects a quarter-turn, so an
+    upright image and the same image turned 90 degrees produce identical output
+    and identical scores; a score that cannot separate those two is no use for
+    choosing between them. It separates a turn from its opposite cleanly, which
+    is the one axis this check is asked to decide.
+    """
+
+    osd_rotation_degrees: int = Field(description="The turn Tesseract's own detection chose.")
+    osd_confidence: float = Field(description="Its confidence in that turn.")
+    floor: float = Field(
+        description="The confidence at or above which the verdict would have been taken as final."
+    )
+    candidates: list[RotationScoreDetail] = Field(
+        description="The two turns that were scored: the one chosen and its 180-degree opposite."
+    )
+    chosen_rotation_degrees: int = Field(description="The turn that was kept and applied.")
+    overrode_osd: bool = Field(
+        description=(
+            "Whether the opposite turn scored higher and replaced the verdict. "
+            "False means the scores agreed with Tesseract, or tied, and its "
+            "answer stood."
+        )
+    )
+
+
 class OrientationDetail(BaseModel):
     """How the submitted image was turned before it was read (FR-1, FR-10).
 
@@ -399,19 +483,33 @@ class OrientationDetail(BaseModel):
             "degrees: 0, 90, 180 or 270."
         )
     )
-    method: Literal["osd", "unavailable", "disabled"] = Field(
+    method: Literal["osd", "osd_180_check", "unavailable", "disabled"] = Field(
         description=(
             "Where the rotation came from. 'osd' is Tesseract's orientation and "
-            "script detection; 'unavailable' means it could not judge, usually "
-            "too little text, and the image was left as it arrived; 'disabled' "
-            "means TTB_CORRECT_ORIENTATION is off."
+            "script detection, taken at its word; 'osd_180_check' means it "
+            "answered below the confidence floor and its answer was scored "
+            "against the opposite turn, which is reported in `check`; "
+            "'unavailable' means it could not judge, usually too little text, "
+            "and the image was left as it arrived; 'disabled' means "
+            "TTB_CORRECT_ORIENTATION is off."
         )
     )
     confidence: float | None = Field(
         default=None,
         description=(
-            "Tesseract's confidence in the orientation. Null when no judgement "
-            "was made. A value near zero means the answer was a guess."
+            "Tesseract's confidence in its own orientation verdict. Null when "
+            "no judgement was made. A value near zero means the answer was a "
+            "guess, and below the floor reported in `check.floor` it was "
+            "treated as one."
+        ),
+    )
+    check: OrientationCheckDetail | None = Field(
+        default=None,
+        description=(
+            "The second opinion taken when Tesseract's confidence fell under "
+            "the floor, or null when it did not. Reported in full because a "
+            "rotation that overrode Tesseract's own verdict is exactly the "
+            "decision an agent looking at a poor result has to be able to audit."
         ),
     )
 
@@ -427,22 +525,49 @@ class ReadPathDetail(BaseModel):
     reading batch latency is entitled to know which images paid for two reads.
     """
 
-    variant: Literal["preprocessed", "plain"] = Field(
+    variant: Literal["preprocessed", "plain", "colour"] = Field(
         description=(
             "Which image the reported text came from. 'preprocessed' is the "
             "adaptively thresholded and deskewed image; 'plain' is the upright "
             "grayscale with no preprocessing, which wins on soft-contrast "
-            "photographs where thresholding destroys the text."
+            "photographs where thresholding destroys the text; 'colour' is the "
+            "image as the file holds it, which wins on label artwork printed in "
+            "more than two tones, where flattening to luminance drops a whole "
+            "ink class."
         )
     )
     preprocessed_confidence: float = Field(
-        description="Mean word confidence of the preprocessed read, which always runs."
+        default=0.0,
+        description=(
+            "Mean word confidence of the preprocessed read, or 0.0 when a "
+            "confident colour read ended the comparison before it ran."
+        ),
     )
     plain_confidence: float | None = Field(
         default=None,
         description=(
             "Mean word confidence of the plain read, or null when the "
-            "preprocessed read scored well enough that the plain one was not run."
+            "comparison was already settled and it was not run."
+        ),
+    )
+    colour_confidence: float | None = Field(
+        default=None,
+        description=(
+            "Mean word confidence of the colour read, or null when the image "
+            "carried no colour a grayscale conversion would have discarded, in "
+            "which case reading it would have repeated the plain read exactly."
+        ),
+    )
+    decided_by: Literal["short_circuit", "confidence", "coverage"] = Field(
+        default="short_circuit",
+        description=(
+            "How the winning read was chosen. 'short_circuit' means the first "
+            "read scored well enough that nothing else ran. 'confidence' means "
+            "it scored clearly above every other read. 'coverage' means two "
+            "reads were equally confident about what each of them read and the "
+            "one that recovered more text was kept, which is the case mean "
+            "confidence alone cannot decide: a word that was never read lowers "
+            "no score."
         ),
     )
 
@@ -570,9 +695,20 @@ class PhaseTimings(BaseModel):
     ocr_passes: int = Field(
         default=0,
         description=(
-            "How many separate reads that was. The count is the half that makes "
-            "the duration diagnosable: three passes where one would do is a fact "
-            "about the code, and a slow machine is not."
+            "How many separate pictures were read end to end. The count is the "
+            "half that makes the duration diagnosable: three passes where one "
+            "would do is a fact about the code, and a slow machine is not."
+        ),
+    )
+    tesseract_reads: int = Field(
+        default=0,
+        description=(
+            "How many times the engine was invoked on an image inside those "
+            "passes. Always at least ocr_passes and often more: one picture "
+            "costs an orientation call, up to two more where that call came "
+            "back unsure and its answer was scored against the opposite turn, "
+            "and one per image variant compared. Reported because a pass count "
+            "alone cannot show the engine being run five times for one picture."
         ),
     )
     accounted_ms: float = Field(default=0.0, description="The sum of the named phases above.")

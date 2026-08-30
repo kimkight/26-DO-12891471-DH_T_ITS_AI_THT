@@ -229,6 +229,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 90,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(turned)).toBe('We turned it 90 degrees to read it.')
@@ -242,6 +243,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 0,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(tagged)).toBe('It was saved sideways by the camera.')
@@ -255,6 +257,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 180,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(both)).toBe(
@@ -287,6 +290,7 @@ describe('the note for one photo', () => {
               rotation_degrees: 270,
               method: 'osd',
               confidence: 12,
+              check: null,
             },
           }),
         ]}

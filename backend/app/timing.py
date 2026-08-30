@@ -88,11 +88,21 @@ class Recording:
 
     ms: dict[str, float] = field(default_factory=dict)
     counts: dict[str, int] = field(default_factory=dict)
+    tallies: dict[str, int] = field(default_factory=dict)
     started: float = field(default_factory=time.perf_counter)
 
     def add(self, name: str, elapsed_ms: float) -> None:
         self.ms[name] = self.ms.get(name, 0.0) + elapsed_ms
         self.counts[name] = self.counts.get(name, 0) + 1
+
+    def tally(self, name: str) -> None:
+        """Count something that happens inside a phase, without timing it.
+
+        Used for the Tesseract invocations inside one image read. Timing them
+        separately would open a phase inside a phase and break the guarantee
+        that the buckets are disjoint, so they are counted and not timed.
+        """
+        self.tallies[name] = self.tallies.get(name, 0) + 1
 
     def get(self, name: str) -> float:
         return round(self.ms.get(name, 0.0), 1)
@@ -112,6 +122,25 @@ class Recording:
     @property
     def ocr_passes(self) -> int:
         return sum(self.counts.get(name, 0) for name in OCR_PHASES)
+
+    @property
+    def tesseract_reads(self) -> int:
+        """How many times Tesseract was actually invoked on an image.
+
+        Not the same number as ``ocr_passes``, and the difference is the point.
+        A pass is one picture read end to end; a read is one invocation of the
+        engine. One pass costs one read on a label that reads cleanly and up to
+        five on one that does not: the orientation call, the second opinion's
+        two scored rotations where it runs, and the colour, preprocessed and
+        plain arms where the comparison goes the whole way.
+
+        It is reported because the arms added in v1.1.0 are invisible in
+        ``ocr_passes`` by construction: they all happen inside one pass. A
+        release that silently tripled the engine invocations while the reported
+        pass count held at 1 would be the same class of mistake the 2026-08-30
+        finding was, and this module exists because of that finding.
+        """
+        return self.tallies.get("tesseract", 0)
 
     @property
     def accounted_ms(self) -> float:
@@ -149,6 +178,13 @@ def phase(name: str) -> Iterator[None]:
         yield
     finally:
         current.add(name, (time.perf_counter() - started) * 1000)
+
+
+def tesseract_read() -> None:
+    """Record one Tesseract invocation. A no-op outside a recording."""
+    recorded = _CURRENT.get()
+    if recorded is not None:
+        recorded.tally("tesseract")
 
 
 def current() -> Recording | None:
