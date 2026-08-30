@@ -374,7 +374,7 @@ test.describe('what axe cannot check', () => {
     expect(report(await violations(page))).toBe('')
   })
 
-  test('a document with gaps opens the typed fields and announces why (US-24)', async ({
+  test('a document with gaps shows the missing field and announces why (US-26)', async ({
     page,
   }) => {
     // The honest shape of TTB F 5100.31 (04/2023): a brand name, and no class
@@ -400,16 +400,18 @@ test.describe('what axe cannot check', () => {
       buffer: Buffer.from([37, 80, 68, 70]),
     })
 
-    await expect(
-      panel.getByRole('button', { name: 'Or type the application values' }),
-    ).toHaveAttribute('aria-expanded', 'true')
-    // The parsed value is filled; the gaps are empty and waiting.
+    // What was read is a line, not a box: the box for it is behind the
+    // disclosure, which stays collapsed (US-26).
+    await expect(panel.getByText('Read from your upload')).toBeVisible()
+    await expect(panel.getByLabel('Brand name', { exact: true })).toBeHidden()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
+
+    // What was not read is shown, focused, and announced. Three of the five are
+    // not items on TTB F 5100.31 at all (A-17), so this is the ordinary case.
+    await expect(panel.getByLabel('Alcohol content', { exact: true })).toBeVisible()
     await expect(panel.getByLabel('Alcohol content', { exact: true })).toHaveValue('')
-    // And the expansion is announced, rather than only being visible.
-    await expect(panel.getByLabel('Application values')).toContainText(
-      'The application values are open below',
-    )
+    await expect(panel.getByLabel('Class or type designation', { exact: true })).toBeFocused()
+    await expect(panel.getByLabel('Application values')).toContainText('not found in your upload')
 
     expect(report(await violations(page))).toBe('')
   })
@@ -431,14 +433,19 @@ test.describe('what axe cannot check', () => {
       buffer: Buffer.from([37, 80, 68, 70]),
     })
 
-    // PARSED_APPLICATION leaves the beverage type unread, which is a gap, so
-    // the typed fields open on their own (US-24, expansion case 2).
-    await expect(
-      panel.getByRole('button', { name: 'Or type the application values' }),
-    ).toHaveAttribute('aria-expanded', 'true')
+    // PARSED_APPLICATION carries all four compared values and leaves only the
+    // beverage type unread, which is never compared and never a gap in the
+    // check (US-26, ADR 0008). So nothing opens and no box is shown.
+    await expect(panel.getByRole('button', { name: 'Review the values' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    await expect(panel.getByText('Read from your upload')).toBeVisible()
+    await expect(panel.getByLabel('Alcohol content', { exact: true })).toBeHidden()
 
-    // The parsed values reach the same fields an agent would have typed into,
-    // and every one of them says where it came from (FR-11, ADR 0008).
+    // The values are still the agent's to change, behind that one control
+    // (FR-3), and each says where it came from (FR-11, ADR 0008).
+    await panel.getByRole('button', { name: 'Review the values' }).click()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
     await expect(
       panel.getByText('Read from the application form. Change it if it is wrong.').first(),
@@ -604,30 +611,35 @@ const FORM_WITH_GAPS = {
       display_name: 'Brand name',
       value: "STONE'S THROW",
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'class_type',
       display_name: 'Class or type designation',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'alcohol_content',
       display_name: 'Alcohol content',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'beverage_type',
       display_name: 'Beverage type',
       value: 'distilled spirits',
       found_on_document: true,
+      source: 'embedded_text',
     },
   ],
   fanciful_name: 'Small Batch Reserve',
@@ -651,30 +663,35 @@ const PARSED_APPLICATION = {
       display_name: 'Brand name',
       value: "STONE'S THROW",
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'class_type',
       display_name: 'Class or type designation',
       value: 'KENTUCKY STRAIGHT BOURBON WHISKEY',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'alcohol_content',
       display_name: 'Alcohol content',
       value: '45% ALC/VOL',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       value: '750 ML',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'beverage_type',
       display_name: 'Beverage type',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
   ],
   fanciful_name: 'Small Batch Reserve',

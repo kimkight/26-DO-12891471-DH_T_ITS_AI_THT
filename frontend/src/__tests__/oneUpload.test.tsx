@@ -69,6 +69,20 @@ async function attachApplication(user: ReturnType<typeof userEvent.setup>) {
   await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
 }
 
+/**
+ * Open the disclosure that holds the values that were read (US-26).
+ *
+ * After something has been processed the read values are summary lines and
+ * their boxes are behind this control, collapsed. FR-3 keeps them editable; it
+ * just stops them being in the way.
+ */
+async function reviewTheValues(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: /Review the values/i })).toBeInTheDocument(),
+  )
+  await user.click(screen.getByRole('button', { name: /Review the values/i }))
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
@@ -182,8 +196,10 @@ describe('what the parsed values do to the form', () => {
     stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
+    // The four compared values. The beverage type is a select rather than a
+    // text field and carries its own line (US-26).
     await waitFor(() =>
-      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(5),
+      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(4),
     )
   })
 
@@ -204,6 +220,7 @@ describe('what the parsed values do to the form', () => {
     stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
+    await reviewTheValues(user)
     const brand = await screen.findByLabelText('Brand name')
     await waitFor(() => expect(brand).toHaveValue("STONE'S THROW"))
     await user.clear(brand)
@@ -216,11 +233,12 @@ describe('what the parsed values do to the form', () => {
     stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
+    await reviewTheValues(user)
     const brand = await screen.findByLabelText('Brand name')
     await waitFor(() => expect(brand).toHaveValue("STONE'S THROW"))
     await user.type(brand, 'X')
     await waitFor(() =>
-      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(4),
+      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(3),
     )
   })
 
@@ -229,6 +247,7 @@ describe('what the parsed values do to the form', () => {
     const fetchMock = stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
+    await reviewTheValues(user)
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
     const brand = screen.getByLabelText('Brand name')
     await user.clear(brand)
@@ -374,7 +393,7 @@ describe('announcements and keyboard use (NFR-5)', () => {
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
-      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(5),
+      expect(screen.getAllByText(/Read from the application form/i)).toHaveLength(4),
     )
     await user.click(screen.getByRole('button', { name: 'Remove application.pdf' }))
     await waitFor(() =>

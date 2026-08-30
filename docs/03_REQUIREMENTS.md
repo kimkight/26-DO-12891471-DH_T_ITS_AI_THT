@@ -588,6 +588,57 @@ path keeps `images` and `application_documents` unchanged, because ADR 0009
 pairs by filename stem and a batch is already sorted; ADR 0011 records why the
 two paths differ.
 
+### FR-13 The values that were read go quiet; the ones that were not go loud
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-29:
+"Collapse the form fields and only expand if there is something that isn't read
+in from the application or picture."
+
+Once an upload has been read, show each value that was found as a compact
+read-only line and each value that was not as a field, and put nothing else in
+the agent's way. US-24 collapsed the five typed fields behind a disclosure,
+which fixed what greets an agent on load; this is about what happens after
+something has been processed.
+
+**Why it is a requirement rather than a layout preference.** Five text boxes
+shown after a document has already answered four of them is a form asking an
+agent to re-read work the tool has done, and NFR-4's benchmark is an agent who
+should not have to read past anything. It is also the shape that makes the gaps
+findable: three of the five values are not items on TTB F 5100.31 at all (A-17),
+so a gap is the ordinary outcome rather than an error, and an agent has to be
+able to see which one at a glance.
+
+**Acceptance criteria**
+- Given an upload that supplied a value, then that value is shown as one line
+  carrying the value and where it came from: typed by the agent, the application
+  form, or the label artwork inside the application. It is not shown as an
+  editable box.
+- Given an upload that did not supply a compared value, then that value is shown
+  as an editable field, visible, not behind a disclosure.
+- Given an upload that supplied every compared value, then no editable field is
+  shown at all; one collapsed disclosure holds them.
+- Given at least one gap, then focus moves to the first missing field, the view
+  scrolls to it, and a live region says which value is missing and what to do
+  about it: enter it, or upload a clearer image.
+- Given any value that was read, then it remains editable behind that same
+  disclosure, and a value the agent types is used instead of the one that was
+  read (FR-11's precedence, unchanged).
+- Given the beverage type, then it is stated on its own line: read where the
+  document stated it in text, and otherwise reported as not read from the form,
+  because the product-type boxes are check marks and a text layer cannot report
+  which one is ticked (ADR 0008). Its selector is inline. It is never compared,
+  so it never takes focus and it is never counted as a gap in the check.
+- Given nothing uploaded yet, then the view is exactly what US-24 specified:
+  one collapsed disclosure over the five fields, and no summary lines.
+- The result panel is unchanged. This requirement is about the input side.
+
+**Three sources, not four.** A value on the application side comes from the
+agent, from the document's text, or from label artwork embedded in that
+document (ADR 0010). It never comes from a photograph of the label: that is the
+other side of the comparison, and taking the application value off the label
+would mean comparing the label against itself.
+
 ## 4. Non-functional requirements
 
 ### NFR-1 Response time of about 5 seconds

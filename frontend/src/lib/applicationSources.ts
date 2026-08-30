@@ -40,8 +40,35 @@ export function sourceChipLabel(source: ApplicationSource): string {
   return SOURCE_LABELS[source]
 }
 
-export function documentSource(source: DocumentValueSource): ApplicationSource {
-  return DOCUMENT_SOURCES[source]
+/**
+ * Defaulted rather than indexed blindly: a response from a server that predates
+ * ADR 0010 carries no per-value source, and a value that came off a document
+ * with no source recorded is still a value that came off a document. Losing the
+ * mark on it would tell the agent they typed something they did not.
+ */
+export function documentSource(source: DocumentValueSource | undefined): ApplicationSource {
+  return (source && DOCUMENT_SOURCES[source]) || 'parsed_from_form'
+}
+
+/**
+ * The mark on a filled field, saying where its value came from.
+ *
+ * Kept in the wording it has had since FR-11 ("Read from the application form.
+ * Change it if it is wrong.") because the second sentence is the working half:
+ * an agent who cannot tell whether they are allowed to edit a filled field will
+ * not edit it. What is added is the artwork case, which is the one an agent
+ * should look at hardest.
+ */
+const FIELD_MARKS: Record<ApplicationSource, string | null> = {
+  typed: null,
+  parsed_from_form: 'Read from the application form. Change it if it is wrong.',
+  parsed_from_artwork:
+    'Read from the label artwork inside the application. Change it if it is wrong.',
+  absent: null,
+}
+
+export function fieldSourceMark(source: ApplicationSource): string | null {
+  return FIELD_MARKS[source]
 }
 
 /**
