@@ -446,6 +446,16 @@ reads records the application emitted rather than what CloudWatch received.
 | 59 | Read the result of row 58 | It states, once, that the label checked was the artwork inside the application rather than a photo of a bottle, and that checking the bottle still needs a photo of the bottle. **A result that reads as a check of the product is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; OOS-8 |
 | 60 | Upload a COLA document whose only embedded pictures are a seal, a barcode and a signature block | The artwork values report not found with the reasons A-17 gives, nothing crashes, and the submission is refused with a message naming the missing piece and offering the photo upload. **A field outcome on that refusal is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; FR-9 |
 
+| 61 | Upload the mezcal COLA PDF and a photo of the label together, through the one picker | Each file is listed with what it was taken to be: the PDF as the label application, the photo as the label picture. The check runs against the photo, with the document as the application side | The author's evidence, 2026-08-29; FR-12; ADR 0011 |
+| 62 | Deliberately put the COLA PDF where a photo would have gone, and the photo where the application would have gone | Both are still used on the correct side, because the classification is made from the file rather than from the control. **A COLA form read as label artwork is a failure of this test.** | The author's evidence, 2026-08-29; FR-12 |
+| 63 | Work the upload from the keyboard alone, with a screen reader | One labelled control, reachable by Tab and operable by Enter or Space; each accepted file announced with what it was taken to be; drag and drop offered on top of that rather than instead of it | FR-12; NFR-5 |
+
+Rows 61 to 63 come from the author's third report of 2026-08-29, the design
+instruction: "these should be combined; just one upload; simplify the interface.
+You should be able to upload (pdfs or images)." Row 62 is the one worth running
+adversarially, because it is the failure the two pickers actually produced: a
+file put in the wrong box was read as the wrong thing, silently.
+
 Rows 58 to 60 come from the author's second problem report of 2026-08-29 and
 are the first of the two problems reported that day. The document was a real
 TTB Form 5100.31, OMB No. 1513-0020, three pages, and the deployed v1.0.1 build

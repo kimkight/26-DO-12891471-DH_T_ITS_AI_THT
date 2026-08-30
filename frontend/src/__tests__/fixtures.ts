@@ -2,7 +2,9 @@
 import type {
   ApplicationDocumentResult,
   BatchLine,
+  ClassificationResult,
   FieldResult,
+  FileClassification,
   Outcome,
   ParsedApplicationField,
   PhotoResult,
@@ -82,6 +84,7 @@ export function verification(outcomes: Outcome[] = ['match', 'match', 'match', '
     ocr_ms: 530,
     external_call_made: false,
     application_document: null,
+    files: [],
     label_source: 'uploaded_photographs',
     self_consistency_note: null,
   } satisfies VerificationResult
@@ -161,6 +164,45 @@ export function applicationDocument(
       'The net contents is an item on TTB F 5100.31 (04/2023) only when it is blown, branded or embossed on the container.',
       "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text.",
     ],
+    ...overrides,
+  }
+}
+
+/** One sorted file, as POST /api/classify and POST /api/verify report it. */
+export function fileClassification(
+  filename: string,
+  classifiedAs: FileClassification['classified_as'] = 'label_image',
+  overrides: Partial<FileClassification> = {},
+): FileClassification {
+  const isDocument = classifiedAs === 'application_document'
+  return {
+    filename,
+    classified_as: classifiedAs,
+    basis: isDocument ? 'pdf_header' : 'no_form_markers',
+    reason: isDocument
+      ? 'This is a PDF, so we read it as the label application.'
+      : 'We read this picture as a label.',
+    used: true,
+    ...overrides,
+  }
+}
+
+/**
+ * What POST /api/classify returns for one pile of files (FR-12, ADR 0011).
+ *
+ * The default is the ordinary two-file case: one application and one photo.
+ */
+export function classification(
+  overrides: Partial<ClassificationResult> = {},
+): ClassificationResult {
+  return {
+    files: [
+      fileClassification('application.pdf', 'application_document'),
+      fileClassification('label.png'),
+    ],
+    application_document: applicationDocument(),
+    label_images: 1,
+    application_error: null,
     ...overrides,
   }
 }

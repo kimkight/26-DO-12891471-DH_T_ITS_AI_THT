@@ -522,6 +522,72 @@ from its own embedded artwork too; the row still requires its label image,
 because batch rows are enumerated from the images so that the stream can report
 a total before any document is read (ADR 0010, "Effect on the batch path").
 
+### FR-12 One upload, sorted by the tool rather than by the agent
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-29: "if COLA
+is uploaded, I don't also need an image", and "these should be combined; just
+one upload; simplify the interface. You should be able to upload (pdfs or
+images)."
+
+Accept everything submitted for one label through one control, taking PDFs and
+images in any mix, and decide what each file is from the file itself rather than
+from which control it arrived in. Report that decision per file. See
+[ADR 0011](adr/0011-one-upload.md).
+
+**The classification rule, stated so it can be checked rather than trusted.**
+
+1. A file whose bytes begin with `%PDF`, or which declares `application/pdf`, is
+   the application side. The bytes decide; the declared type is the fallback,
+   because a browser labels a file from its extension and an agent can rename
+   it. Nothing is decoded to reach this answer.
+2. An image is read once through the local OCR pipeline. If its text carries a
+   COLA form or Public COLA Registry marker, or the application parser finds at
+   least one mapped caption value in it, it is the application side. Otherwise
+   it is a label side.
+3. An image that cannot be decoded is a label side, carrying its error, because
+   FR-9's message for an unreadable photograph is the one an agent can act on.
+
+**The label image requirement is removed as a hard gate.** Before
+[ADR 0010](adr/0010-embedded-label-artwork.md) there was nothing to check an
+application against without a photograph, so requiring one was honest. There now
+is: a filed application carries the label artwork inside it. Three submissions
+are valid, and each completes: the application document alone, a label
+photograph plus typed values, or both.
+
+**Acceptance criteria**
+- Given one control on the single-label view, then it accepts PDFs and images,
+  one file or several, in any mix, and its copy says so.
+- Given a file submitted through it, then the server classifies it by the rule
+  above and the response reports, per file, what it was taken to be and why.
+- Given a COLA document submitted through a control intended for photographs, or
+  a photograph submitted through one intended for the application, then each is
+  still classified by the file and used on the correct side.
+- Given anything uploaded, then the check is enabled. No submission is blocked
+  for want of a label photograph.
+- Given an application document alone whose embedded artwork could be read, then
+  the check runs against that artwork (ADR 0010).
+- Given an application document alone with no artwork that could be read, then
+  the verification does not run, the response names the missing piece and offers
+  the photograph upload, and no field reports an outcome. This is an FR-9
+  message, not a validation error on a form field.
+- Given more files of one side than the check accepts, then the request is
+  refused with a message naming the limit, before anything is compared.
+- Given the control, then it is one labelled element, keyboard reachable, with
+  drag and drop offered on top of a keyboard-operable alternative rather than
+  instead of one, and each accepted file is announced to a live region together
+  with what it was taken to be (NFR-5).
+
+**The API contract, and where it is recorded.** `POST /api/verify` takes one
+repeated `files` part. The older `image` and `application_document` parts remain
+accepted and are routed through the same classifier, so a caller written against
+v1.0 keeps working. `POST /api/classify` sorts an upload and reads the
+application side without comparing anything, which is what lets the interface
+show the classification and the parsed values before a check runs. The batch
+path keeps `images` and `application_documents` unchanged, because ADR 0009
+pairs by filename stem and a batch is already sorted; ADR 0011 records why the
+two paths differ.
+
 ## 4. Non-functional requirements
 
 ### NFR-1 Response time of about 5 seconds

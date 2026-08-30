@@ -32,7 +32,7 @@ from app.application_form import (
 )
 from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
-from app.ocr import Orientation, ReadPath, UndecodableImageError, extract_text
+from app.ocr import OcrResult, Orientation, ReadPath, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
 from app.schemas import (
     FIELD_LABELS,
@@ -265,6 +265,11 @@ NO_LABEL_MESSAGE = (
     "check again."
 )
 
+NO_FILES_MESSAGE = (
+    "No files were sent. Upload the label application, a photo of the label, or "
+    "both, and run the check again."
+)
+
 
 @dataclass(frozen=True)
 class _Read:
@@ -286,6 +291,7 @@ def verify_photos(
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
     label_source: LabelSource = "uploaded_photographs",
+    pre_read: list[OcrResult | None] | None = None,
 ) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
 
@@ -308,7 +314,11 @@ def verify_photos(
     hand on the single-label path, so the caller runs them.
     """
     started = time.perf_counter()
-    reads = [_read_one(index, content) for index, content in enumerate(contents, start=1)]
+    already = pre_read or []
+    reads = [
+        _read_one(index, content, already[index - 1] if index <= len(already) else None)
+        for index, content in enumerate(contents, start=1)
+    ]
     usable = [read for read in reads if read.parsed is not None]
 
     if not usable:
@@ -330,10 +340,16 @@ def verify_photos(
     )
 
 
-def _read_one(index: int, content: bytes) -> _Read:
-    """Decode, turn upright, read and parse one photograph. Never raises."""
+def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _Read:
+    """Decode, turn upright, read and parse one photograph. Never raises.
+
+    ``already`` is a read this image has had, which is what ``app.classify``
+    produces while deciding the file is a label at all (ADR 0011). Reusing it is
+    what keeps a submission classified on the server to exactly one OCR pass per
+    image rather than two.
+    """
     try:
-        ocr = extract_text(content)
+        ocr = extract_text(content) if already is None else already
     except UndecodableImageError as exc:
         # Distinct from "no text found" below, because the agent's next action
         # differs: a corrupt file needs resending, a blank one needs a better

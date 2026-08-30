@@ -79,7 +79,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
 
 from app.config import settings
-from app.ocr import OcrLine, UndecodableImageError, extract_text
+from app.ocr import OcrLine, OcrResult, UndecodableImageError, extract_text
 from app.parse import parse_fields
 
 # The values a COLA document can supply. Four of them are compared against the
@@ -202,8 +202,30 @@ class ParsedApplication:
         )
 
 
-def parse_application_document(content: bytes, content_type: str | None) -> ParsedApplication:
-    """Read one uploaded COLA document. Never reaches the network (NFR-3)."""
+def reads_as_application(lines: list[OcrLine]) -> bool:
+    """Whether these lines carry at least one mapped COLA application value.
+
+    Exposed for ``app.classify``, which decides whether an uploaded picture is a
+    form or a label and must not reach into this module's internals to do it. A
+    label carries no ``BRAND NAME:`` caption, because a label prints the brand
+    rather than captioning it.
+    """
+    return _from_lines(lines).found_any
+
+
+def parse_application_document(
+    content: bytes,
+    content_type: str | None,
+    *,
+    pre_read: OcrResult | None = None,
+) -> ParsedApplication:
+    """Read one uploaded COLA document. Never reaches the network (NFR-3).
+
+    ``pre_read`` is an OCR result for an image that has already been read, which
+    is what ``app.classify`` produces while deciding that this file is a form at
+    all (ADR 0011). Passing it back means the picture is read once rather than
+    twice. It is ignored for a PDF, whose text does not come from OCR.
+    """
     if not content:
         raise UnreadableDocumentError(
             "The uploaded application document is empty. Send the file again, or "
@@ -211,7 +233,7 @@ def parse_application_document(content: bytes, content_type: str | None) -> Pars
         )
     if _is_pdf(content, content_type):
         return _parse_pdf(content)
-    return _parse_image(content)
+    return _parse_image(content, pre_read=pre_read)
 
 
 def _is_pdf(content: bytes, content_type: str | None) -> bool:
@@ -363,7 +385,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
         document.close()
 
 
-def _parse_image(content: bytes) -> ParsedApplication:
+def _parse_image(content: bytes, *, pre_read: OcrResult | None = None) -> ParsedApplication:
     """A photograph or scan of the form, submitted as an image.
 
     No embedded artwork here, by construction: an image has no objects inside
@@ -371,7 +393,7 @@ def _parse_image(content: bytes) -> ParsedApplication:
     is already going through the label pipeline.
     """
     try:
-        result = extract_text(content)
+        result = extract_text(content) if pre_read is None else pre_read
     except UndecodableImageError as exc:
         raise UnreadableDocumentError(
             "The uploaded application document could not be decoded as an image "

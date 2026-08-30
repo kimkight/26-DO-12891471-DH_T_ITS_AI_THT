@@ -225,6 +225,78 @@ class ApplicationDocumentResult(BaseModel):
     )
 
 
+class FileClassification(BaseModel):
+    """What one uploaded file was taken to be, and why (FR-12, ADR 0011).
+
+    **Reported so a misclassification is visible rather than silent.** The
+    single upload accepts PDFs and images in any mix and decides what each one
+    is from the file itself rather than from which control it arrived in. That
+    is right far more often than trusting the control was, and when it is wrong
+    an agent has to be able to see it and act, which they cannot do if the
+    decision is never stated.
+    """
+
+    filename: str = Field(description="The name the file was submitted under.")
+    classified_as: Literal["application_document", "label_image"] = Field(
+        description=(
+            "Which side of the check this file was used as: the label "
+            "application, or a picture of the label."
+        )
+    )
+    basis: Literal[
+        "pdf_header",
+        "declared_pdf",
+        "form_markers",
+        "form_values",
+        "no_form_markers",
+        "undecodable",
+    ] = Field(
+        description=(
+            "The evidence the classification rests on: the file's own PDF "
+            "header, its declared type, COLA form wording found in the picture, "
+            "a filled-in form value found in it, the absence of both, or a file "
+            "that could not be opened."
+        )
+    )
+    reason: str = Field(description="The same judgement as one sentence an agent can read.")
+    used: bool = Field(
+        default=True,
+        description=(
+            "False when the file was classified but not used, which happens "
+            "only where more of one side was submitted than the check accepts."
+        ),
+    )
+
+
+class ClassificationResult(BaseModel):
+    """What POST /api/classify returns: the sorting, plus the application read.
+
+    It exists so the interface can tell an agent what each file was taken to be,
+    and can put the application values in front of them for confirmation, before
+    any check runs. It compares nothing.
+    """
+
+    files: list[FileClassification] = Field(
+        description="One entry per submitted file, in submission order."
+    )
+    application_document: ApplicationDocumentResult | None = Field(
+        default=None,
+        description=(
+            "What the file classified as the application side was read to say, "
+            "or null when no file classified that way."
+        ),
+    )
+    label_images: int = Field(description="How many files classified as pictures of the label.")
+    application_error: ErrorDetail | None = Field(
+        default=None,
+        description=(
+            "Set when a file classified as the application side could not be "
+            "read (FR-9). The classification still stands and is reported; what "
+            "failed is the reading of it."
+        ),
+    )
+
+
 class ErrorDetail(BaseModel):
     """An error response. It carries no field outcomes at all (FR-9)."""
 
@@ -386,6 +458,14 @@ class VerificationResult(BaseModel):
         description=(
             "False on the default path, which makes no outbound network call "
             "(NFR-3). True only when the optional Bedrock fallback ran."
+        ),
+    )
+    files: list[FileClassification] = Field(
+        default_factory=list,
+        description=(
+            "What each submitted file was taken to be, in submission order "
+            "(FR-12, ADR 0011). Empty for a request that used the older named "
+            "parts and so had nothing to sort."
         ),
     )
     label_source: Literal["uploaded_photographs", "application_artwork"] = Field(

@@ -117,6 +117,13 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
   test('the results, including a needs-review card and an error notice', async ({ page }) => {
     // The results only exist after a response, so one is supplied here rather
     // than reaching the real API. The markup under test is the interface's.
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
     await page.route('**/api/verify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -125,7 +132,7 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       })
     })
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'label.png',
       mimeType: 'image/png',
       buffer: Buffer.from([137, 80, 78, 71]),
@@ -159,11 +166,13 @@ test.describe('what axe cannot check', () => {
     await page.keyboard.press('ArrowLeft')
     await expect(page.getByRole('tab', { name: 'Check one label' })).toBeFocused()
 
-    // Then the file input, the control that adds a second photo of the same
-    // label (ADR 0007), the COLA document upload, and the disclosure over the
-    // typed fields, in reading order. The five fields themselves are behind
-    // that disclosure and out of the tab order until it is opened (US-24),
-    // which is the point of it.
+    // Then the one file input, and the disclosure over the typed fields, in
+    // reading order. There is one picker now, not two: the label application,
+    // the photographs, or any mix go into it and the server sorts them
+    // (FR-12, ADR 0011). That is one fewer stop on this walk than before, which
+    // is the accessibility half of what "just one upload" bought. The five
+    // fields themselves are behind the disclosure and out of the tab order
+    // until it is opened (US-24), which is the point of it.
     //
     // Scoped to the single-label panel. The arrow-key steps above mounted the
     // batch panel too, and it stays mounted so a half-filled form survives a
@@ -172,17 +181,7 @@ test.describe('what axe cannot check', () => {
     // an unscoped lookup would still match its controls by name.
     const panel = page.locator('#panel-single')
     await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('Label image', { exact: true })).toBeFocused()
-
-    await page.keyboard.press('Tab')
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toBeFocused()
-
-    // Then the COLA document upload, which is the primary application-side
-    // input and sits directly after the photographs (FR-11, ADR 0008, US-24).
-    await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('Label application', { exact: true })).toBeFocused()
+    await expect(panel.getByLabel('Files for this label', { exact: true })).toBeFocused()
 
     // Then the disclosure. Collapsed, so the next Tab from here reaches the
     // submit button rather than a field: five empty boxes are no longer what
@@ -286,7 +285,7 @@ test.describe('what axe cannot check', () => {
     page,
   }) => {
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'stones-throw.png',
       // A one-pixel PNG, so the element has something real to load.
       mimeType: 'image/png',
@@ -309,32 +308,51 @@ test.describe('what axe cannot check', () => {
 
   test('the primary task is on the landing page with no navigation (NFR-4)', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByLabel('Label image')).toBeVisible()
+    await expect(page.getByLabel('Files for this label')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Check this label' })).toBeVisible()
   })
 
-  test('a second and third photo of the same label are reachable by keyboard', async ({ page }) => {
+  test('several files go in through the one control, each named and removable', async ({
+    page,
+  }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PAIR),
+      })
+    })
     await page.goto('/')
     const panel = page.locator('#panel-single')
 
-    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
-    await expect(panel.getByLabel('Label image, photo 2')).toBeVisible()
-    await expect(panel.getByRole('button', { name: 'Remove photo 2' })).toBeVisible()
+    // One picker, both kinds of file, in one go (FR-12, ADR 0011). More than
+    // one picture of the same label is still ADR 0007 underneath; what has gone
+    // is the row of numbered slots.
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles([
+      {
+        name: 'application.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from([37, 80, 68, 70]),
+      },
+      { name: 'label.png', mimeType: 'image/png', buffer: Buffer.from([137, 80, 78, 71]) },
+    ])
 
-    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
-    await expect(panel.getByLabel('Label image, photo 3')).toBeVisible()
-    // The cap is enforced by withdrawing the control, so an agent never reaches
-    // the API's refusal (NFR-4, ADR 0007).
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toHaveCount(0)
+    // Each file is listed with what it was taken to be, so a misclassification
+    // is visible rather than silent.
+    await expect(panel.getByText('Label application', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Label picture', { exact: true })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove label.png' })).toBeVisible()
 
-    // Removing a slot has to leave focus somewhere usable, which is what a
-    // keyboard user loses if the removed button simply disappears.
-    await panel.getByRole('button', { name: 'Remove photo 3' }).click()
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toBeFocused()
+    // And every accepted file is announced with its classification (NFR-5).
+    await expect(panel.getByLabel('Your uploads')).toContainText(
+      'application.pdf, read as a label application',
+    )
+    await expect(panel.getByLabel('Your uploads')).toContainText(
+      'label.png, read as a label picture',
+    )
+
+    expect(report(await violations(page))).toBe('')
   })
 
   test('the collapsed disclosure is axe-clean, and opening it stays axe-clean', async ({
@@ -362,11 +380,11 @@ test.describe('what axe cannot check', () => {
     // The honest shape of TTB F 5100.31 (04/2023): a brand name, and no class
     // or type, alcohol content or net contents boxes at all (A-17). Gaps are
     // the normal outcome on the form proper, not an error.
-    await page.route('**/api/read-application', async (route) => {
+    await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(FORM_WITH_GAPS),
+        body: JSON.stringify({ ...CLASSIFIED_APPLICATION, application_document: FORM_WITH_GAPS }),
       })
     })
     await page.goto('/')
@@ -376,7 +394,7 @@ test.describe('what axe cannot check', () => {
       panel.getByRole('button', { name: 'Or type the application values' }),
     ).toHaveAttribute('aria-expanded', 'false')
 
-    await panel.getByLabel('Label application', { exact: true }).setInputFiles({
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles({
       name: 'application.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from([37, 80, 68, 70]),
@@ -397,17 +415,17 @@ test.describe('what axe cannot check', () => {
   })
 
   test('the COLA document upload is labelled, announced and axe-clean', async ({ page }) => {
-    await page.route('**/api/read-application', async (route) => {
+    await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(PARSED_APPLICATION),
+        body: JSON.stringify(CLASSIFIED_APPLICATION),
       })
     })
     await page.goto('/')
     const panel = page.locator('#panel-single')
 
-    await panel.getByLabel('Label application', { exact: true }).setInputFiles({
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles({
       name: 'application.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from([37, 80, 68, 70]),
@@ -425,13 +443,20 @@ test.describe('what axe cannot check', () => {
     await expect(
       panel.getByText('Read from the application form. Change it if it is wrong.').first(),
     ).toBeVisible()
-    await expect(panel.getByRole('button', { name: 'Remove this application form' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
 
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
 
   test('the axe scan covers a result built from two photos', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
     await page.route('**/api/verify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -440,7 +465,7 @@ test.describe('what axe cannot check', () => {
       })
     })
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'front.png',
       mimeType: 'image/png',
       buffer: Buffer.from([137, 80, 78, 71]),
@@ -564,7 +589,7 @@ const RESULT = {
   application_document: null,
 }
 
-/** What POST /api/read-application returns for a registry printout (FR-11). */
+/** What the application read looks like for a registry printout (FR-11). */
 /**
  * A read of TTB F 5100.31 (04/2023) itself, which carries the brand name and
  * has no box for the class or type, the alcohol content or the net contents
@@ -607,6 +632,9 @@ const FORM_WITH_GAPS = {
   ],
   fanciful_name: 'Small Batch Reserve',
   class_type_code: null,
+  artwork_images_found: 0,
+  artwork_images_read: 0,
+  label_artwork_available: false,
   notes: [
     'The class or type designation is not an item on TTB F 5100.31 (04/2023).',
     'The alcohol content is not an item on TTB F 5100.31 (04/2023).',
@@ -651,7 +679,68 @@ const PARSED_APPLICATION = {
   ],
   fanciful_name: 'Small Batch Reserve',
   class_type_code: '141',
+  artwork_images_found: 0,
+  artwork_images_read: 0,
+  label_artwork_available: false,
   notes: [
     "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text, and this document did not name one type on its own. Choose it yourself.",
   ],
+}
+
+/**
+ * What POST /api/classify returns for one uploaded application (FR-12).
+ *
+ * The single upload sorts files on the server, so the interface asks this route
+ * what each file is and gets the application read back in the same answer.
+ */
+const CLASSIFIED_APPLICATION = {
+  files: [
+    {
+      filename: 'application.pdf',
+      classified_as: 'application_document',
+      basis: 'pdf_header',
+      reason: 'This is a PDF, so we read it as the label application.',
+      used: true,
+    },
+  ],
+  application_document: PARSED_APPLICATION,
+  label_images: 0,
+  application_error: null,
+}
+
+const CLASSIFIED_PAIR = {
+  files: [
+    {
+      filename: 'application.pdf',
+      classified_as: 'application_document',
+      basis: 'pdf_header',
+      reason: 'This is a PDF, so we read it as the label application.',
+      used: true,
+    },
+    {
+      filename: 'label.png',
+      classified_as: 'label_image',
+      basis: 'no_form_markers',
+      reason: 'We read this picture as a label.',
+      used: true,
+    },
+  ],
+  application_document: PARSED_APPLICATION,
+  label_images: 1,
+  application_error: null,
+}
+
+const CLASSIFIED_PHOTO = {
+  files: [
+    {
+      filename: 'label.png',
+      classified_as: 'label_image',
+      basis: 'no_form_markers',
+      reason: 'We read this picture as a label.',
+      used: true,
+    },
+  ],
+  application_document: null,
+  label_images: 1,
+  application_error: null,
 }

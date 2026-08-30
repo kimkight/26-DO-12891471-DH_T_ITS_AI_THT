@@ -216,6 +216,10 @@ class TestNothingSensitiveReachesTheLogs:
             # the label side came from, and cannot carry anything the document
             # or the artwork said.
             "label_source",
+            # ADR 0011 added two. Both are counts of files. Neither can carry a
+            # filename or anything a file contained.
+            "files_received",
+            "documents_classified",
         }
         assert record.application_document_bytes == 0
         assert record.application_document_path is None
