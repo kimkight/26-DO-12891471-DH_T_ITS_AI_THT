@@ -72,6 +72,8 @@ import io
 import logging
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -336,6 +338,41 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     )
 
 
+@contextmanager
+def _open_page(document: pdfium.PdfDocument, index: int) -> Iterator[pdfium.PdfPage]:
+    """One page, closed when the caller is done with it rather than by the GC.
+
+    **This is the page-level half of the rule ``_read_pdf_with_pdfium`` already
+    applies to the document, and it is not tidiness.** Every pypdfium2 handle is
+    an ``AutoCloseable``, and each one registers a weakref of itself in its
+    parent's ``_kids`` set. A page left to the garbage collector takes that
+    weakref with it whenever the collector happens to run, and the collector is
+    free to run in the middle of ``PdfDocument.close()``, which walks exactly
+    that set. It raised on CI on 2026-08-30:
+
+        File "pypdfium2/internal/bases.py", line 168, in close
+          for k_wref in self._kids:
+        RuntimeError: Set changed size during iteration
+
+    The library defers the child closes to avoid mutating the set from inside
+    its own loop; what it cannot defend against is a weakref callback firing
+    from a collection it did not ask for. So the pages are closed here, in
+    order, while they are still referenced, and ``_kids`` is empty by the time
+    the document is closed. ``PdfDocument.get_page`` caches nothing, so each
+    call was adding another weakref for the collector to drop later.
+
+    It is the same argument the document's own ``close()`` rests on: a
+    collection running on another thread would call into PDFium outside
+    ``_PDFIUM_LOCK``. That is true of a page handle as much as of a document
+    one, and it was only ever half enforced.
+    """
+    page = document[index]
+    try:
+        yield page
+    finally:
+        page.close()
+
+
 def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
     """Everything that touches PDFium, in one place, for one document.
 
@@ -503,29 +540,29 @@ def _embedded_images(
     candidates: list[EmbeddedArtwork] = []
     rejected: list[RejectedImage] = []
     for index in range(page_count):
-        page = document[index]
-        for obj in page.get_objects():
-            if not isinstance(obj, pdfium.PdfImage):
-                continue
-            try:
-                width, height = obj.get_px_size()
-            except Exception as exc:
-                logger.warning(
-                    "embedded image size could not be read",
-                    extra={"page": index + 1, "cause": type(exc).__name__},
+        with _open_page(document, index) as page:
+            for obj in page.get_objects():
+                if not isinstance(obj, pdfium.PdfImage):
+                    continue
+                try:
+                    width, height = obj.get_px_size()
+                except Exception as exc:
+                    logger.warning(
+                        "embedded image size could not be read",
+                        extra={"page": index + 1, "cause": type(exc).__name__},
+                    )
+                    continue
+                reason = _rejection(width, height)
+                if reason is None and (content := _artwork_png(obj, index)) is None:
+                    reason = "unreadable"
+                if reason is not None:
+                    rejected.append(
+                        RejectedImage(page=index + 1, width=width, height=height, reason=reason)
+                    )
+                    continue
+                candidates.append(
+                    EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
                 )
-                continue
-            reason = _rejection(width, height)
-            if reason is None and (content := _artwork_png(obj, index)) is None:
-                reason = "unreadable"
-            if reason is not None:
-                rejected.append(
-                    RejectedImage(page=index + 1, width=width, height=height, reason=reason)
-                )
-                continue
-            candidates.append(
-                EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
-            )
 
     candidates.sort(key=lambda art: (-art.pixels, art.page))
     rejected.sort(key=lambda image: (image.page, -image.width * image.height))
@@ -718,12 +755,16 @@ def _render_page(document: pdfium.PdfDocument, index: int) -> bytes:
     template, and the OCR fallback would find captions and no answers.
     """
     document.init_forms()
-    page = document[index]
-    scale = max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
-    bitmap = page.render(scale=scale)
-    buffer = io.BytesIO()
-    bitmap.to_pil().save(buffer, format="PNG")
-    return buffer.getvalue()
+    with _open_page(document, index) as page:
+        scale = max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
+        bitmap = page.render(scale=scale)
+        buffer = io.BytesIO()
+        bitmap.to_pil().save(buffer, format="PNG")
+        # Materialized before the page is closed. ``to_pil`` can hand back an
+        # image sharing the bitmap's buffer, and the bitmap is the page's child,
+        # so closing the page frees it. The encode happens above, inside the
+        # block, and only the bytes leave it.
+        return buffer.getvalue()
 
 
 def _pdf_text_lines(document: pdfium.PdfDocument, pages: int) -> list[OcrLine]:
@@ -737,7 +778,8 @@ def _pdf_text_lines(document: pdfium.PdfDocument, pages: int) -> list[OcrLine]:
     position = 0
     for index in range(pages):
         try:
-            text = document[index].get_textpage().get_text_bounded()
+            with _open_page(document, index) as page:
+                text = page.get_textpage().get_text_bounded()
         except Exception as exc:
             # As above: the page is skipped, and the log records the class name
             # and the page number rather than anything the page said (NFR-6).
@@ -902,24 +944,24 @@ def _from_form_fields(document: pdfium.PdfDocument, pages: int) -> ParsedApplica
         return ParsedApplication(values=values)
 
     for index in range(pages):
-        page = document[index]
-        for annotation in _widgets(page):
-            name = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldName, formenv, annotation)
-            value = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldValue, formenv, annotation)
-            if _PRODUCT_TYPE_FIELD.search(name) and pdfium_raw.FPDFAnnot_IsChecked(
-                formenv, annotation
-            ):
-                export = _widget_text(
-                    pdfium_raw.FPDFAnnot_GetFormFieldExportValue, formenv, annotation
-                )
-                values["beverage_type"] = values["beverage_type"] or _product_type(export)
-            if not value:
-                continue
-            if _FIELD_NAME_PATTERNS["brand_name"].search(name):
-                values["brand_name"] = values["brand_name"] or value
-            elif _FIELD_NAME_PATTERNS["fanciful_name"].search(name):
-                fanciful = fanciful or value
-            pdfium_raw.FPDFPage_CloseAnnot(annotation)
+        with _open_page(document, index) as page:
+            for annotation in _widgets(page):
+                name = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldName, formenv, annotation)
+                value = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldValue, formenv, annotation)
+                if _PRODUCT_TYPE_FIELD.search(name) and pdfium_raw.FPDFAnnot_IsChecked(
+                    formenv, annotation
+                ):
+                    export = _widget_text(
+                        pdfium_raw.FPDFAnnot_GetFormFieldExportValue, formenv, annotation
+                    )
+                    values["beverage_type"] = values["beverage_type"] or _product_type(export)
+                if not value:
+                    continue
+                if _FIELD_NAME_PATTERNS["brand_name"].search(name):
+                    values["brand_name"] = values["brand_name"] or value
+                elif _FIELD_NAME_PATTERNS["fanciful_name"].search(name):
+                    fanciful = fanciful or value
+                pdfium_raw.FPDFPage_CloseAnnot(annotation)
 
     return ParsedApplication(values=values, fanciful_name=fanciful, path="form_fields")
 
