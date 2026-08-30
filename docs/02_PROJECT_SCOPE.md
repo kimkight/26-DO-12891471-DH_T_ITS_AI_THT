@@ -139,6 +139,11 @@ lets an agent work around the distortion rather than correcting it, and the
 difference is stated here so the two are not confused. Glare and poor lighting
 are still handled only by the adaptive threshold that was already there.
 
+**Section 6 below is the judged scope line on this**, with the evidence from the
+author's mezcal test of 2026-08-29: what the extraction works on, what it does
+not work on reliably, and what it would take to change that. Bottle photography
+stays as a best-effort path and is not claimed as a supported capability.
+
 ## 4. Definition of Done for the prototype
 
 The prototype is done when every item below is true. Each is verifiable; none
@@ -193,3 +198,146 @@ for a claim of adequacy.
   both.
 - Accuracy measured on a self-built sample set is not accuracy measured on the
   real application population.
+
+## 6. What the extraction works on, and what it does not
+
+The author asked, in plain words: **"Should I even be contemplating a label on a
+bottle, or is everything coming through COLA?"** This section is the answer, with
+the evidence, so that a reviewer reads a judged scope line rather than finding a
+gap.
+
+### 6.1 The input that works: flat label artwork
+
+Two things count as flat label artwork, and the pipeline handles both:
+
+- **The images filed with the COLA application.** An applicant affixes the label
+  artwork to TTB F 5100.31, so a filed application carries pictures of the
+  labels. Those pictures are flat by construction: they are the artwork, not a
+  photograph of a bottle.
+  [ADR 0010](adr/0010-embedded-label-artwork.md) extracts and reads them.
+- **Photographs of a flat label**, or of a label lying flat: a label sheet, a
+  proof, a label peeled off or not yet applied.
+
+**The measured performance in [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 was
+obtained on that input**, and on nothing else. One label with its COLA document
+returned in 1.5 seconds end to end through the load balancer with all five
+fields matched, and 300 labels with 300 paired documents completed in roughly
+6.5 to 7 minutes with every seeded defect caught and no false alarms. Both runs
+used synthetic flat artwork rendered by `samples/labelmaker.py`. Every accuracy
+figure in the README carries the same qualification.
+
+### 6.2 The input that does not work reliably: a label wrapped on a round bottle
+
+A photograph of a label still on a cylindrical bottle is not a supported input.
+Three findings from the author's mezcal test of 2026-08-29, stated as evidence
+rather than as opinion:
+
+**1. The blocks are set at right angles to each other.** On that bottle the
+GOVERNMENT WARNING block is printed at 90 degrees to the body copy, confirmed
+visually in a crop of the photograph. No single global rotation can bring both
+upright: turning the image to read the warning lays the brand and class on their
+side, and turning it to read those does the same to the warning. The best-of-four
+cardinal rotation net described in assumption A-15 chooses one orientation for
+the whole image, so it **cannot** succeed on both blocks of that label at once,
+whatever it chooses. The fix is a per-text-block orientation pass, and **it is
+not built**.
+
+**2. Baselines curve around the cylinder.** A sweep of 4 rotations by 5 page
+segmentation modes, 20 reads, over the isolated warning crop produced
+`4 AANDVW 1AG` as its best result, at a similarity of **2.1 percent** against
+27 CFR 16.21. That is not a degraded read; it is a failure to read at all.
+Tesseract has no model for text on a curved baseline, and no rotation or
+threshold setting substitutes for one. This is the SG-1 dewarp problem in its
+original form, unchanged and unsolved, and it is the
+[ADR 0003](adr/0003-local-ocr-default-bedrock-optional.md) accuracy risk
+realized for the third time.
+
+**3. Even with perfect OCR, the semantics do not fall out of the pixels.** The
+real COLA for that product gives the brand name as `DEL MAGUEY` and the fanciful
+name as `VIDA`. The largest text on the label is `Vida Clasico`. `parse.py`
+locates the brand name by type size, because no source states a layout rule and
+type size is a property of the artwork rather than an assumption about it; on
+this real product that heuristic returns the wrong answer, and it would return
+the wrong answer from a perfect transcription. Reading the pixels correctly and
+attributing them correctly are two different problems, and only the first is an
+OCR problem.
+
+### 6.3 The scope decision
+
+**Bottle photography stays in the prototype as a best-effort path with honest
+failure reporting. It is not claimed as a supported capability.**
+
+- **It is not removed**, because an agent standing at a bottling line has
+  nothing else. [ADR 0007](adr/0007-multi-photo-single-label.md) exists for
+  exactly that agent: several photographs of one label, merged, so they can work
+  around the distortion rather than being blocked by it. When it fails it fails
+  visibly, which is what FR-1 and FR-9 require: a field that cannot be located
+  reports not found rather than a guess, and an image that cannot be read
+  returns a message naming the problem.
+- **It is not promised**, because the evidence in 6.2 says that would be a false
+  promise. No performance or accuracy figure in this repository was measured on
+  a curved bottle photograph, and none is claimed for one.
+
+This is a scope line, not a defect. What changed on 2026-08-29 is that the
+application document turned out to carry its own flat artwork
+([ADR 0010](adr/0010-embedded-label-artwork.md)), so the input that works is
+also the input an agent most often has. The bottle is the fallback, not the
+path.
+
+### 6.4 What would make it work, and what each would cost
+
+Named so that a reviewer sees the road as well as the wall. None of these is
+built.
+
+| Approach | What it solves | What it costs |
+| --- | --- | --- |
+| **Per-text-block orientation detection** | Finding 1: two blocks at right angles to each other. Detect and rotate each block rather than the whole image | Layout analysis before recognition, and a rule for reassembling blocks read at different orientations into one reading order. Does nothing for finding 2 |
+| **Cylindrical dewarp from the label's edges** | Finding 2: curved baselines. Estimate the cylinder from the label's top and bottom edges and unwrap it | Edge detection robust to glare and to labels whose edges are not visible, plus an estimated radius. It is the SG-1 problem stated as an implementation |
+| **Multi-photo stitching around the bottle** | Findings 1 and 2 together, by reconstructing the flat label from several overlapping views | Feature matching and blending across photographs taken by hand. **ADR 0007 exists; stitching does not.** ADR 0007 merges *fields* read independently from several photographs; it does not merge the photographs |
+| **A vision model that reads curved and skewed text directly** | All three findings, including finding 3, since a model can be asked which text is the brand rather than being told to take the largest | This is **SG-2**, the Bedrock fallback, and it carries the FedRAMP status, egress and data-handling questions already recorded in [ADR 0003](adr/0003-local-ocr-default-bedrock-optional.md) and in [06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md) section 6.3. It also reintroduces the fabricated-value risk that ADR 0003 keeps out by default |
+
+### 6.5 The two TTB statements this section rests on, quoted
+
+Neither is paraphrased, and neither is stretched beyond what it says.
+
+**On what is filed: labels, not containers.** TTB F 5100.31 (04/2023), item 15,
+transcribed from the form downloaded during development from
+`https://www.ttb.gov/system/files/images/pdfs/forms/f510031.pdf` (see assumption
+[A-17](ASSUMPTIONS.md#a-17)):
+
+> 15. SHOW ANY INFORMATION THAT IS BLOWN, BRANDED, OR EMBOSSED ON THE CONTAINER
+> (e.g., net contents) ONLY IF IT DOES NOT APPEAR ON THE LABELS AFFIXED BELOW.
+
+**What it says:** the form's own baseline is the labels affixed to the
+application, and the container is the exception the applicant reports only where
+something appears on the container and not on those labels. **What it does not
+say:** it does not say a container photograph is unacceptable evidence, and it
+does not say anything about how a label should be photographed. It is quoted
+here because it establishes that the artefact TTB works from is the label as
+filed, which is the input 6.1 describes.
+
+**On legibility, which is measured against the container and is out of scope.**
+27 CFR 16.22(a), retrieved from eCFR on 2026-08-20, quoted verbatim in
+[03_REQUIREMENTS.md](03_REQUIREMENTS.md) section 1. Source URL:
+`https://www.ecfr.gov/current/title-27/section-16.22`
+
+> (a) Legibility. (1) All labels shall be so designed that the statement
+> required by § 16.21 is readily legible under ordinary conditions, and such
+> statement shall be on a contrasting background.
+
+**What it says:** legibility and contrast are requirements on the label as
+designed. **What it does not say:** it does not state a type size in this
+paragraph, and it does not say how either is to be verified. The type sizes are
+elsewhere in § 16.22 and are keyed to container volume, which is why **OOS-5**
+excludes type size, characters per inch and contrasting-background checks: they
+are physical measurements against a known container size, and this system
+receives an image with no scale reference and no container size. A bottle
+photograph does not change that. It carries no scale either, and reading a
+millimetre off a photograph of unknown distance is not a measurement.
+
+### 6.6 What this section changes
+
+Nothing in the code, and no capability is claimed that was not claimed before.
+It records a scope decision and the evidence for it. The stretch goal SG-1 is
+unchanged: still a stretch goal, still partly taken on for orientation, still
+not attempted for dewarping.

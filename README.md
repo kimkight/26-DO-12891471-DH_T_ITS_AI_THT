@@ -212,7 +212,7 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, and the government warning near miss |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -231,8 +231,9 @@ and the first figures measured on the deployed target are below.**
 | `POST /api/read-application` (read one COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, including the label artwork embedded in it ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)), so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
-| Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Verification interface, one label | Works: one screen, up to three photographs of the same label, then the label application upload as the primary application-side input, the five application fields behind a disclosure that opens when the agent opens it or when a document leaves a gap or fails to parse, five result cards, and a note saying what was done to each photograph |
+| Government warning checks, text and capitalization | Works: `backend/app/warning.py`. The comparison is exact; a difference of one or two characters is routed to human review with the character-level difference shown rather than reported as a mismatch, and is never a pass ([ADR 0012](docs/adr/0012-warning-near-miss.md)). |
+| Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and a note saying what was read and how |
+| Verification interface, values that were read | Works: each is a read-only line with where it came from, typed or the application form or the label artwork inside it. If every value was read, no editable field is shown at all; one collapsed disclosure holds them. A gap takes focus and is announced |
 | Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
@@ -243,7 +244,8 @@ and the first figures measured on the deployed target are below.**
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
-| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
+| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). |
+| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** Real photographs have been submitted; what they found is A-15, OQ-21, and the scope line in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6. A label wrapped on a round bottle is not a supported input. |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
@@ -331,6 +333,23 @@ five fields did not come back at all.
   and the plain image and keeps the better one. What that does not do is make
   the point below untrue. One label read correctly is not a measurement, and the
   same degraded fixture still leaves half the sample set unreadable.
+- **A label wrapped on a round bottle is not a supported input, and the scope
+  line is written down.** The author's mezcal test of 2026-08-29 established
+  three things about that case, and they are evidence rather than opinion. The
+  GOVERNMENT WARNING block is printed at 90 degrees to the body copy on the same
+  label, so no single global rotation makes both upright and the best-of-four
+  rotation net cannot succeed on both at once. A sweep of 4 rotations by 5 page
+  segmentation modes over the isolated warning crop returned `4 AANDVW 1AG` at
+  2.1 percent similarity to 27 CFR 16.21, which is a failure to read rather than
+  a degraded read. And the real COLA for that product gives Brand `DEL MAGUEY`
+  and Fanciful `VIDA` while the largest text on the label is "Vida Clasico", so
+  even a perfect transcription would attribute the brand wrongly under the
+  type-size heuristic. **Bottle photography stays in the prototype as a
+  best-effort path with honest failure reporting and is not claimed as a
+  capability**; the input that works, and that every measured figure came from,
+  is flat label artwork. The full statement, and what each of the four possible
+  fixes would cost, is
+  [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6.
 - **Accuracy has been measured against synthetic labels only.** `samples/`
   renders twelve labels from text with Pillow; `scripts/measure.py` scores the
   engine against them. Rendered text is far easier to read than a photographed

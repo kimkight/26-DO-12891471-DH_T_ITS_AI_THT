@@ -424,6 +424,18 @@ photograph of the same label; the second is what
 [ADR 0007](adr/0007-multi-photo-single-label.md) does instead. Recorded here so
 that the orientation fix is not mistaken for a general imperfect-image fix.
 
+**And the orientation net cannot rescue a bottle photograph at all, which is
+measured rather than argued.** The author's mezcal test of 2026-08-29 found the
+GOVERNMENT WARNING block printed at 90 degrees to the body copy on the same
+label, so no single global rotation makes both upright and the best-of-four net
+cannot succeed on both blocks at once whatever it chooses. On the isolated
+warning crop, a sweep of 4 rotations by 5 page segmentation modes returned
+`4 AANDVW 1AG` as its best result, at 2.1 percent similarity to 27 CFR 16.21.
+The full evidence and the resulting scope line are in
+[02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md) section 6: bottle photography stays
+as a best-effort path with honest failure reporting and is not claimed as a
+supported capability.
+
 ### What v1.0.1 corrected in the orientation rule
 
 The 2026-08-26 measurement above was taken entirely on artwork rendered by

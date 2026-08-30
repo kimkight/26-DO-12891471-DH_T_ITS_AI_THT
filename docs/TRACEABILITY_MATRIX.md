@@ -53,6 +53,7 @@ gap register, not decoration.
 | 28j | "if COLA is uploaded, I don't also need an image", and "these should be combined; just one upload; simplify the interface. You should be able to upload (pdfs or images)." Two pickers asked the agent to sort their own files before the tool had read any of them, and the check was gated on a label photograph that ADR 0010 had made unnecessary. | The author's own use of the deployed prototype, 2026-08-29 | FR-12 (new); FR-11; FR-9; NFR-4; NFR-5 | US-25 | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) | `backend/tests/test_one_upload.py` (five classes, including the three valid submissions and every refusal), `frontend/src/__tests__/oneUpload.test.tsx`, `multiPhoto.test.tsx`, `frontend/tests/a11y.spec.ts` (the one control by keyboard, each file announced with its classification, axe over the list); UAT rows 61, 62, 63 | [0011](adr/0011-one-upload.md) |
 | 28k | "Collapse the form fields and only expand if there is something that isn't read in from the application or picture." Five text boxes shown after a document has already answered four of them is a form asking an agent to re-read work the tool has done. | The author's own use of the deployed prototype, 2026-08-29 | FR-13 (new); FR-11; FR-3; NFR-4; NFR-5 | US-26 | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) | `frontend/src/__tests__/quietFields.test.tsx` (15 tests: no gaps yields zero visible editable fields, one gap yields exactly one with focus on it, the announcement, the collapsed default before any upload), `applicationFirst.test.tsx`, `oneUpload.test.tsx`, `frontend/tests/a11y.spec.ts`; UAT rows 64, 65, 66 | |
 | 28l | The embedded label artwork in the author's own COLA filing OCRs the government warning with exactly one character wrong, `MPAIRS` for `IMPAIRS`. Reported as a flat mismatch, that tells an agent their label is defective when the truth is that the scan is imperfect. | The author's evidence, 2026-08-29 | FR-5 (reporting amended, comparison unchanged); FR-6; FR-3 | US-4 | [#4](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/4) | `backend/tests/test_warning_near_miss.py` (19 tests: exact stays match, one wrong character routes to needs review with a diff, a missing clause stays a mismatch, capitalization is never a near miss), `frontend/src/__tests__/warningNearMiss.test.tsx`; UAT rows 67, 68, 69 | [0012](adr/0012-warning-near-miss.md) |
+| 28m | "Should I even be contemplating a label on a bottle, or is everything coming through COLA?" Answered with the evidence from the mezcal test: the warning block is printed at 90 degrees to the body copy so no global rotation makes both upright; a 4 by 5 rotation and PSM sweep on the warning crop returned `4 AANDVW 1AG` at 2.1 percent similarity; and the real COLA gives Brand DEL MAGUEY and Fanciful VIDA while the largest text is "Vida Clasico", so the type-size heuristic is wrong on a real product. | The author's own question and test, 2026-08-29 | SG-1 (unchanged); OOS-5 (unchanged); scope line recorded, no requirement changed | US-22 | [#61](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/61) | Documentation only. No code changes and no capability claimed; the existing FR-1 and FR-9 failure reporting is what makes the best-effort path honest | |
 | 29 | "I've seen a lot of these 'modernization' projects come and go." | Dave Morrison | Adoption risk; drives NFR-4 and FR-3 | US-12, US-2 | [#12](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/12), [#2](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/2) | UAT row 14 | [0004](adr/0004-fuzzy-matching-with-review-band.md) |
 
 ## 2. Requirement coverage
@@ -107,11 +108,11 @@ Tested column names a test or a CI job; the three that do not are NFR-2, which
 is covered only in part, and NFR-10 and NFR-11, which have none.
 
 The gap between "traced" and "tested" is the honest state of this repository.
-The verification engine, single label and batch (FR-1 through FR-9 and FR-11,
-NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 264 backend tests.
-The agent-facing interface (FR-10, FR-11, NFR-4, NFR-5) is built and covered by
-174 component tests, a computed-contrast test over the palette, and an axe-core
-run with a keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
+The verification engine, single label and batch (FR-1 through FR-9, FR-11 and
+FR-12, NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 346 backend
+tests. The agent-facing interface (FR-10, FR-11, FR-12, FR-13, NFR-4, NFR-5) is
+built and covered by 207 component tests, a computed-contrast test over the
+palette, and an axe-core run with a keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
 Application Load Balancer in `us-east-1`, deployed by image digest.
 
 What deployment did not settle is accuracy on real artwork. The first
@@ -119,6 +120,13 @@ photograph of a real bottle submitted to the deployed prototype returned none
 of its five fields. Two of the three causes are fixed and recorded as
 assumption A-15; the third, that a label wrapping a round bottle is never flat
 in one photograph, is not corrected, and is recorded as OQ-21.
+The scope line this leads to is [02_PROJECT_SCOPE.md](02_PROJECT_SCOPE.md)
+section 6, added 2026-08-29 with the evidence from the author's mezcal test:
+flat label artwork is the input that works and the input every measured figure
+came from; a label wrapped on a round bottle is not a supported input; bottle
+photography stays as a best-effort path with honest failure reporting and is not
+claimed as a capability. Nothing in the code changed for it.
+
 [ADR 0007](adr/0007-multi-photo-single-label.md) works around it by accepting up
 to three photographs of one label rather than modelling the geometry of one, and
 that distinction is stated there rather than blurred.
