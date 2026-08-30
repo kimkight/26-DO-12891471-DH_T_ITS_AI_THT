@@ -39,11 +39,22 @@ FIELD_LABELS = {
     "government_warning": "Government warning statement",
 }
 
-# Where an application value came from (FR-11, ADR 0008). Reported per field
-# because a submission can mix the two: an agent uploads the application and
-# corrects one value by hand, and the result has to say which is which or the
-# agent cannot tell what they are checking.
-ApplicationSource = Literal["typed", "parsed_from_form", "absent"]
+# Where an application value came from (FR-11, ADR 0008, ADR 0010). Reported per
+# field because a submission can mix all three: an agent uploads the
+# application, some values come out of its text layer, some out of the label
+# artwork embedded in it, and one is corrected by hand. The result has to say
+# which is which or the agent cannot tell what they are checking.
+#
+# These four are the precedence order, highest first. `parsed_from_form` is the
+# document's own text, whether that is an AcroForm field or the text layer;
+# `parsed_from_artwork` is a picture inside the document, read by OCR, which is
+# weaker evidence than text and is therefore only used where the text was
+# silent.
+ApplicationSource = Literal["typed", "parsed_from_form", "parsed_from_artwork", "absent"]
+
+# Where inside the document one value was read (ADR 0010). Finer than
+# ApplicationSource, which is about the agent as well as the document.
+DocumentValueSource = Literal["form_fields", "embedded_text", "embedded_artwork", "absent"]
 
 
 class FieldResult(BaseModel):
@@ -81,9 +92,10 @@ class FieldResult(BaseModel):
     application_value_source: ApplicationSource = Field(
         default="typed",
         description=(
-            "Where the application value came from: typed by the agent, parsed "
-            "from an uploaded COLA document, or absent because neither supplied "
-            "it (FR-11, ADR 0008). A typed value always wins over a parsed one."
+            "Where the application value came from, in precedence order: typed "
+            "by the agent, parsed from the uploaded COLA document's own text, "
+            "parsed from label artwork embedded in that document, or absent "
+            "because none of the three supplied it (FR-11, ADR 0008, ADR 0010)."
         ),
     )
 
@@ -120,6 +132,17 @@ class ParsedApplicationField(BaseModel):
     )
     found_on_document: bool = Field(
         description="False means the document did not carry this value (FR-1's rule, applied here)."
+    )
+    source: DocumentValueSource = Field(
+        default="absent",
+        description=(
+            "Where in the document this value was read: 'form_fields' is an "
+            "AcroForm field, 'embedded_text' is the file's own text layer or a "
+            "page read as an image, 'embedded_artwork' is a picture of the "
+            "label embedded in the document and read by OCR, and 'absent' means "
+            "the document did not carry it (ADR 0010). Artwork never overrides "
+            "text: it fills what the text left empty."
+        ),
     )
 
 
@@ -168,7 +191,36 @@ class ApplicationDocumentResult(BaseModel):
         description=(
             "Why a value is missing, where the reason is a property of the form "
             "rather than of this document. Three of the five values this tool "
-            "compares are not items on TTB F 5100.31 at all (A-17)."
+            "compares are not items on TTB F 5100.31 at all (A-17). Where any "
+            "value or label side came out of the embedded artwork, the last "
+            "note states that this is a self-consistency check rather than "
+            "independent verification of a bottle (ADR 0010)."
+        ),
+    )
+    artwork_images_found: int = Field(
+        default=0,
+        description=(
+            "How many raster images embedded in the document cleared the size "
+            "floor and were treated as candidate label artwork (ADR 0010). "
+            "Images below the floor, which is where agency seals, barcodes and "
+            "signature blocks sit, are not counted."
+        ),
+    )
+    artwork_images_read: int = Field(
+        default=0,
+        description=(
+            "How many of those images produced readable text. Zero with a "
+            "non-zero artwork_images_found means the pictures were there and "
+            "could not be read, which is a different thing for an agent to act "
+            "on than a document that carries no pictures at all."
+        ),
+    )
+    label_artwork_available: bool = Field(
+        default=False,
+        description=(
+            "Whether one of those images can stand in as the label side of the "
+            "check when the agent supplied no photograph of their own "
+            "(ADR 0010). See VerificationResult.label_source."
         ),
     )
 
@@ -284,6 +336,16 @@ class PhotoResult(BaseModel):
     """
 
     index: int = Field(description="Position in submission order, numbered from 1.")
+    origin: Literal["uploaded", "application_artwork"] = Field(
+        default="uploaded",
+        description=(
+            "Where this label image came from: 'uploaded' is a photograph the "
+            "agent submitted, 'application_artwork' is a picture of the label "
+            "lifted out of the uploaded application document (ADR 0010). The "
+            "second is a self-consistency check rather than a check of a "
+            "physical bottle; see VerificationResult.self_consistency_note."
+        ),
+    )
     orientation: OrientationDetail = Field(
         description="How this photograph was turned before it was read."
     )
@@ -324,6 +386,25 @@ class VerificationResult(BaseModel):
         description=(
             "False on the default path, which makes no outbound network call "
             "(NFR-3). True only when the optional Bedrock fallback ran."
+        ),
+    )
+    label_source: Literal["uploaded_photographs", "application_artwork"] = Field(
+        default="uploaded_photographs",
+        description=(
+            "What the label side of this check was read from. "
+            "'application_artwork' means the agent uploaded no photograph and "
+            "the label artwork embedded in their application document was used "
+            "instead (ADR 0010)."
+        ),
+    )
+    self_consistency_note: str | None = Field(
+        default=None,
+        description=(
+            "Set only when label_source is 'application_artwork'. It states, in "
+            "the response rather than only in a document, that checking artwork "
+            "taken out of an application against that same application is a "
+            "self-consistency check and not independent verification of a "
+            "bottle (ADR 0010)."
         ),
     )
     application_document: ApplicationDocumentResult | None = Field(

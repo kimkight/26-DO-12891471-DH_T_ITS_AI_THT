@@ -7,7 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.1] - unreleased until tagged
+## [1.1.0] - unreleased until tagged
+
+The author's own use of the deployed v1.0.1 build on 2026-08-29, with a real
+COLA document: TTB Form 5100.31, OMB No. 1513-0020, three pages. Two problems
+reported and one design instruction, and this release is the answer to all
+three.
+
+### The evidence
+
+**Only two of the five fields reconciled.** The diagnosis was made against the
+file rather than guessed. The brand name and the class or type designation came
+out of the PDF's embedded text layer, both correct. The alcohol content and the
+net contents are genuinely absent from the form's text layer, exactly as
+assumption A-17 already said. **But they are not absent from the document**:
+pages 2 and 3 each carry an embedded raster image, and page 3 is the complete
+flat label artwork at 1750 by 1150 pixels, carrying `DEL MAGUEY`,
+`VIDA SINGLE VILLAGE MEZCAL`, `42% ALC BY VOL`, `750 ML` and the full horizontal
+GOVERNMENT WARNING. The parser never rasterized or extracted those images, so it
+never saw values that were sitting inside the file it had been handed. OCR of
+that artwork at 2x reads the warning with exactly one character wrong, `MPAIRS`
+for `IMPAIRS`.
+
+**Submission was blocked because a label image was required.** The author's
+words: "if COLA is uploaded, I don't also need an image."
+
+**And the instruction:** "these should be combined; just one upload; simplify
+the interface. You should be able to upload (pdfs or images). Collapse the form
+fields and only expand if there is something that isn't read in from the
+application or picture."
+
+### Added
+
+- **The COLA document's own label artwork is read**
+  ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). Every embedded raster
+  image at or above a size floor is lifted out of the PDF at its own resolution
+  and read through the same OCR pipeline label artwork goes through, with the
+  v1.0.1 orientation and preprocessing decisions unchanged. What it says fills
+  application values the text layer left empty.
+  - The floor has two halves, both of which have to be met: at least 400 pixels
+    on the shortest edge, which rejects a barcode or a signature strip, and at
+    least 250,000 pixels of area, which rejects a seal or a logo. Both are
+    settings (`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`), and
+    `TTB_MAX_ARTWORK_IMAGES` bounds how many are read.
+  - Extracted rather than rendered. A page rasterized at a fixed scale loses
+    resolution the embedded picture already has and hands the engine the form's
+    own printed captions along with the label text. The alternatives rejected,
+    and why, are in ADR 0010.
+- **A three-source precedence, reported per field.** Typed by the agent, then
+  the document's text layer or form fields, then the embedded artwork, then
+  absent. Artwork never overrides text, because a value the file states is read
+  and a value off a picture is recognized. Every field says which of the four
+  supplied it, in the response and on screen, and the artwork case carries a
+  line telling the agent to check it.
+- **An application document alone is now a complete submission.** Where the
+  agent uploaded no photograph and the document carries readable artwork, the
+  largest such image is the label side and the check runs. Where it carries
+  none, the submission is refused with a message naming the missing piece and
+  offering the photo upload, which is an FR-9 message rather than a validation
+  error on a field.
+
+### The limitation, stated rather than implied
+
+Checking a label lifted out of an application against that same application is
+a **self-consistency check**. It shows that the artwork on file carries the
+mandatory elements and agrees with the typed form data. It shows nothing about
+a physical bottle; verifying the bottle against the filing still needs a
+photograph of the bottle. That sentence is in the parser's notes, in the
+response as `self_consistency_note`, and once on screen above the result,
+because a limitation that lives only in an ADR is a limitation nobody reads.
+
+### Changed
+
+- `POST /api/verify` accepts a submission with no `image` part, when
+  `application_document` carries label artwork. One `image` part behaves exactly
+  as it always did.
+- The response gains `label_source`, `self_consistency_note`, `photos[].origin`,
+  a per-value `source` on the parsed application block, and
+  `artwork_images_found`, `artwork_images_read` and `label_artwork_available`.
+  `application_value_source` gains `parsed_from_artwork` as a fourth value.
+- Assumption A-17 is amended: two of the three values it records as "not items
+  on the form" are recoverable from the artwork embedded in a filing.
+- `samples/formmaker.py` can embed raster artwork into a synthetic form as an
+  image XObject, so the new fixtures are still generated at test time and no
+  real applicant's filing is committed.
+
+### Known limits
+
+- The size floor is a judgement about what a filing looks like, not a
+  measurement of one. Which form editions embed their artwork, and what pixel
+  sizes real embedded label images span, is [OQ-24](docs/OPEN_QUESTIONS.md#oq-24).
+- The batch path is unchanged: a row still requires its label image, because
+  rows are enumerated from the images so the stream can report a total before
+  any document is read. The reason, and what it would take to change, is in
+  ADR 0010 under "Effect on the batch path".
+
+## [1.0.1] - 2026-08-29
 
 Hotfix against the released v1.0.0, branched from `main` per the Git Flow path
 in [docs/08_SDLC_PROCESS.md](docs/08_SDLC_PROCESS.md) section 2. It goes to

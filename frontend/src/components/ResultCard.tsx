@@ -20,6 +20,7 @@
  * right, which is the shape a reader compares two things in.
  */
 import { OutcomeBadge } from './OutcomeBadge'
+import { sourceCaveat, sourceChipLabel } from '../lib/applicationSources'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
@@ -97,11 +98,26 @@ export function ResultCard({
           }
         />
         <Value
-          label={isWarning ? 'Required by 27 CFR 16.21' : 'On the application'}
+          label={
+            isWarning
+              ? 'Required by 27 CFR 16.21'
+              : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
+          }
           value={field.application_value}
           missing="Not supplied"
         />
       </dl>
+
+      {/*
+        The one caveat that is worth a line of its own: this application value
+        was recognized off a picture of the label inside the document rather
+        than read out of the document's text, so it can be misread in a way the
+        others cannot (ADR 0010). Text, not colour, so it survives greyscale
+        (NFR-5).
+      */}
+      {!isWarning && sourceCaveat(field.application_value_source) ? (
+        <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
+      ) : null}
 
       <p className="card__reason">{reasonWithout(field.reason, warning?.bold_type_note)}</p>
 

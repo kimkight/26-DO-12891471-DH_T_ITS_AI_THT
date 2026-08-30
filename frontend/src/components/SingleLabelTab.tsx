@@ -78,6 +78,7 @@ import { ResultCard } from './ResultCard'
 import { Chip, Kicker } from './Ui'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
+import { ARTWORK_LABEL_LINE } from '../lib/applicationSources'
 import { announcement } from '../lib/outcomes'
 import { EMPTY_APPLICATION } from '../types'
 import type { ApplicationData, ApplicationDocumentResult } from '../types'
@@ -153,6 +154,13 @@ export function SingleLabelTab() {
   // agent, or by one of the two document cases below, and never closed by
   // anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
+  /*
+   * The attached application, when it carries label artwork of its own
+   * (ADR 0010). Held here rather than in `ApplicationUpload` because it is the
+   * label side of the check when no photograph was taken, and the check is
+   * submitted from here.
+   */
+  const [artworkDocument, setArtworkDocument] = useState<File | null>(null)
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
@@ -199,7 +207,8 @@ export function SingleLabelTab() {
    * back, every field stays editable, and the live region in ApplicationUpload
    * names what was filled.
    */
-  function fillFromDocument(document: ApplicationDocumentResult) {
+  function fillFromDocument(document: ApplicationDocumentResult, file: File) {
+    setArtworkDocument(document.label_artwork_available ? file : null)
     const filled = document.fields.filter((entry) => entry.found_on_document)
     setApplication((previous) => {
       const next = { ...previous }
@@ -233,6 +242,7 @@ export function SingleLabelTab() {
   /** Taking the document back off the form clears only the marks, not the values. */
   function clearFormMarks() {
     setFromForm(new Set())
+    setArtworkDocument(null)
   }
 
   /**
@@ -245,6 +255,7 @@ export function SingleLabelTab() {
    */
   function openFieldsAfterFailure() {
     setFromForm(new Set())
+    setArtworkDocument(null)
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
@@ -282,12 +293,20 @@ export function SingleLabelTab() {
     returnFocusToAdd.current = true
   }
 
+  /*
+   * There is something to check when the agent took a photograph, or when the
+   * application they attached carries its own label artwork (ADR 0010). The
+   * author's words on 2026-08-29: "if COLA is uploaded, I don't also need an
+   * image."
+   */
+  const canCheck = photos.length > 0 || artworkDocument !== null
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!photos.length || checking) return
+    if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
-    setOutcome(await verifyLabel(photos, application))
+    setOutcome(await verifyLabel(photos, application, artworkDocument))
     setChecking(false)
   }
 
@@ -492,11 +511,20 @@ export function SingleLabelTab() {
             </div>
           </div>
 
-          <button className="button button--primary" type="submit" disabled={!photos.length}>
+          <button className="button button--primary" type="submit" disabled={!canCheck}>
             {checking ? 'Checking...' : 'Check this label'}
           </button>
-          {!photos.length ? (
-            <p className="field__hint">Choose a label image to turn on the check.</p>
+          {!canCheck ? (
+            <p className="field__hint">
+              Choose a label image, or attach an application that carries the label artwork, to turn
+              on the check.
+            </p>
+          ) : null}
+          {!photos.length && artworkDocument ? (
+            <p className="field__hint">
+              We will check the label artwork inside the application you attached. Add a photo if
+              you want to check a bottle instead.
+            </p>
           ) : null}
         </form>
       </section>
@@ -529,6 +557,15 @@ export function SingleLabelTab() {
                 sending the image and receiving the answer.
               </span>
             </p>
+            {/*
+              One short line, once, when the label being checked came out of the
+              application document rather than off a bottle (ADR 0010). It is
+              the honest limitation, stated where the agent is reading the
+              result rather than left to a document.
+            */}
+            {result.label_source === 'application_artwork' ? (
+              <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
+            ) : null}
             <PhotoNotes photos={result.photos} />
             <div className="cards">
               {result.fields.map((field) => (

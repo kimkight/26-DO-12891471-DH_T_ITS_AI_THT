@@ -11,8 +11,19 @@
 /** FR-3's three outcomes, plus FR-2's "the application did not supply this". */
 export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared'
 
-/** Where an application value came from (FR-11, ADR 0008). */
-export type ApplicationSource = 'typed' | 'parsed_from_form' | 'absent'
+/**
+ * Where an application value came from (FR-11, ADR 0008, ADR 0010).
+ *
+ * These four are the precedence order, highest first. `parsed_from_form` is the
+ * document's own text, whether an AcroForm field or a text layer;
+ * `parsed_from_artwork` is a picture of the label embedded in that document,
+ * read by OCR, which is weaker evidence and is only used where the text was
+ * silent.
+ */
+export type ApplicationSource = 'typed' | 'parsed_from_form' | 'parsed_from_artwork' | 'absent'
+
+/** Where inside an uploaded document one value was read (ADR 0010). */
+export type DocumentValueSource = 'form_fields' | 'embedded_text' | 'embedded_artwork' | 'absent'
 
 /** One field row (FR-3): both values, the score, the outcome, and why. */
 export interface FieldResult {
@@ -43,6 +54,8 @@ export interface ParsedApplicationField {
   display_name: string
   value: string | null
   found_on_document: boolean
+  /** Where in the document it was read: text, form field, or embedded artwork. */
+  source: DocumentValueSource
 }
 
 /**
@@ -59,6 +72,16 @@ export interface ApplicationDocumentResult {
   fanciful_name: string | null
   class_type_code: string | null
   notes: string[]
+  /**
+   * How many pictures embedded in the document were big enough to be label
+   * artwork, and how many of those were read (ADR 0010). Zero read out of a
+   * non-zero found is a different thing for an agent to act on than a document
+   * carrying no pictures at all.
+   */
+  artwork_images_found: number
+  artwork_images_read: number
+  /** Whether one of them can stand in as the label side of the check. */
+  label_artwork_available: boolean
 }
 
 /** How one photograph was turned before it was read (A-15). */
@@ -100,6 +123,11 @@ export interface ReadPathDetail {
  */
 export interface PhotoResult {
   index: number
+  /**
+   * Where this label image came from: a photograph the agent uploaded, or a
+   * picture of the label lifted out of their application document (ADR 0010).
+   */
+  origin: 'uploaded' | 'application_artwork'
   orientation: OrientationDetail
   ocr_confidence: number
   read_path: ReadPathDetail
@@ -126,6 +154,15 @@ export interface VerificationResult {
   ocr_ms: number
   external_call_made: boolean
   application_document: ApplicationDocumentResult | null
+  /**
+   * What the label side was read from (ADR 0010). `application_artwork` means
+   * no photograph was uploaded and the artwork inside the application document
+   * was used instead, which is a self-consistency check rather than a check of
+   * a physical bottle.
+   */
+  label_source: 'uploaded_photographs' | 'application_artwork'
+  /** Set only when `label_source` is `application_artwork`. */
+  self_consistency_note: string | null
 }
 
 /** An error body (FR-9). It carries no field outcomes at all. */

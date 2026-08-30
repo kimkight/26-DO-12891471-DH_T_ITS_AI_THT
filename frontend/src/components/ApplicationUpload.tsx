@@ -44,8 +44,12 @@ const PATHS: Record<ApplicationDocumentResult['extraction_path'], string> = {
 }
 
 interface Props {
-  /** Called with what the document said, so the form fields can be filled. */
-  onParsed: (document: ApplicationDocumentResult) => void
+  /**
+   * Called with what the document said and the file it was read from, so the
+   * form fields can be filled and, where the document carries its own label
+   * artwork, the file can go with the check as the label side (ADR 0010).
+   */
+  onParsed: (document: ApplicationDocumentResult, file: File) => void
   /** Called when the agent takes the document back off the form. */
   onCleared: () => void
   /**
@@ -92,13 +96,17 @@ export function ApplicationUpload({ onParsed, onCleared, onUnreadable }: Props) 
       return
     }
     setDocument(outcome.document)
-    onParsed(outcome.document)
+    onParsed(outcome.document, chosen)
     const found = outcome.document.fields.filter((entry) => entry.found_on_document)
+    const artwork = found.filter((entry) => entry.source === 'embedded_artwork')
+    const artworkSentence = artwork.length
+      ? ` ${artwork.map((entry) => entry.display_name).join(', ')} came from the label artwork inside the application rather than from its text.`
+      : ''
     setSpoken(
       found.length
         ? `${found.length} of ${outcome.document.fields.length} values filled in from the application form: ${found
             .map((entry) => entry.display_name)
-            .join(', ')}. Check them and change anything that is wrong.`
+            .join(', ')}.${artworkSentence} Check them and change anything that is wrong.`
         : 'The application form was read, but it did not carry any of the values we compare. Type them in yourself.',
     )
   }
@@ -109,6 +117,10 @@ export function ApplicationUpload({ onParsed, onCleared, onUnreadable }: Props) 
 
   const found = document?.fields.filter((entry) => entry.found_on_document) ?? []
   const missing = document?.fields.filter((entry) => !entry.found_on_document) ?? []
+  // Values that came out of the pictures inside the document rather than out of
+  // its text (ADR 0010). Named separately because they are weaker evidence:
+  // they went through OCR and can be misread.
+  const fromArtwork = found.filter((entry) => entry.source === 'embedded_artwork')
 
   return (
     <section className="application-upload" aria-labelledby={headingId}>
@@ -150,6 +162,21 @@ export function ApplicationUpload({ onParsed, onCleared, onUnreadable }: Props) 
             <strong>Or type the application values</strong> below to see them, or to change any of
             them before you run the check.
           </p>
+          {fromArtwork.length ? (
+            <p className="field__hint">
+              {fromArtwork.length === 1
+                ? `${fromArtwork[0].display_name} was read from the label artwork inside this application, not from its text.`
+                : `${fromArtwork.map((entry) => entry.display_name).join(', ')} were read from the label artwork inside this application, not from its text.`}{' '}
+              Those went through the same reading we use on a label photo, so check them.
+            </p>
+          ) : null}
+          {document.label_artwork_available ? (
+            <p className="field__hint">
+              This application carries its own label artwork, so you do not have to add a photo. We
+              will check that artwork. Checking the physical bottle still needs a photo of the
+              bottle.
+            </p>
+          ) : null}
           {document.class_type_code ? (
             <p className="field__hint">
               The form gives the class or type code as {document.class_type_code}. The description

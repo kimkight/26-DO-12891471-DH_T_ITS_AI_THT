@@ -56,7 +56,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.0.1","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.1.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:

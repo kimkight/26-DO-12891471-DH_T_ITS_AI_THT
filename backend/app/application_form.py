@@ -33,6 +33,26 @@ mapped value, because rasterizing and reading pages costs about what reading a
 label photograph costs and there is nothing to gain by paying it for a document
 that has already answered.
 
+**Four, in fact: the document carries its own label artwork.** An applicant
+affixes the label artwork to the application, so a filed PDF carries pictures of
+the labels alongside the typed items. Three of the five values this tool
+compares are not items on the form at all, which is assumption A-17, and on the
+author's own document, 2026-08-29, they were sitting inside those pictures: the
+alcohol content and the net contents are absent from the text layer exactly as
+A-17 says, and both are printed on the flat label artwork embedded in the file.
+So every embedded raster image at or above a size floor is read through the same
+Tesseract pipeline label artwork goes through, and what it says fills the fields
+the text layer left empty. It never overrides the text layer. The precedence,
+end to end, is: typed by the agent, then the document's text layer or form
+fields, then the embedded artwork, then absent. See
+[ADR 0010](../../docs/adr/0010-embedded-label-artwork.md).
+
+**Comparing artwork lifted out of the application against the application it
+came from is a self-consistency check.** It proves the artwork on file carries
+the mandatory elements and that they agree with the typed form data. It is not
+independent verification of a physical bottle, and nothing here should be read
+as claiming it is; that still needs a photograph of the bottle.
+
 **What the form does not carry.** The item map below is transcribed from
 TTB F 5100.31 (04/2023) as downloaded, not from memory, and the honest result is
 that three of the five values this tool compares are not items on the form at
@@ -60,6 +80,7 @@ import pypdfium2.raw as pdfium_raw
 
 from app.config import settings
 from app.ocr import OcrLine, UndecodableImageError, extract_text
+from app.parse import parse_fields
 
 # The values a COLA document can supply. Four of them are compared against the
 # label (FR-2); the beverage type is carried for the interface, which asks for
@@ -73,6 +94,19 @@ APPLICATION_FIELDS = (
 )
 
 ExtractionPath = Literal["form_fields", "embedded_text", "ocr"]
+
+# Where one value came from, inside the document (ADR 0010). Reported per value
+# because a document can now answer from two different places at once, and a
+# reading taken off a picture is a different kind of evidence from a reading
+# taken out of a text layer: the first went through OCR and can be misread, the
+# second cannot.
+ValueSource = Literal["form_fields", "embedded_text", "embedded_artwork"]
+
+# The four values the embedded artwork can supply. The beverage type is not one
+# of them: item 5 is three check boxes, a label does not print "distilled
+# spirits" as a form answer, and inferring one from the artwork would be exactly
+# the guess FR-1 forbids (ADR 0008).
+ARTWORK_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
 
 PDF_MAGIC = b"%PDF"
 
@@ -103,6 +137,28 @@ class UnreadableDocumentError(Exception):
 
 
 @dataclass(frozen=True)
+class EmbeddedArtwork:
+    """One raster image lifted whole out of an application document (ADR 0010).
+
+    ``content`` is PNG bytes of the embedded image at its own resolution, not a
+    render of the page it sits on. That distinction is the decision: a page
+    rasterized at a fixed DPI throws away resolution the embedded picture
+    already has, and hands the OCR engine the form's own printed captions mixed
+    in with the label text. Lifting the image out gives the pipeline the flat
+    artwork on its own, which is the input it handles well.
+    """
+
+    page: int
+    width: int
+    height: int
+    content: bytes
+
+    @property
+    def pixels(self) -> int:
+        return self.width * self.height
+
+
+@dataclass(frozen=True)
 class ParsedApplication:
     """What an uploaded COLA document said, and how it was read.
 
@@ -118,6 +174,19 @@ class ParsedApplication:
     path: ExtractionPath = "embedded_text"
     pages_read: int = 0
     notes: list[str] = field(default_factory=list)
+    # Where each value came from, for the values that were found (ADR 0010). A
+    # field the document did not carry has no entry.
+    value_sources: dict[str, ValueSource] = field(default_factory=dict)
+    # How many embedded raster images cleared the size floor, and how many of
+    # those produced readable text. Both are reported so that "the artwork
+    # supplied nothing" and "there was no artwork" are distinguishable, which is
+    # the difference between a scan worth retaking and a document that simply
+    # files its labels separately.
+    artwork_images_found: int = 0
+    artwork_images_read: int = 0
+    # The embedded image the label side can be taken from when the agent
+    # supplied no photograph of their own (ADR 0010, FR-1).
+    label_artwork: EmbeddedArtwork | None = None
 
     @property
     def found_any(self) -> bool:
@@ -154,41 +223,74 @@ def _is_pdf(content: bytes, content_type: str | None) -> bool:
     return content.startswith(PDF_MAGIC) or content_type == "application/pdf"
 
 
+@dataclass(frozen=True)
+class _PdfContents:
+    """What one pass over a PDF produced, with every PDFium call already done.
+
+    Everything expensive is deliberately left for the caller to do once the lock
+    is released: the rendered pages and the embedded artwork come back as bytes,
+    and Tesseract reads them outside the critical section.
+    """
+
+    text_side: ParsedApplication | None
+    rendered_pages: list[bytes]
+    artwork: list[EmbeddedArtwork]
+    artwork_found: int
+    pages: int
+
+
 def _parse_pdf(content: bytes) -> ParsedApplication:
     """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
     with _PDFIUM_LOCK:
-        read, rendered_pages, pages = _read_pdf_with_pdfium(content)
-    if read is not None:
-        return read
+        contents = _read_pdf_with_pdfium(content)
+
+    # The artwork read happens here, outside the lock, for the reason the page
+    # OCR below does: Tesseract is the expensive part and there is no reason for
+    # one document's reading to block another's.
+    artwork = _read_artwork(contents.artwork)
+
+    if contents.text_side is not None:
+        return _with_notes(
+            _merge_artwork(contents.text_side, artwork),
+            path=contents.text_side.path,
+            pages_read=contents.pages,
+        )
 
     # Nothing in the file itself, so it is a scan: read the pages rendered
-    # above. This runs outside the lock, because Tesseract is the expensive part
-    # and there is no reason for one document's OCR to block another's.
+    # above.
     # Orientation correction is off because a page rendered from a PDF is
     # already the right way up, and the OSD pass costs about as much again as
     # the read it precedes (see app.ocr).
     ocr_lines: list[OcrLine] = []
-    for rendered in rendered_pages:
+    for rendered in contents.rendered_pages:
         ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
-    if not ocr_lines:
+    if not ocr_lines and not artwork.values:
         raise UnreadableDocumentError(
             "No text could be read from the uploaded PDF, either from the file "
-            "itself or by reading its pages as images. Nothing was taken from "
-            "it. Type the application values instead."
+            "itself, or by reading its pages as images, or from any picture "
+            "embedded in it. Nothing was taken from it. Type the application "
+            "values instead."
         )
-    return _with_notes(_from_lines(ocr_lines), path="ocr", pages_read=pages)
+    from_pages = (
+        _from_lines(ocr_lines)
+        if ocr_lines
+        else ParsedApplication(values=dict.fromkeys(APPLICATION_FIELDS))
+    )
+    return _with_notes(
+        _merge_artwork(_sourced(from_pages, "embedded_text"), artwork),
+        path="ocr",
+        pages_read=contents.pages,
+    )
 
 
-def _read_pdf_with_pdfium(
-    content: bytes,
-) -> tuple[ParsedApplication | None, list[bytes], int]:
+def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
     """Everything that touches PDFium, in one place, for one document.
 
-    Returns either the parsed reading, when the file itself carried values, or
-    the pages rendered to PNG bytes for the OCR fallback to read once the lock
-    is released. The document is closed here rather than left to the garbage
-    collector, because a collection running on another thread would call into
-    PDFium outside the lock.
+    Returns the reading taken from the file itself, when it carried values, plus
+    the pages rendered to PNG bytes for the OCR fallback and every embedded
+    raster image that cleared the size floor. The document is closed here rather
+    than left to the garbage collector, because a collection running on another
+    thread would call into PDFium outside the lock.
     """
     try:
         document = pdfium.PdfDocument(io.BytesIO(content))
@@ -208,6 +310,15 @@ def _read_pdf_with_pdfium(
             )
 
         pages = min(page_count, settings.max_document_pages)
+
+        # Every page is searched for artwork, not only the pages read for text.
+        # The author's own document states its brand name on page 1 and carries
+        # the label artwork on page 3, and a page limit chosen to bound how much
+        # text is read has nothing to say about where the pictures are. The cost
+        # is bounded by the count of images actually read rather than by the
+        # page count (ADR 0010).
+        artwork, artwork_found = _embedded_images(document, page_count)
+
         from_fields = _from_form_fields(document, pages)
         lines = _pdf_text_lines(document, pages)
         from_text = _from_lines(lines)
@@ -215,7 +326,19 @@ def _read_pdf_with_pdfium(
         merged = _combine(from_fields, from_text)
         if merged.found_any:
             path: ExtractionPath = "form_fields" if from_fields.found_any else "embedded_text"
-            return _with_notes(merged, path=path, pages_read=pages), [], pages
+            return _PdfContents(
+                text_side=ParsedApplication(
+                    values=merged.values,
+                    fanciful_name=merged.fanciful_name,
+                    class_type_code=merged.class_type_code,
+                    path=path,
+                    value_sources=merged.value_sources,
+                ),
+                rendered_pages=[],
+                artwork=artwork,
+                artwork_found=artwork_found,
+                pages=pages,
+            )
 
         rendered_pages: list[bytes] = []
         for index in range(pages):
@@ -229,13 +352,24 @@ def _read_pdf_with_pdfium(
                     "application document page could not be rendered",
                     extra={"page": index + 1, "cause": type(exc).__name__},
                 )
-        return None, rendered_pages, pages
+        return _PdfContents(
+            text_side=None,
+            rendered_pages=rendered_pages,
+            artwork=artwork,
+            artwork_found=artwork_found,
+            pages=pages,
+        )
     finally:
         document.close()
 
 
 def _parse_image(content: bytes) -> ParsedApplication:
-    """A photograph or scan of the form, submitted as an image."""
+    """A photograph or scan of the form, submitted as an image.
+
+    No embedded artwork here, by construction: an image has no objects inside
+    it to lift out. What the pixels show is what was read, and the whole picture
+    is already going through the label pipeline.
+    """
     try:
         result = extract_text(content)
     except UndecodableImageError as exc:
@@ -249,7 +383,203 @@ def _parse_image(content: bytes) -> ParsedApplication:
             "extracted from it. Nothing was taken from it. Type the application "
             "values instead."
         )
-    return _with_notes(_from_lines(result.lines), path="ocr", pages_read=1)
+    return _with_notes(
+        _sourced(_from_lines(result.lines), "embedded_text"), path="ocr", pages_read=1
+    )
+
+
+# --------------------------------------------------------------------------
+# The embedded label artwork (ADR 0010).
+# --------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ArtworkReading:
+    """What every embedded picture in one document was read to say."""
+
+    values: dict[str, str]
+    images_found: int
+    images_read: int
+    label_artwork: EmbeddedArtwork | None
+
+
+def _embedded_images(
+    document: pdfium.PdfDocument, page_count: int
+) -> tuple[list[EmbeddedArtwork], int]:
+    """Lift every embedded raster image out of the document, largest first.
+
+    **Extracted rather than rendered, and the difference is the decision.**
+    ``_render_page`` rasterizes a whole page at a chosen scale, which is right
+    for reading a scanned form and wrong for reading the artwork on it: the
+    render is capped at ``ocr_long_edge_px`` across the whole page, so a picture
+    occupying a third of it comes out at a third of that, well below the
+    resolution the file already holds. It also hands Tesseract the form's own
+    printed captions mixed in with the label text. Lifting the image object out
+    gives the pipeline the artwork at its native size and nothing else.
+
+    Only images clearing both halves of the size floor survive; see
+    ``Settings.min_artwork_edge_px``. They are returned largest first, and no
+    more than ``max_artwork_images`` of them, because each one costs a full OCR
+    read. The count returned alongside is how many cleared the floor, which is
+    not the same as how many were read.
+
+    Called under ``_PDFIUM_LOCK``. Every failure here is one image skipped, not
+    a document failing: a PDF can carry an image in a colour space or a filter
+    PDFium will not hand back, and the rest of the file is still readable.
+    """
+    candidates: list[EmbeddedArtwork] = []
+    for index in range(page_count):
+        page = document[index]
+        for obj in page.get_objects():
+            if not isinstance(obj, pdfium.PdfImage):
+                continue
+            try:
+                width, height = obj.get_px_size()
+            except Exception as exc:
+                logger.warning(
+                    "embedded image size could not be read",
+                    extra={"page": index + 1, "cause": type(exc).__name__},
+                )
+                continue
+            if not _clears_floor(width, height):
+                continue
+            content = _artwork_png(obj, index)
+            if content is None:
+                continue
+            candidates.append(
+                EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
+            )
+
+    candidates.sort(key=lambda art: (-art.pixels, art.page))
+    return candidates[: settings.max_artwork_images], len(candidates)
+
+
+def _clears_floor(width: int, height: int) -> bool:
+    """Whether one embedded image is big enough to be label artwork.
+
+    Both halves have to be met. The edge floor rejects a long thin barcode or
+    signature strip whatever its area; the area floor rejects a small square
+    seal or logo. Agency seals, barcodes and signature blocks are small; label
+    artwork is not.
+    """
+    return (
+        min(width, height) >= settings.min_artwork_edge_px
+        and width * height >= settings.min_artwork_pixels
+    )
+
+
+def _artwork_png(image: pdfium.PdfImage, page_index: int) -> bytes | None:
+    """One embedded image as PNG bytes at its own resolution, or None.
+
+    ``render=False`` asks PDFium for the image's own bitmap rather than for a
+    rendering of it as placed on the page, which is what keeps the resolution.
+    """
+    try:
+        pil = image.get_bitmap(render=False).to_pil()
+        buffer = io.BytesIO()
+        pil.convert("RGB").save(buffer, format="PNG")
+        return buffer.getvalue()
+    except Exception as exc:
+        # NFR-6: the class name and the page number, nothing the picture showed.
+        logger.warning(
+            "embedded image could not be extracted",
+            extra={"page": page_index + 1, "cause": type(exc).__name__},
+        )
+        return None
+
+
+def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
+    """Read every surviving embedded picture through the label OCR pipeline.
+
+    **The pipeline is the one label artwork goes through, unchanged.**
+    ``extract_text`` is called with its defaults, so the v1.0.1 orientation
+    decision and the preprocessed-against-plain best-of both apply exactly as
+    they do to a photograph. The artwork is flat, which is the input that
+    pipeline handles well; that is the whole reason this is worth doing.
+
+    Values are taken from the images in size order, so the largest picture that
+    states a field wins and a smaller one fills what the larger one did not
+    show, which is the front-and-back case. ``label_artwork`` is the image the
+    label side can be taken from: the largest one that both read and yielded a
+    label value, falling back to the largest one that read at all. Preferring
+    the one that yielded values keeps a large scan of a signature page from
+    being offered as the label when a smaller picture of the label was there.
+
+    A picture that will not decode is skipped rather than fatal. It is a picture
+    inside a document, and the document may have answered already.
+    """
+    values: dict[str, str] = {}
+    read_count = 0
+    with_values: EmbeddedArtwork | None = None
+    any_read: EmbeddedArtwork | None = None
+
+    for image in images:
+        try:
+            result = extract_text(image.content)
+        except UndecodableImageError as exc:
+            logger.warning(
+                "embedded image could not be decoded",
+                extra={"page": image.page, "cause": type(exc).__name__},
+            )
+            continue
+        if not result.has_text:
+            continue
+        read_count += 1
+        any_read = any_read or image
+
+        parsed = parse_fields(result.lines)
+        found = {
+            name: value for name in ARTWORK_FIELDS if (value := getattr(parsed, name)) is not None
+        }
+        if found:
+            with_values = with_values or image
+        for name, value in found.items():
+            values.setdefault(name, value)
+
+    return _ArtworkReading(
+        values=values,
+        images_found=len(images),
+        images_read=read_count,
+        label_artwork=with_values or any_read,
+    )
+
+
+def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> ParsedApplication:
+    """Fill what the text layer left empty from the artwork, never the reverse.
+
+    This is the precedence rule, and it is the whole of it on the document side:
+    a value the file itself states wins over a value recognized out of a
+    picture, because the first is read and the second is guessed at by an OCR
+    engine. A typed value beats both, and that decision is made one layer up in
+    ``app.verify.resolve_application``.
+    """
+    values = dict(text_side.values)
+    sources = dict(text_side.value_sources)
+    for name, value in artwork.values.items():
+        if values.get(name) is None:
+            values[name] = value
+            sources[name] = "embedded_artwork"
+    return ParsedApplication(
+        values=values,
+        fanciful_name=text_side.fanciful_name,
+        class_type_code=text_side.class_type_code,
+        path=text_side.path,
+        value_sources=sources,
+        artwork_images_found=artwork.images_found,
+        artwork_images_read=artwork.images_read,
+        label_artwork=artwork.label_artwork,
+    )
+
+
+def _sourced(parsed: ParsedApplication, source: ValueSource) -> ParsedApplication:
+    """Attribute every value a reading found to one source."""
+    return ParsedApplication(
+        values=parsed.values,
+        fanciful_name=parsed.fanciful_name,
+        class_type_code=parsed.class_type_code,
+        path=parsed.path,
+        value_sources={name: source for name, value in parsed.values.items() if value is not None},
+    )
 
 
 def _render_page(document: pdfium.PdfDocument, index: int) -> bytes:
@@ -603,14 +933,27 @@ def _sole_product_type(texts: list[str]) -> str | None:
 
 
 def _combine(preferred: ParsedApplication, fallback: ParsedApplication) -> ParsedApplication:
-    """Take each value from the form fields, falling back to the text layer."""
+    """Take each value from the form fields, falling back to the text layer.
+
+    The source of each value is recorded as it is chosen rather than inferred
+    afterwards, because the two sides can carry the same value and a reader
+    comparing them after the fact cannot tell which one it came from.
+    """
+    values: dict[str, str | None] = {}
+    sources: dict[str, ValueSource] = {}
+    for name in APPLICATION_FIELDS:
+        from_fields = preferred.values.get(name)
+        from_text = fallback.values.get(name)
+        values[name] = from_fields or from_text
+        if from_fields:
+            sources[name] = "form_fields"
+        elif from_text:
+            sources[name] = "embedded_text"
     return ParsedApplication(
-        values={
-            name: preferred.values.get(name) or fallback.values.get(name)
-            for name in APPLICATION_FIELDS
-        },
+        values=values,
         fanciful_name=preferred.fanciful_name or fallback.fanciful_name,
         class_type_code=preferred.class_type_code or fallback.class_type_code,
+        value_sources=sources,
     )
 
 
@@ -643,13 +986,35 @@ _ABSENCE_NOTES = {
 }
 
 
+# What is said, once, whenever a value or a label side came out of the pictures
+# inside the application rather than out of a photograph the agent took
+# (ADR 0010). It is a limitation, written down where the reading is reported,
+# rather than a caveat left to a document nobody has open.
+SELF_CONSISTENCY_NOTE = (
+    "Some of this was read from the label artwork inside the application "
+    "document. Checking that artwork against the application it came from is a "
+    "self-consistency check: it shows that the artwork on file carries the "
+    "mandatory elements and agrees with the typed form data. It is not an "
+    "independent check of the bottle. Verifying the physical bottle against the "
+    "filing still needs a photograph of that bottle."
+)
+
+
 def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: int):
-    """Attach the honest explanation for each value the document did not carry."""
+    """Attach the honest explanation for each value the document did not carry.
+
+    A value the embedded artwork supplied gets no absence note, because it is no
+    longer absent. What it gets instead is the self-consistency note, once, for
+    the whole reading.
+    """
     notes = [
         _ABSENCE_NOTES[name]
         for name in APPLICATION_FIELDS
         if parsed.values.get(name) is None and name in _ABSENCE_NOTES
     ]
+    from_artwork = "embedded_artwork" in parsed.value_sources.values()
+    if from_artwork or parsed.label_artwork is not None:
+        notes.append(SELF_CONSISTENCY_NOTE)
     return ParsedApplication(
         values=parsed.values,
         fanciful_name=parsed.fanciful_name,
@@ -657,4 +1022,8 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
         path=path,
         pages_read=pages_read,
         notes=notes,
+        value_sources=parsed.value_sources,
+        artwork_images_found=parsed.artwork_images_found,
+        artwork_images_read=parsed.artwork_images_read,
+        label_artwork=parsed.label_artwork,
     )

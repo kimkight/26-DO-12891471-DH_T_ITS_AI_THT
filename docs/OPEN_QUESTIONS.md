@@ -33,6 +33,7 @@ updates every artifact the answer affects.
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
+| [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size floor and the coverage claim for the embedded artwork path (ADR 0010) |
 
 ---
 
@@ -1176,3 +1177,49 @@ actually look like when it lands, and what is on the files.
 **Blocks:** nothing. The pairing rule is stated on the batch page, a mismatch
 names the file it is about, and the rest of the batch still runs. The cost of
 being wrong is that agents rename files they should not have had to.
+
+## OQ-24
+**Which COLA form editions embed the label artwork in the filed PDF, and which
+file it separately? And how big are those embedded images in practice?**
+
+**Status: Open, 2026-08-29.**
+
+[ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
+image from an uploaded COLA document, discards the ones below a size floor, and
+reads the rest as label artwork. Two things about that rest on one document.
+
+**What one document establishes.** The author's own filing, put through the
+deployed v1.0.1 build on 2026-08-29, is TTB Form 5100.31, OMB No. 1513-0020,
+three pages, and it carries the complete flat label artwork as an embedded image
+on page 3 at 1750 by 1150 pixels. That is a filing that embeds its artwork. The
+form's own item 15 refers to "THE LABELS AFFIXED BELOW", so the practice of
+affixing labels to the application is the form's, not this filing's alone.
+
+**What it does not establish.** Whether every edition of the form embeds the
+artwork rather than attaching it as separate files; whether a COLAs Online
+submission produces the same shape as a filed paper form scanned to PDF;
+whether an approved application retrieved from the Public COLA Registry carries
+the artwork at all, or only the typed items; and what range of pixel sizes real
+embedded label images actually span. That last one is what the size floor was
+chosen against, and it was chosen as a judgement about what a seal, a barcode
+and a signature block look like next to a label scan, not from a distribution
+anybody measured. The defaults are 400 pixels on the shortest edge and 250,000
+pixels of area, both settable (`TTB_MIN_ARTWORK_EDGE_PX`,
+`TTB_MIN_ARTWORK_PIXELS`).
+
+**What would answer it:** a set of real filings across editions and submission
+routes, with the embedded image sizes reported, the way
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 3 reports per-field accuracy
+for label artwork. A redacted or synthetic set produced by TTB would serve and
+would not carry the personal-data problem that keeps a real filing out of this
+repository (07_TEST_STRATEGY.md section 8).
+
+**Who can answer:** Sarah Chen or Jenny Park, for which document shapes actually
+reach an agent's desk; measurement, for the sizes.
+**Blocks:** nothing in the prototype. A filing whose artwork sits below the
+floor reports the artwork fields as absent, which is exactly where v1.0.1 was,
+and the agent types them. A filing that embeds something large that is not a
+label has it reported as the label side, in the response and on screen, where
+the agent can see it. It bounds the claim that this works across filings, and it
+is the reason no such claim is made.
+

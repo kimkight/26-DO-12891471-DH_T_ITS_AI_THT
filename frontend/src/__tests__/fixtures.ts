@@ -33,6 +33,7 @@ export function field(name: string, outcome: Outcome, overrides: Partial<FieldRe
 export function photo(index = 1, overrides: Partial<PhotoResult> = {}): PhotoResult {
   return {
     index,
+    origin: 'uploaded',
     orientation: {
       exif_orientation: null,
       exif_transposed: false,
@@ -81,6 +82,8 @@ export function verification(outcomes: Outcome[] = ['match', 'match', 'match', '
     ocr_ms: 530,
     external_call_made: false,
     application_document: null,
+    label_source: 'uploaded_photographs',
+    self_consistency_note: null,
   } satisfies VerificationResult
 }
 
@@ -119,6 +122,9 @@ export function parsedField(
     display_name: name.replace(/_/g, ' '),
     value,
     found_on_document: value !== null,
+    // The ordinary case is a value read out of the document's own text. A
+    // fixture for the ADR 0010 case overrides this with 'embedded_artwork'.
+    source: value === null ? 'absent' : 'embedded_text',
     ...overrides,
   }
 }
@@ -144,6 +150,11 @@ export function applicationDocument(
     ],
     fanciful_name: 'Small Batch Reserve',
     class_type_code: null,
+    // No embedded artwork by default, which is the v1.0.1 shape of this
+    // document. The ADR 0010 fixtures override all three.
+    artwork_images_found: 0,
+    artwork_images_read: 0,
+    label_artwork_available: false,
     notes: [
       'The class or type designation is not an item on TTB F 5100.31 (04/2023).',
       'The alcohol content is not an item on TTB F 5100.31 (04/2023).',

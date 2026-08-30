@@ -55,6 +55,38 @@ class Settings(BaseSettings):
     # photograph, so the page count is a latency limit as much as a parsing one.
     max_document_pages: int = 3
 
+    # The embedded label artwork inside a COLA document (ADR 0010, FR-11).
+    #
+    # An applicant affixes the label artwork to the application, so a filed PDF
+    # carries pictures of the labels alongside the typed items. Three of the
+    # five values this tool compares are not items on the form at all (A-17),
+    # and on the author's own document they were sitting in those pictures. Each
+    # embedded raster image at or above the floor below is read through the same
+    # OCR pipeline label artwork goes through.
+    #
+    # **The floor separates label artwork from furniture.** An agency seal, a
+    # barcode, a signature strip and a logo are small; a scan of a label is not.
+    # Both halves of the floor have to be met: an edge of at least
+    # ``min_artwork_edge_px`` in each direction, which rejects a long thin
+    # barcode or signature strip whatever its area, and at least
+    # ``min_artwork_pixels`` in total, which rejects a small square logo. The
+    # numbers are stated rather than derived: 400 pixels is below any scan of a
+    # label at a readable resolution and above every seal and barcode, and
+    # 250,000 pixels is a 500 by 500 square, which is smaller than any label
+    # scan and larger than any mark. The author's own document carries its label
+    # artwork at 1750 by 1150, which is 2.0 megapixels, eight times the area
+    # floor. Both are settings, because the floor is a judgement about what a
+    # filing looks like rather than a measurement (NFR-11, OQ-24).
+    min_artwork_edge_px: int = 400
+    min_artwork_pixels: int = 250_000
+
+    # How many surviving embedded images are read. Each one costs about what
+    # reading a label photograph costs, so this is a latency bound in the same
+    # sense max_document_pages is. Four, because the author's three-page document
+    # carries two and a filing with front, back, neck and a strip label is the
+    # most any source describes.
+    max_artwork_images: int = 4
+
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
     review_threshold: int = 80

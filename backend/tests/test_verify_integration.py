@@ -212,6 +212,10 @@ class TestNothingSensitiveReachesTheLogs:
             # carry an item value, a filename or anything the document said.
             "application_document_bytes",
             "application_document_path",
+            # ADR 0010 added one. It is one of two fixed strings naming where
+            # the label side came from, and cannot carry anything the document
+            # or the artwork said.
+            "label_source",
         }
         assert record.application_document_bytes == 0
         assert record.application_document_path is None

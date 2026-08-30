@@ -1530,3 +1530,21 @@ main {
   border-radius: 5px;
   font-size: 0.9em;
 }
+
+/*
+ * The one line that says the label being checked came out of the application
+ * document rather than off a bottle (ADR 0010).
+ *
+ * It sits above the per-image notes and reads as a qualification of the whole
+ * result rather than as a note about one image, so it is ruled on its leading
+ * edge in the same gold the application-side marks use. Text carries the
+ * meaning; the colour only groups it (NFR-5).
+ */
+.footnote--artwork {
+  margin: 0 0 1rem;
+  padding: 0.75rem 0.875rem;
+  border-left: 3px solid var(--gold-text);
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--gold-wash);
+  color: var(--gold-text);
+}

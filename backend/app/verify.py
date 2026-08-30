@@ -23,8 +23,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Literal
 
-from app.application_form import APPLICATION_FIELDS, ParsedApplication
+from app.application_form import (
+    APPLICATION_FIELDS,
+    SELF_CONSISTENCY_NOTE,
+    ParsedApplication,
+)
 from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
 from app.ocr import Orientation, ReadPath, UndecodableImageError, extract_text
@@ -45,6 +50,11 @@ from app.schemas import (
 from app.warning import WARNING_STATEMENT, WarningCheck
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
+
+# What the label side of a check was read from (ADR 0010). A label lifted out of
+# the application document is a self-consistency check, and the response says so
+# rather than letting the two look alike.
+LabelSource = Literal["uploaded_photographs", "application_artwork"]
 
 
 def _size_limit_text() -> str:
@@ -118,10 +128,29 @@ def check_document_media_type(content_type: str | None) -> None:
         )
 
 
+# How a document-side source maps onto the source reported per field. The
+# document distinguishes an AcroForm field from a text layer; the comparison
+# does not, because both are text the file itself states and neither went
+# through a recognition step. What the comparison does distinguish is text from
+# artwork (ADR 0010).
+_DOCUMENT_SOURCES: dict[str, ApplicationSource] = {
+    "form_fields": "parsed_from_form",
+    "embedded_text": "parsed_from_form",
+    "embedded_artwork": "parsed_from_artwork",
+}
+
+
 def resolve_application(
     typed: dict[str, str], parsed: ParsedApplication | None
 ) -> tuple[dict[str, str], dict[str, ApplicationSource]]:
     """Decide each application value, and record where it came from (FR-11).
+
+    **The precedence is typed, then the document's text, then the artwork
+    embedded in the document, then absent** (ADR 0010). The first two thirds of
+    that were always here. The third is new: a value the text layer did not
+    carry may have been read off a picture of the label inside the same
+    document, and it arrives already resolved by ``app.application_form``, which
+    never lets artwork override text.
 
     **A typed value always wins.** An agent who corrects a field has read the
     document and disagreed with what was read off it, and the tool defers to the
@@ -129,8 +158,10 @@ def resolve_application(
     not a correction: it is the absence of one, so the parsed value stands.
 
     The returned source map is reported per field, because a submission can mix
-    the two and a result that did not say which was which would leave an agent
-    unable to tell what they were checking.
+    all three and a result that did not say which was which would leave an agent
+    unable to tell what they were checking. It matters most for the artwork: a
+    value recognized off a picture can be misread in a way a value read out of a
+    text layer cannot.
     """
     values: dict[str, str] = {}
     sources: dict[str, ApplicationSource] = {}
@@ -142,7 +173,9 @@ def resolve_application(
             sources[name] = "typed"
         elif from_document:
             values[name] = from_document
-            sources[name] = "parsed_from_form"
+            sources[name] = _DOCUMENT_SOURCES.get(
+                (parsed.value_sources.get(name) if parsed else None) or "", "parsed_from_form"
+            )
         else:
             values[name] = ""
             sources[name] = "absent"
@@ -160,12 +193,16 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
                 display_name=FIELD_LABELS[name],
                 value=parsed.values.get(name),
                 found_on_document=parsed.values.get(name) is not None,
+                source=parsed.value_sources.get(name, "absent"),
             )
             for name in APPLICATION_FIELDS
         ],
         fanciful_name=parsed.fanciful_name,
         class_type_code=parsed.class_type_code,
         notes=parsed.notes,
+        artwork_images_found=parsed.artwork_images_found,
+        artwork_images_read=parsed.artwork_images_read,
+        label_artwork_available=parsed.label_artwork is not None,
     )
 
 
@@ -221,6 +258,14 @@ def verify_image(
     )
 
 
+NO_LABEL_MESSAGE = (
+    "There is nothing to check the application against. The application "
+    "document was read, but it carries no label artwork this tool could read, "
+    "so there is no label side to compare. Add a photo of the label and run the "
+    "check again."
+)
+
+
 @dataclass(frozen=True)
 class _Read:
     """One photograph, read or failed. Internal to the merge below."""
@@ -240,6 +285,7 @@ def verify_photos(
     *,
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
+    label_source: LabelSource = "uploaded_photographs",
 ) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
 
@@ -276,10 +322,11 @@ def verify_photos(
         round(sum(read.confidence for read in usable) / len(usable), 1),
         ocr_ms=round(sum(read.ocr_ms for read in reads), 1),
         elapsed_ms=elapsed_ms,
-        photos=[_photo_result(read) for read in reads],
+        photos=[_photo_result(read, label_source) for read in reads],
         sources=sources,
         application_sources=application_sources,
         application_document=application_document,
+        label_source=label_source,
     )
 
 
@@ -451,9 +498,10 @@ def _pick_warning(reads: list[_Read]) -> _Read | None:
     )
 
 
-def _photo_result(read: _Read) -> PhotoResult:
+def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs") -> PhotoResult:
     return PhotoResult(
         index=read.index,
+        origin="application_artwork" if label_source == "application_artwork" else "uploaded",
         orientation=OrientationDetail(
             exif_orientation=read.orientation.exif_orientation,
             exif_transposed=read.orientation.exif_transposed,
@@ -485,6 +533,7 @@ def build_result(
     sources: dict[str, int] | None = None,
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
+    label_source: LabelSource = "uploaded_photographs",
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
@@ -570,6 +619,10 @@ def build_result(
         ocr_ms=round(ocr_ms, 1),
         external_call_made=False,
         application_document=application_document,
+        label_source=label_source,
+        self_consistency_note=(
+            SELF_CONSISTENCY_NOTE if label_source == "application_artwork" else None
+        ),
     )
 
 
