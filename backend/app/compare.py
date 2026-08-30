@@ -38,12 +38,21 @@ class Outcome(StrEnum):
     requires. ``NOT_COMPARED`` is required separately by FR-2: "Given
     application data missing a field, then that field is reported as not
     compared, and this is distinguished from a mismatch."
+
+    ``ARTWORK_DERIVED`` is the fifth, and it is not a verdict about agreement at
+    all (FR-14, ADR 0013). It marks a row whose application value was read off
+    the same label artwork that supplied the label side, so the two strings
+    being compared are one reading of one picture. Such a comparison can only
+    ever agree, and a match chip on it would be structurally incapable of saying
+    anything else. It is decided in ``app.verify`` rather than here, because
+    this module compares two strings and has no idea where either came from.
     """
 
     MATCH = "match"
     NEEDS_REVIEW = "needs_review"
     MISMATCH = "mismatch"
     NOT_COMPARED = "not_compared"
+    ARTWORK_DERIVED = "artwork_derived"
 
 
 @dataclass(frozen=True)
@@ -190,6 +199,124 @@ def parse_abv(value: str | None) -> AbvReading:
     return AbvReading(percent=percent, proof=proof)
 
 
+# --------------------------------------------------------------------------
+# Two checks that read the label on its own (FR-14, ADR 0013).
+#
+# Everything else in this module compares the label against the application.
+# These two do not, and that is the point of them: they are the part of the
+# check that stays meaningful when both sides of a row came out of the same
+# picture. See ``app.verify`` for where that happens and what it is called.
+# --------------------------------------------------------------------------
+
+# 27 CFR requires alcohol content and net contents on the label whatever the
+# application form says, so a label that does not carry one is a finding in its
+# own right rather than a field there was nothing to compare. All three
+# sections fetched from eCFR on 2026-08-30.
+#
+# The carve-outs are real and they are quoted rather than smoothed over,
+# because an agent reading a finding needs to know when it is not a defect:
+#
+# - 27 CFR 5.63(b)(2) requires distilled spirits containers to bear net
+#   contents "(which may be blown, embossed, or molded into the container as
+#   part of the process of manufacturing the container)".
+# - 27 CFR 7.63(a)(5) says the same for malt beverages, and 7.63(a)(3) requires
+#   alcohol content on a malt beverage only "for malt beverages that contain any
+#   alcohol derived from added nonbeverage flavors or other added nonbeverage
+#   ingredients (other than hops extract) containing alcohol".
+# - 27 CFR 4.32(b)(2) and (b)(3) require net contents and alcohol content on a
+#   label affixed to a wine container, with no container carve-out.
+#
+# So absence is reported, and the reason says what would make it innocent. The
+# tool recommends and the agent judges (FR-3); it does not conclude a violation
+# from a picture.
+_PRESENCE_RULES = {
+    "alcohol_content": (
+        "Alcohol content was not found on the label. 27 CFR 5.63(a)(3) requires "
+        "it on a distilled spirits label and 27 CFR 4.32(b)(3) on a wine label, "
+        "whatever the application form says, so this is reported as a finding "
+        "rather than as nothing to compare. 27 CFR 7.63(a)(3) requires it on a "
+        "malt beverage only where alcohol is derived from added nonbeverage "
+        "ingredients, so check the product type before treating it as a defect."
+    ),
+    "net_contents": (
+        "Net contents was not found on the label. 27 CFR 5.63(b)(2) and "
+        "27 CFR 7.63(a)(5) require it on distilled spirits and malt beverage "
+        "containers and 27 CFR 4.32(b)(2) on a wine label, whatever the "
+        "application form says, so this is reported as a finding rather than as "
+        "nothing to compare. Both spirits and malt beverage sections allow it to "
+        "be \u201cblown, embossed, or molded into the container\u201d, which a picture of "
+        "a flat label cannot show, so check the container before treating it as "
+        "a defect."
+    ),
+}
+
+
+def missing_from_label(name: str, label_value: str | None) -> Comparison | None:
+    """The regulatory presence finding, or None where the label carries it.
+
+    **This is the half of the check that is never circular** (FR-14, ADR 0013).
+    Whether the label carries a mandatory element is a question about the label
+    alone. It is answerable from artwork lifted out of an application document
+    exactly as well as from a photograph of a bottle, and it stays a real result
+    when the comparison beside it has become a comparison of a value with
+    itself.
+
+    Returns a mismatch rather than a review, because it is the same answer FR-1
+    already gives a field that could not be located on the label, and one defect
+    reported two ways depending on what the form happened to say would be
+    incoherent. What the reason carries is the two carve-outs above, so the
+    agent can tell a finding from a violation.
+    """
+    if label_value and label_value.strip():
+        return None
+    reason = _PRESENCE_RULES.get(name)
+    if reason is None:
+        return None
+    return Comparison(outcome=Outcome.MISMATCH, score=None, reason=reason)
+
+
+def label_contradicts_itself(label_value: str | None) -> Comparison | None:
+    """The A-12 proof cross-check, applied within the label (FR-7, FR-14).
+
+    A label stating both a percentage and a proof states the same number twice,
+    and 27 CFR 5.65 fixes the relation between them. Whether they agree is a
+    property of that label on its own: it needs no application value, it is not
+    weakened by the application being silent, and it cannot be manufactured by
+    reading one picture twice. It is therefore the one genuinely non-circular
+    comparison available on a row whose two sides came out of the same artwork
+    (ADR 0013).
+
+    **It is run before the application side is considered at all**, which is the
+    only change to the rule. FR-7 and A-12 already required this cross-check and
+    already fixed its outcome as needs human review "because it indicates an
+    internal inconsistency on the label itself"; what they did not say was what
+    to do when there is no application value beside it, and the answer used to be
+    that the row reported "not compared" and the contradiction went unmentioned.
+
+    Returns None where the label states no proof, or states one that agrees.
+    """
+    if label_value is None:
+        return None
+    reading = parse_abv(label_value)
+    if reading.proof is None or reading.percent is None:
+        return None
+    expected_proof = 2 * reading.percent
+    if abs(reading.proof - expected_proof) <= 1e-9:
+        return None
+    return Comparison(
+        outcome=Outcome.NEEDS_REVIEW,
+        score=None,
+        reason=(
+            f"The label states {reading.percent:g} percent alcohol and "
+            f"{reading.proof:g} proof. 27 CFR 5.65 defines proof as twice the "
+            f"alcohol by volume, so {reading.percent:g} percent should read "
+            f"{expected_proof:g} proof. The label contradicts itself (A-12). "
+            "This is a reading of the label on its own, so it holds whatever "
+            "the application says and whether or not it says anything."
+        ),
+    )
+
+
 def compare_abv(label_value: str | None, application_value: str | None) -> Comparison:
     """Compare declared alcohol content values (FR-7, A-12).
 
@@ -197,7 +324,22 @@ def compare_abv(label_value: str | None, application_value: str | None) -> Compa
     the label itself (proof that is not twice the ABV) routes to review even
     when the two declared percentages agree, because the label contradicts
     itself and that is a person's call.
+
+    **The two label-only checks run first** (FR-14, ADR 0013). Whether the label
+    carries alcohol content at all, and whether the percentage and the proof it
+    prints agree with each other, are both questions about the label. Running
+    them before the application side is considered is what keeps them answerable
+    when the application supplied nothing, and what keeps the contradiction from
+    being swallowed by a row that reports "not compared".
     """
+    absent = missing_from_label("alcohol_content", label_value)
+    if absent is not None:
+        return absent
+
+    contradiction = label_contradicts_itself(label_value)
+    if contradiction is not None:
+        return contradiction
+
     missing = _missing(label_value, application_value)
     if missing is not None:
         return missing
@@ -234,20 +376,8 @@ def compare_abv(label_value: str | None, application_value: str | None) -> Compa
             ),
         )
 
-    if label.proof is not None:
-        expected_proof = 2 * label.percent
-        if abs(label.proof - expected_proof) > 1e-9:
-            return Comparison(
-                outcome=Outcome.NEEDS_REVIEW,
-                score=None,
-                reason=(
-                    f"The label states {label.percent:g} percent alcohol and "
-                    f"{label.proof:g} proof. 27 CFR 5.65 defines proof as twice "
-                    f"the alcohol by volume, so {label.percent:g} percent should "
-                    f"read {expected_proof:g} proof. The label contradicts "
-                    "itself (A-12)."
-                ),
-            )
+    # The proof cross-check is not repeated here. It ran above, on the label
+    # alone, and anything reaching this line has already passed it.
 
     difference = abs(label.percent - application.percent)
     if difference <= settings.abv_tolerance:
@@ -342,7 +472,17 @@ def parse_net_contents(value: str | None) -> NetContentsReading:
 
 
 def compare_net_contents(label_value: str | None, application_value: str | None) -> Comparison:
-    """Compare net contents values (FR-7, A-13)."""
+    """Compare net contents values (FR-7, A-13).
+
+    The presence rule runs first, for the reason it does in ``compare_abv``:
+    27 CFR requires net contents on the label whatever the form says, so a label
+    that does not carry it is a finding rather than a field with nothing to
+    compare (FR-14, ADR 0013).
+    """
+    absent = missing_from_label("net_contents", label_value)
+    if absent is not None:
+        return absent
+
     missing = _missing(label_value, application_value)
     if missing is not None:
         return missing

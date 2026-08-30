@@ -116,6 +116,16 @@
   --mismatch-tint: #fdecea;
   --neutral: #4d5a6d;
   --neutral-tint: #edf0f5;
+  /*
+   * FR-14, ADR 0013. A fifth tone, for a row that is not a verdict at all: the
+   * value was read off the same artwork the label side came from, so the two
+   * sides could not have disagreed. Violet because it has to be unmistakable
+   * against all four of the above at a glance, and because it belongs to none
+   * of the good/attention/bad family the other four form. The word and the
+   * frame glyph carry the meaning; this only has to be different (NFR-5).
+   */
+  --artwork: #5b3b8c;
+  --artwork-tint: #f0ebf8;
 
   /* The prototype banner, which is neither an outcome nor chrome. */
   --notice: #fdf4e2;
@@ -1117,6 +1127,29 @@ main {
 }
 
 /*
+ * The artwork-derived card (FR-14, ADR 0013). Edged rather than tinted: the
+ * tinted body belongs to needs-review, which is the card an agent has to act
+ * on, and this one is not asking for an action. It is asking to be read as
+ * something other than a match, which the chip and its own edge already do.
+ */
+.card--artwork {
+  border-color: rgba(91, 59, 140, 0.35);
+}
+
+/*
+ * The one-line count above the cards (FR-14). Set at reading weight rather than
+ * as a heading: it is a sentence an agent reads, and the cards under it are the
+ * detail. It carries no colour of its own, because it summarises five outcomes
+ * and tinting it any one of their hues would be a claim about all five.
+ */
+.summary-line {
+  margin: 0 0 0.75rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/*
  * FR-10's third criterion: needs-review is visually distinct from BOTH match
  * and mismatch. It is the only card with a tinted body and a ring around it, so
  * it differs from the other two by shape as well as by hue. It is also the only
@@ -1255,6 +1288,11 @@ main {
 .badge--neutral {
   color: var(--neutral);
   background: var(--neutral-tint);
+}
+
+.badge--artwork {
+  color: var(--artwork);
+  background: var(--artwork-tint);
 }
 
 .badge__icon {

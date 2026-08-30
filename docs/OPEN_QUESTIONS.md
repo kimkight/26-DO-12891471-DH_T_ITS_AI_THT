@@ -34,6 +34,8 @@ updates every artifact the answer affects.
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size floor and the coverage claim for the embedded artwork path (ADR 0010) |
+| [OQ-25](#oq-25) | Open | Nothing; it decides which failing outcome the FR-7 proof contradiction carries |
+<!-- feature/honest-timing adds OQ-26 on the line below; keep both, in numeric order. -->
 
 ---
 
@@ -1223,3 +1225,45 @@ label has it reported as the label side, in the response and on screen, where
 the agent can see it. It bounds the claim that this works across filings, and it
 is the reason no such claim is made.
 
+
+
+## OQ-25
+**Should a label whose stated proof is not twice its stated alcohol content be
+reported as a mismatch rather than as needs human review?**
+
+**Status: Open, 2026-08-30.**
+
+FR-7's third acceptance criterion and assumption A-12 both fix this outcome as
+**needs human review**, and both give the same reason: a proof that does not
+equal twice the ABV "indicates an internal inconsistency on the label itself",
+which is a person's call rather than the tool's. UAT row 21 in
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) states the same expectation.
+
+The author's brief of 2026-08-30, which is what
+[ADR 0013](adr/0013-artwork-derived-values.md) implements, described the same
+defect as one that "is reported as a mismatch, not as artwork-derived". Read in
+context the contrast in that sentence is with the new `artwork_derived` state
+rather than with `needs_review`: the requirement it states is that a real defect
+must never be absorbed by a state that means "nothing was checked". That
+requirement is implemented and tested.
+
+What is left open is the outcome itself. Both are failing outcomes and neither
+passes a label, so nothing turns on it for correctness; what turns on it is what
+an agent is asked to do. A mismatch says the label is wrong. A review says the
+label contradicts itself and a person should look. The second is what FR-7 and
+A-12 say today, and it was chosen deliberately.
+
+**Why this is not resolved by guessing.** Flipping it means amending FR-7's
+acceptance criterion, A-12, and UAT row 21 together, which is an assumption
+change rather than a code change. Making that change silently would leave three
+sourced documents disagreeing with the code, which is the failure mode
+[CONTRIBUTING.md](../CONTRIBUTING.md) rule 1 exists to prevent.
+
+**What would answer it:** the author confirming which of the two they intended,
+or a compliance agent stating what they do with a label that contradicts itself.
+
+**Who can answer:** the author, for the requirement; Jenny Park or Dave
+Morrison, for the practice.
+**Blocks:** nothing. The check runs, the contradiction is reported, and it is
+never reported as artwork-derived. The change, if it is wanted, is one constant
+in `backend/app/compare.py` plus the three document edits above.
