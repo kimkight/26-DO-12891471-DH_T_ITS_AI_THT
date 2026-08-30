@@ -151,6 +151,32 @@ per-field accuracy against the sample set is required work; see
   transfer to photographs, and the accuracy risk above stays open: one label
   read correctly is still not a measurement.
 
+  **Realized a third time, 2026-08-30, on flat artwork rather than a
+  photograph.** The author's mezcal COLA document, submitted alone so its
+  embedded artwork is the label side, returned the brand as `AMoviy TS` against
+  `DEL MAGUEY` and did not find the government warning. Two causes, and neither
+  is the cylinder problem.
+
+  The first refines the measurement above rather than contradicting it. OSD
+  answered 180 degrees at a confidence of 0.03, the label was turned upside
+  down, and the read never had a chance. The 46 of 48 figure is not in doubt and
+  above the floor OSD still decides alone. What the 7 of 48 for the best-of-four
+  score hides is which cases it loses: it loses the quarter-turns, because
+  Tesseract corrects those itself and returns identical output either way, so
+  the score is equal on the two cases it would have to separate. It separates a
+  turn from its opposite by more than fifty points on this very artwork. So
+  below the floor the verdict is now scored against its opposite alone, on two
+  rotations rather than four. The rejected alternative in this ADR was a
+  four-rotation sweep used in place of OSD; what v1.1.0 adds is a two-rotation
+  check used only where OSD has said it is guessing. Recorded in A-15.
+
+  The second is preprocessing again, and again in the way the consequence above
+  predicts, but with a failure mode mean word confidence cannot see. Flattening
+  a label printed in more than two tones to grayscale can drop an entire ink
+  class, and the text that survives still reads at 95, so the score that is
+  supposed to catch a bad rendering reports a good one. That is
+  [ADR 0014](0014-colour-as-an-ocr-candidate.md).
+
   The third is not fixed and is this risk in its original form: the label wraps
   a round bottle, so the far edges compress and distort, and no single
   photograph shows the label flat. Perspective and cylinder dewarping are

@@ -33,9 +33,9 @@ updates every artifact the answer affects.
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
-| [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size floor and the coverage claim for the embedded artwork path (ADR 0010) |
-| [OQ-25](#oq-25) | Open | Nothing; it decides which failing outcome the FR-7 proof contradiction carries |
-| [OQ-26](#oq-26) | Open | Nothing; it is the deployed re-measurement that would close or confirm the NFR-1 miss on the application-document path |
+| [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010) |
+| [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
+| [OQ-26](#oq-26) | Answered 2026-08-30: met at about 3.5 s | Nothing; re-measured against deploy #11, and to be re-taken once v1.1.0 changes what is read |
 
 ---
 
@@ -1205,9 +1205,22 @@ the artwork at all, or only the typed items; and what range of pixel sizes real
 embedded label images actually span. That last one is what the size floor was
 chosen against, and it was chosen as a judgement about what a seal, a barcode
 and a signature block look like next to a label scan, not from a distribution
-anybody measured. The defaults are 400 pixels on the shortest edge and 250,000
-pixels of area, both settable (`TTB_MIN_ARTWORK_EDGE_PX`,
-`TTB_MIN_ARTWORK_PIXELS`).
+anybody measured. The defaults are 400 pixels on the shortest edge, 250,000
+pixels of area and a long-to-short edge ratio of 3.0, all settable
+(`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`,
+`TTB_MAX_ARTWORK_ASPECT_RATIO`).
+
+**What the ratio adds, and why it was added in v1.1.0.** The two absolute
+floors are properties of the scanner as much as of the thing scanned. The
+author's document carries the applicant's handwritten signature on page 2 at
+687 by 195, which both of them reject twice over; the same strip scanned at
+300 dpi rather than 100 is about 2000 by 580, which clears both comfortably and
+is still a signature. The shape does not move with resolution. That makes the
+ratio the part of the floor least dependent on the distribution this question
+asks about, and it is also the part that trades something away: a neck or strip
+label filed on its own is genuinely long and thin and is rejected by it. Every
+rejection is reported with its page, its size and a named reason, so the trade
+is visible in the response rather than silent.
 
 **What would answer it:** a set of real filings across editions and submission
 routes, with the embedded image sizes reported, the way
@@ -1231,7 +1244,41 @@ is the reason no such claim is made.
 **Should a label whose stated proof is not twice its stated alcohol content be
 reported as a mismatch rather than as needs human review?**
 
-**Status: Open, 2026-08-30.**
+**Status: Decided and closed, 2026-08-30. It stays needs human review, and the
+constant is not flipped.**
+
+**The decision, and the reasoning behind it.** Three sourced documents fix this
+outcome and they agree: FR-7's third acceptance criterion, assumption A-12, and
+UAT row 21 in [07_TEST_STRATEGY.md](07_TEST_STRATEGY.md). All three give the
+same reason, which is that a proof disagreeing with an ABV "indicates an
+internal inconsistency on the label itself".
+
+That reason is the decision. A proof-against-percentage disagreement read off
+one imperfect scan is exactly the judgement call Dave Morrison's human-review
+band exists for: the tool has two numbers off one picture, they do not agree,
+and it cannot tell from the picture whether the label is wrong or the reading
+is. A mismatch says the label is wrong, which is a claim about the bottle. A
+review says the label contradicts itself and a person should look, which is a
+claim about the evidence. The second is what the evidence supports, and it is
+what all three documents already say.
+
+Neither outcome passes a label, so nothing about compliance turns on it. What
+turns on it is what an agent is asked to do next, and asking a person to look at
+a contradiction is the right ask.
+
+**What was actually at issue, and why it was never the constant.** The author's
+brief of 2026-08-30 described the defect as one that "is reported as a mismatch,
+not as artwork-derived". Read in context the contrast is with the new
+`artwork_derived` state rather than with `needs_review`: the requirement is that
+a real defect must never be absorbed by a state meaning "nothing was checked".
+That requirement is implemented and tested
+([ADR 0013](adr/0013-artwork-derived-values.md)), and it is satisfied by either
+failing outcome.
+
+**Blocks:** nothing, and nothing is changed. `backend/app/compare.py` keeps the
+constant it has, and the three documents keep the criterion they state.
+
+**The question as it stood, kept for the record.**
 
 FR-7's third acceptance criterion and assumption A-12 both fix this outcome as
 **needs human review**, and both give the same reason: a proof that does not
@@ -1271,7 +1318,36 @@ in `backend/app/compare.py` plus the three document edits above.
 **Does the application-document path meet NFR-1 once the duplicated OCR pass is
 gone, on the deployed target rather than on a session container?**
 
-**Status: Open, 2026-08-30.**
+**Status: Answered and closed, 2026-08-30. It does, at about 3.5 s against a
+target of roughly five.**
+
+**The answer.** The same document was submitted to the same URL against deploy
+#11, three consecutive runs from the author's browser:
+
+| run | wall clock | server `elapsed_ms` | `unaccounted_ms` | `ocr_passes` |
+| --- | --- | --- | --- | --- |
+| 1 | 3468 ms | 3387 ms | 1.3 ms | 1 |
+| 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
+| 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
+
+`ocr_passes` reads 1, which is what this question asked for. `elapsed_ms` is now
+within 80 ms of the browser's wall clock rather than 3.5 seconds away from it,
+and `unaccounted_ms` of 1.3 ms is what says the phase breakdown covers the
+request rather than a part of it. The matrix row, the README and
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 all carry these figures.
+
+**What the answer does not cover, stated because it is a real limitation.**
+Those runs were taken while the artwork OCR on this document was still failing:
+the label was being turned 180 degrees on an orientation verdict of 0.03
+confidence and then flattened to grayscale, so 3.5 seconds was the cost of
+reading a wrongly turned, wrongly rendered image. v1.1.0 changes what is read.
+The figure is re-measured against the next deploy, by re-running
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) step 8.3a, and updated everywhere it
+appears if it moves. That is a follow-up on a closed question rather than the
+question staying open: what was asked was whether removing the duplicate pass
+put this path inside the bar on the deployed target, and it did.
+
+**The history, kept because the shape of the mistake is the useful part.**
 
 **What is measured.** The author submitted their own mezcal COLA document, a
 382 KB PDF, alone to the deployed URL on 2026-08-30, build 1.1.0, three

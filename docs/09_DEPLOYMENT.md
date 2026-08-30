@@ -378,7 +378,9 @@ python -c "import json;t=json.load(open('/tmp/verify.json'))['timings'];print(js
 
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
-reporting 3.2 s; section 9 carries the numbers and what was wrong with them. The
+reporting 3.2 s, and 3.5 s against deploy #11 later the same day once the
+instrumentation was honest and the duplicated read was gone; section 9 carries
+both sets of numbers and what was wrong with the first. The
 `timings` block printed by the second command is the phase breakdown, and
 `ocr_passes` is the figure to look at first: a document-only submission should
 read one picture once.
@@ -471,10 +473,12 @@ This section is the record of the runs; the README is the summary of them.
       matched, and the rotation was detected and reported. **NFR-1's roughly
       five seconds is met with margin on this path.**
 - [x] **NFR-1 on the application-document path, which is a different path and
-      does not meet it.** Measured 2026-08-30, build 1.1.0, from the author's
-      browser against the deployed URL. Sample: the author's own mezcal COLA
+      now meets it.** Measured twice on 2026-08-30, from the author's browser
+      against the deployed URL. Sample both times: the author's own mezcal COLA
       document, a 382 KB PDF, submitted **alone**, so that the label artwork
-      embedded in it is the label side (ADR 0010). Three consecutive runs:
+      embedded in it is the label side (ADR 0010).
+
+      **Before, build 1.1.0 as first deployed.** Three consecutive runs:
 
       | run | wall clock | server `elapsed_ms` | server `ocr_ms` |
       | --- | --- | --- | --- |
@@ -482,10 +486,34 @@ This section is the record of the runs; the README is the summary of them.
       | 2 | 6786 ms | 3214 ms | 3213 ms |
       | 3 | 6781 ms | 3198 ms | 3196 ms |
 
-      **6.8 s end to end is outside NFR-1's roughly five seconds.** It is
-      recorded here as a miss rather than absorbed into the image path's 1.5 s,
-      because they are two different paths and one number covering both would
-      be a claim about neither.
+      **After, deploy #11, same day, same document, same URL.** Three
+      consecutive runs:
+
+      | run | wall clock | server `elapsed_ms` | `unaccounted_ms` | `ocr_passes` |
+      | --- | --- | --- | --- | --- |
+      | 1 | 3468 ms | 3387 ms | 1.3 ms | 1 |
+      | 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
+      | 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
+
+      **About 3.5 s end to end is inside NFR-1's roughly five seconds, with
+      about 1.5 s of margin.** It is recorded separately from the image path's
+      1.5 s rather than averaged into it, because they are two different paths
+      and one number covering both would be a claim about neither.
+
+      The `elapsed_ms` column is the change worth reading twice. Before, it sat
+      2 ms from `ocr_ms` and was measuring one span. After, it sits within
+      80 ms of the browser's wall clock and `unaccounted_ms` is 1.3 ms, which is
+      what says the phase breakdown beside it covers the request rather than a
+      part of it. `ocr_passes` went from 2 to 1.
+
+      **One caveat, and it is not a rounding error.** The 3.5 s runs were taken
+      while the artwork OCR on this document was still failing: the label was
+      being turned 180 degrees on a Tesseract orientation verdict of 0.03
+      confidence and then flattened to grayscale, so what took 3.5 seconds was
+      reading a wrongly turned, wrongly rendered image. v1.1.0 changes what is
+      read, so it changes what the read costs. **Re-run this step against the
+      next deploy and replace these figures if they move.** Do not assume they
+      will not.
 
       **The instrumentation was also wrong, and wrong in the flattering
       direction.** `elapsed_ms` and `ocr_ms` are within 2 ms of each other on
@@ -514,10 +542,12 @@ This section is the record of the runs; the README is the summary of them.
       2.19 s to 1.12 s and a two-image document from 3.17 s to 1.15 s, with the
       Tesseract passes going from two and three respectively to one.
 
-      **The 6.8 s figure above is not superseded by that.** It stands until the
-      same document is submitted to the deployed URL on a build carrying the
-      fix. Re-run it and replace this entry with the new numbers; do not
-      substitute the arithmetic.
+      **And the 6.8 s figure was superseded by measurement rather than by that
+      arithmetic.** The earlier edition of this entry said it would stand until
+      the same document was submitted to the deployed URL on a build carrying
+      the fix. It was, against deploy #11, and the second table above is the
+      result. The session-container figures are still quoted only as a
+      before-and-after on one machine; they are not what closed this.
 - [x] **One full batch at the configured cap**: 300 label images plus 300 COLA
       documents, which is 600 files in one envelope (ADR 0009).
 
