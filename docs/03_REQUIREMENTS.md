@@ -849,6 +849,60 @@ section 1.
 - Deployed environments receive configuration through the task definition rather
   than a committed file.
 
+### FR-14 A value read off the artwork is filled in, and never called a match
+
+**Priority:** Must
+**Source:** The author's decision of 2026-08-30, taken against the discovery
+record; Sarah Chen interview ("spend half their day doing what's essentially
+data entry verification"); SC-3 and the batch path; Dave Morrison and Jenny Park
+interviews for why the result may not overstate itself. See
+[ADR 0013](adr/0013-artwork-derived-values.md).
+
+Fill the alcohol content and the net contents from the label artwork embedded in
+an uploaded COLA document when the application form does not state them, which is
+the ordinary case because neither is an item on TTB F 5100.31 (A-17). Report a
+value filled that way, and compared against the same artwork standing in as the
+label side, as **read from the artwork** rather than as verified.
+
+**Why both halves are required.** Asking an agent to hand-type a value the tool
+has already read puts back the data entry the tool exists to remove, and on the
+batch path there is no agent present to type it at all. But a comparison of a
+value against the picture it was read from always agrees, so a match reported
+there is structurally incapable of ever saying anything else. It is a signal with
+no information in it, presented in the shape of four signals that carry
+information.
+
+**Acceptance criteria**
+- Given a COLA document stating no alcohol content and no net contents, and
+  carrying label artwork that states both, then both values are filled from the
+  artwork and reported with their source.
+- Given such a value compared against that same artwork as the label side, then
+  the outcome is `artwork_derived`, it carries no score, and it is not a match.
+- Given a result containing such rows, then the summary line counts only the
+  rows that could have disagreed and names the rest, in the shape "3 of 3
+  verifiable fields match; 2 read from the artwork only". Where no row is
+  artwork-derived the line is unqualified.
+- Given the `artwork_derived` state, then it is carried by a word and a
+  silhouette that no other outcome uses, before any colour (NFR-5).
+- Given such a row, then it states its source on the row itself, as "Label
+  artwork (same source as the label)", rather than in a footnote elsewhere on
+  the page.
+- Given an agent who also uploaded a photograph of the label, then the same
+  value is compared against that photograph, which is independent evidence, and
+  is reported as an ordinary match, review or mismatch.
+- Given a typed value or a value the document's own text states, then it wins
+  over the artwork and is compared normally. FR-11's precedence is unchanged.
+- Given label artwork that does not carry the alcohol content or the net
+  contents, then the absence is reported as a finding rather than as not
+  compared, because 27 CFR requires both on the label whatever the form says,
+  and the reason names the section and its carve-outs.
+- Given label artwork for a spirit stating both a percentage and a proof that do
+  not agree, then the FR-7 cross-check reports it whether or not the application
+  stated anything, and it is never reported as `artwork_derived`.
+- Given a batch row, then every rule above applies to it unchanged. A batch row
+  pairs a document with a label image (ADR 0009), so its label side is always an
+  independent photograph and no batch row is artwork-derived.
+
 ## 5. Requirements deliberately not written
 
 The following were considered and excluded because writing them would require

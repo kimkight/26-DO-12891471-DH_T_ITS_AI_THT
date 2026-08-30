@@ -97,3 +97,31 @@ export const ARTWORK_LABEL_LINE =
   'The label checked here is the artwork inside the application document, not a photo of a bottle. ' +
   'This checks that the filed artwork carries the required elements and agrees with the form. ' +
   'Checking the physical bottle needs a photo of that bottle.'
+
+/**
+ * What the artwork-derived row says about itself, on the row (FR-14, ADR 0013).
+ *
+ * **On the row rather than in a footnote**, which is the requirement and not a
+ * presentation preference. An agent scanning five results has to be able to see
+ * why one of them is different from the others without reading anything else on
+ * the page; a caveat at the bottom of the panel is read by the people who
+ * already understood, and missed by everyone else.
+ *
+ * The parenthetical is the whole of the point. "Label artwork" alone is already
+ * on the row for any value that came off a picture, including the ones checked
+ * against an independent photograph. What makes this row different is that the
+ * artwork is *also* the label side, and the phrase says so.
+ */
+export const ARTWORK_DERIVED_SOURCE = 'Label artwork (same source as the label)'
+
+/**
+ * The one line under it, saying what that means for the agent.
+ *
+ * It supersedes `sourceCaveat` on this row rather than joining it. The generic
+ * artwork caveat warns that a value recognized off a picture can be misread,
+ * which is true here too and is the smaller of the two problems; two notes on
+ * one card is noise, and the larger problem is the one worth the line.
+ */
+export const ARTWORK_DERIVED_CAVEAT =
+  'Both sides of this row are one reading of one picture, so they could not have disagreed. ' +
+  'It shows the artwork carries this value. It shows nothing about whether the applicant declared the same one.'

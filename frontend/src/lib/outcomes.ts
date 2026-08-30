@@ -18,13 +18,13 @@
 import type { BatchLine, Outcome } from '../types'
 
 /** The shapes. Deliberately different silhouettes, not one shape recoloured. */
-export type Glyph = 'check' | 'triangle' | 'cross' | 'dash'
+export type Glyph = 'check' | 'triangle' | 'cross' | 'dash' | 'artwork'
 
 export interface OutcomePresentation {
   /** The word an agent reads. Plain language, no jargon (NFR-4). */
   label: string
   glyph: Glyph
-  tone: 'match' | 'review' | 'mismatch' | 'neutral'
+  tone: 'match' | 'review' | 'mismatch' | 'neutral' | 'artwork'
   /** Expanded wording for the live region, where there is no icon to see. */
   spoken: string
 }
@@ -54,6 +54,19 @@ const PRESENTATIONS: Record<Outcome, OutcomePresentation> = {
     tone: 'neutral',
     spoken: 'was not compared',
   },
+  /*
+   * FR-14, ADR 0013. Not a verdict, and worded so that it cannot be read as
+   * one: "Read from the artwork" says what happened rather than how it went.
+   * Its own silhouette, a picture frame, because it is a statement about where
+   * a value came from and none of the other four shapes means that. The colour
+   * arrives last here as everywhere else, and the word alone is enough.
+   */
+  artwork_derived: {
+    label: 'Read from the artwork',
+    glyph: 'artwork',
+    tone: 'artwork',
+    spoken: 'was read from the label artwork and could not be compared against it',
+  },
 }
 
 export function presentation(outcome: Outcome): OutcomePresentation {
@@ -70,6 +83,7 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
     needs_review: 0,
     mismatch: 0,
     not_compared: 0,
+    artwork_derived: 0,
   }
   for (const outcome of outcomes) {
     if (outcome in counts) counts[outcome] += 1
@@ -78,16 +92,51 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
 }
 
 /**
+ * The summary line, which stops claiming a denominator it does not have
+ * (FR-14, ADR 0013).
+ *
+ * **"5 of 5 fields match" was the false half of the old line.** On a submission
+ * where the agent uploaded only the application document, some of those five
+ * rows compared a value read off the label artwork against that same artwork.
+ * Counting them alongside the rows that were genuinely checked inflates the
+ * denominator with fields that could not have come out any other way, which is
+ * exactly the false assurance the artwork-derived state exists to prevent.
+ *
+ * So the count is over the verifiable rows only, and the rows that were merely
+ * read are stated beside it rather than hidden: "3 of 3 verifiable fields
+ * match; 2 read from the artwork only". Where nothing was artwork-derived,
+ * which is every submission carrying a photograph, the second clause is absent
+ * and the word "verifiable" with it: the line reads as it always did, because
+ * there is nothing to qualify.
+ */
+export function summary(outcomes: Outcome[]): string {
+  const counts = tally(outcomes)
+  const derived = counts.artwork_derived
+  const verifiable = outcomes.length - derived
+  if (derived === 0) {
+    return `${counts.match} of ${outcomes.length} fields match`
+  }
+  const noun = verifiable === 1 ? 'verifiable field' : 'verifiable fields'
+  const verb = verifiable === 1 ? 'matches' : 'match'
+  return (
+    `${counts.match} of ${verifiable} ${noun} ${verb}; ` + `${derived} read from the artwork only`
+  )
+}
+
+/**
  * The sentence read out when results appear (NFR-5's last criterion).
  *
  * Written as a sentence rather than as a count list because it is heard, not
  * scanned. "Three fields match" is followed by only what needs attention, so
  * the important half is not buried behind four zeroes.
+ *
+ * It opens with the same summary the panel prints, so what is heard and what is
+ * seen are one sentence rather than two that can drift apart.
  */
 export function announcement(outcomes: Outcome[], seconds: number): string {
   const counts = tally(outcomes)
   const parts = [`Checked in ${seconds.toFixed(1)} seconds.`]
-  parts.push(`${counts.match} of ${outcomes.length} fields match.`)
+  parts.push(`${summary(outcomes)}.`)
   if (counts.needs_review > 0) {
     parts.push(`${counts.needs_review} needs your review.`)
   }
@@ -96,6 +145,12 @@ export function announcement(outcomes: Outcome[], seconds: number): string {
   }
   if (counts.not_compared > 0) {
     parts.push(`${counts.not_compared} was not compared.`)
+  }
+  if (counts.artwork_derived > 0) {
+    parts.push(
+      `${counts.artwork_derived} came from the label artwork inside the application, ` +
+        'so there was nothing independent to check it against.',
+    )
   }
   return parts.join(' ')
 }
@@ -117,6 +172,11 @@ export function rowOutcome(line: BatchLine): Outcome | 'error' {
   if (outcomes.includes('mismatch')) return 'mismatch'
   if (outcomes.includes('needs_review')) return 'needs_review'
   if (outcomes.includes('not_compared')) return 'not_compared'
+  // Ranked below "not compared" rather than above it, because the two say
+  // different things and neither is a match: "not compared" is a field with no
+  // evidence at all, and this is a field with evidence that could not disagree.
+  // A row carrying one is never reported as fully matching (FR-14, ADR 0013).
+  if (outcomes.includes('artwork_derived')) return 'artwork_derived'
   return 'match'
 }
 

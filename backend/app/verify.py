@@ -30,7 +30,7 @@ from app.application_form import (
     SELF_CONSISTENCY_NOTE,
     ParsedApplication,
 )
-from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
+from app.compare import Comparison, Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
 from app.ocr import OcrResult, Orientation, ReadPath, UndecodableImageError, extract_text
 from app.parse import ParsedFields, parse_fields
@@ -539,6 +539,72 @@ def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs
     )
 
 
+# What the row says instead of a match when both of its sides are one reading of
+# one picture (FR-14, ADR 0013). Stated on the row rather than in a footnote,
+# because an agent has to be able to see why this row is different without
+# reading anything else.
+ARTWORK_DERIVED_SOURCE = "Label artwork (same source as the label)"
+
+
+def _is_circular(
+    name: str,
+    value_sources: dict[str, ApplicationSource],
+    label_source: LabelSource,
+) -> bool:
+    """Whether this row's two sides are the same reading of the same artwork.
+
+    **The rule keys on provenance, not on a field name.** It fires exactly when
+    the application value was read off label artwork embedded in the uploaded
+    document *and* that same artwork is standing in as the label side, which is
+    the submission where an agent uploads the COLA document and nothing else.
+
+    Two consequences are deliberate. It covers whatever fields actually fell that
+    way on a given document, which on the author's own filing is the alcohol
+    content and the net contents that A-17 says the form never carries, and the
+    class or type designation alongside them. And it does **not** fire when the
+    agent supplied a photograph of their own: comparing a reading of that
+    photograph against a reading of the filed artwork is two pictures, which is
+    a real comparison and is reported as one.
+    """
+    return (
+        label_source == "application_artwork" and value_sources.get(name) == "parsed_from_artwork"
+    )
+
+
+def _artwork_derived(name: str, comparison: Comparison) -> Comparison:
+    """Relabel a circular agreement as what it is (FR-14, ADR 0013).
+
+    **Only a match is relabelled, and that is the whole of the safety
+    argument.** Reading one picture twice can manufacture agreement; it cannot
+    manufacture a mismatch, a review or a not-found. So every other outcome on a
+    circular row is a real result and is left exactly as the comparison found it:
+    the A-12 proof contradiction reaches an agent as the review A-12 says it is,
+    and a mandatory element missing from the artwork reaches them as the finding
+    27 CFR makes it.
+
+    The score goes with the outcome. A similarity of 100 between a string and
+    itself is arithmetically true and tells an agent nothing, and printed beside
+    this row it would read as strong evidence of exactly the thing that was not
+    established.
+    """
+    return Comparison(
+        outcome=Outcome.ARTWORK_DERIVED,
+        score=None,
+        reason=(
+            f"{FIELD_LABELS[name]} was read from the label artwork inside the "
+            "application document, and that same artwork is the label being "
+            "checked here, because no photograph was uploaded. Both sides of "
+            "this row are one reading of one picture, so they can only agree "
+            "and the agreement establishes nothing. It is reported as read from "
+            "the artwork rather than as a match. What has been established is "
+            "that the artwork carries the value; what has not is that it agrees "
+            "with anything the applicant declared. Upload a photograph of the "
+            "bottle, or type the value from the filing, to make this a real "
+            "comparison."
+        ),
+    )
+
+
 def build_result(
     parsed: ParsedFields,
     application: dict[str, str],
@@ -580,6 +646,19 @@ def build_result(
         "class_type": parsed.class_type,
         "alcohol_content": parsed.alcohol_content,
         "net_contents": parsed.net_contents,
+    }
+
+    # The circularity overlay (FR-14, ADR 0013), applied after the comparisons
+    # and before the rows are built, so that exactly one place decides what a
+    # row says and the comparison layer stays a function of two strings.
+    comparisons = {
+        name: (
+            _artwork_derived(name, comparison)
+            if comparison.outcome is Outcome.MATCH
+            and _is_circular(name, value_sources, label_source)
+            else comparison
+        )
+        for name, comparison in comparisons.items()
     }
 
     fields = [

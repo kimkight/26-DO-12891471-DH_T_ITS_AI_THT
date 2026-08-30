@@ -20,7 +20,12 @@
  * right, which is the shape a reader compares two things in.
  */
 import { OutcomeBadge } from './OutcomeBadge'
-import { sourceCaveat, sourceChipLabel } from '../lib/applicationSources'
+import {
+  ARTWORK_DERIVED_CAVEAT,
+  ARTWORK_DERIVED_SOURCE,
+  sourceCaveat,
+  sourceChipLabel,
+} from '../lib/applicationSources'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
@@ -72,6 +77,10 @@ export function ResultCard({
 }) {
   const { tone } = presentation(field.outcome)
   const isWarning = field.name === 'government_warning'
+  // A row whose two sides are one reading of one picture (FR-14, ADR 0013).
+  // It says so on the row, in its own key-value pair, because that is where an
+  // agent is already looking when they wonder why this chip is not a match.
+  const isArtworkDerived = field.outcome === 'artwork_derived'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
   const source = sourceLabel(field.source_photo, photoCount)
@@ -106,6 +115,9 @@ export function ResultCard({
           value={field.application_value}
           missing="Not supplied"
         />
+        {isArtworkDerived ? (
+          <Value label="Source" value={ARTWORK_DERIVED_SOURCE} missing="" />
+        ) : null}
       </dl>
 
       {/*
@@ -115,7 +127,9 @@ export function ResultCard({
         others cannot (ADR 0010). Text, not colour, so it survives greyscale
         (NFR-5).
       */}
-      {!isWarning && sourceCaveat(field.application_value_source) ? (
+      {isArtworkDerived ? (
+        <p className="card__detail--note">{ARTWORK_DERIVED_CAVEAT}</p>
+      ) : !isWarning && sourceCaveat(field.application_value_source) ? (
         <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
       ) : null}
 

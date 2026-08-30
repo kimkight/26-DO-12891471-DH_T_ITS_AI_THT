@@ -21,6 +21,7 @@ describe('an outcome is carried by text and shape, not by colour', () => {
     ['needs_review', 'Needs review'],
     ['mismatch', 'Does not match'],
     ['not_compared', 'Not compared'],
+    ['artwork_derived', 'Read from the artwork'],
   ]
 
   it.each(cases)('%s renders the word "%s"', (outcome, word) => {

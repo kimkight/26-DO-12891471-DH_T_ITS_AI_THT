@@ -65,6 +65,7 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
         'review',
         'mismatch',
         'neutral',
+        'artwork',
       ].map((foreground) => [foreground, surface] as const),
     ),
   )('--%s on --%s is at least 4.5:1', (foreground, surface) => {
@@ -76,6 +77,7 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     ['review', 'review-tint'],
     ['mismatch', 'mismatch-tint'],
     ['neutral', 'neutral-tint'],
+    ['artwork', 'artwork-tint'],
   ])('--%s on its own tint --%s is at least 4.5:1', (foreground, tint) => {
     expect(ratio(token(foreground), token(tint))).toBeGreaterThanOrEqual(AA_BODY)
   })
@@ -85,6 +87,7 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     ['text', 'review-tint'],
     ['text', 'mismatch-tint'],
     ['text', 'neutral-tint'],
+    ['text', 'artwork-tint'],
   ])('body text --%s stays readable on the tinted card --%s', (foreground, tint) => {
     expect(ratio(token(foreground), token(tint))).toBeGreaterThanOrEqual(AA_BODY)
   })

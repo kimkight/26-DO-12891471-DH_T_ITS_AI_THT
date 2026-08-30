@@ -20,6 +20,9 @@ function Icon({ glyph }: { glyph: Glyph }) {
     triangle: <path d="M8 2.5 14.5 13.5h-13Z M8 6.5v3 M8 11.4v.1" />,
     cross: <path d="M4 4l8 8 M12 4l-8 8" />,
     dash: <path d="M3.5 8h9" />,
+    // A picture in a frame: the one shape that says "this came off the
+    // artwork" rather than saying how a comparison went (FR-14, ADR 0013).
+    artwork: <path d="M2.5 3.5h11v9h-11z M2.5 11 6 7.5l2.5 2.5L10.5 8l3 3 M5.5 6.4v.01" />,
   }
   return (
     <svg

@@ -32,7 +32,12 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
-from samples.formmaker import ApplicationSpec, as_pdf_bytes, registry_printout_lines
+from samples.formmaker import (
+    ApplicationSpec,
+    as_pdf_bytes,
+    paper_form_lines,
+    registry_printout_lines,
+)
 from samples.specs import SAMPLE_LABEL, SPECS
 
 from app.batch import pairing_stem
@@ -532,3 +537,78 @@ def test_the_worker_pool_bound_is_honoured_and_every_line_still_returns(monkeypa
     received = lines(response)
     assert len(received) == 8
     assert {line["filename"] for line in received} == {name for name, _ in images}
+
+
+@requires_tesseract
+@requires_fonts
+class TestTheSameArtworkRulesApplyPerRow:
+    """FR-14 and ADR 0013, exercised through the batch path rather than beside it.
+
+    SC-3 is the reason the artwork rules exist at all: importers submit "200,
+    300 label applications" at once and nobody is sitting there to hand-type two
+    values off a document the tool has already read. So the rules have to hold
+    per row, and they are asserted here through the real stream rather than
+    inferred from the single-label path sharing a function with it.
+
+    **A batch row never reports an artwork-derived value, and that is the
+    correct result rather than a gap.** ADR 0009 makes a batch row a label image
+    paired with a COLA document, so the label side of every row is a photograph
+    the agent supplied and the artwork side is a second, independent picture.
+    Comparing them is a real comparison. The circularity FR-14 guards against
+    needs both sides to be one reading of one picture, which on this path cannot
+    happen.
+    """
+
+    def _document_with_artwork(self, sample_label_png: bytes) -> bytes:
+        """A paper form that states no alcohol content and carries the artwork.
+
+        Three of the five values are not items on TTB F 5100.31 (A-17), so this
+        is what the ordinary batch document looks like.
+        """
+        return as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[sample_label_png])
+
+    def test_a_row_fills_both_values_from_the_artwork_and_compares_them_for_real(
+        self, sample_label_png
+    ):
+        """The SC-3 case: nothing typed, and the row still compares five fields.
+
+        Both values arrive from the artwork inside that row's document, and both
+        are compared against the photograph of the label, which is independent
+        evidence. So they are real matches and are reported as such.
+        """
+        response = submit(
+            [("a.png", sample_label_png)],
+            [("a.pdf", self._document_with_artwork(sample_label_png))],
+        )
+        result = lines(response)[0]["result"]
+        by_name = {field["name"]: field for field in result["fields"]}
+
+        assert result["label_source"] == "uploaded_photographs"
+        for name in ("alcohol_content", "net_contents"):
+            entry = by_name[name]
+            assert entry["application_value_source"] == "parsed_from_artwork"
+            assert entry["outcome"] == "match"
+            assert entry["outcome"] != "artwork_derived"
+
+    def test_a_row_whose_label_omits_a_mandatory_element_reports_the_finding(
+        self, sample_label_png
+    ):
+        """The presence rule is per row, and it is never "not compared"."""
+        from dataclasses import replace
+
+        from samples.labelmaker import render_png_bytes
+
+        without_net_contents = render_png_bytes(replace(SAMPLE_LABEL, net_contents=""))
+        response = submit(
+            [("a.png", without_net_contents)],
+            [("a.pdf", as_pdf_bytes(paper_form_lines(ApplicationSpec())))],
+        )
+        entry = next(
+            field
+            for field in lines(response)[0]["result"]["fields"]
+            if field["name"] == "net_contents"
+        )
+
+        assert entry["found_on_label"] is False
+        assert entry["outcome"] == "mismatch"
+        assert "27 CFR 5.63(b)(2)" in entry["reason"]
