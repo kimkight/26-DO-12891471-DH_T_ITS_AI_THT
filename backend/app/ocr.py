@@ -825,7 +825,10 @@ def _rank(arms: list[_Arm]) -> tuple[_Arm, Literal["short_circuit", "confidence"
     point lower for it.
 
     Order is stable: with everything equal the earliest arm wins, and the arms
-    arrive preprocessed first, so nothing v1.0.1 decided is decided differently.
+    arrive in the order ``extract_text`` read them. On a source with no colour
+    to lose that is the preprocessed read first, which is v1.0.1 unchanged; on a
+    coloured one it is the colour read first, which is the arm that cannot have
+    lost an ink class before Tesseract saw it.
     """
     if len(arms) == 1:
         return arms[0], "short_circuit"
