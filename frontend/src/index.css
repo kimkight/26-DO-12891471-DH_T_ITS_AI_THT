@@ -1671,3 +1671,35 @@ main {
   border-radius: var(--radius-sm, 0.25rem);
   background: var(--accent-wash);
 }
+
+/*
+ * The character-level difference against 27 CFR 16.21 (FR-5, ADR 0012).
+ *
+ * Monospaced, because the agent is comparing characters and a proportional face
+ * makes a missing "i" almost invisible. The two kinds of run are marked by
+ * `<del>` and `<ins>`, which carry their own meaning; the tints here are a
+ * second signal and never the only one, and the legend under the block says in
+ * words what each one is (NFR-5).
+ */
+.warning-diff {
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-sm, 0.25rem);
+  background: var(--surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.warning-diff__missing {
+  background: var(--gold-wash);
+  color: var(--gold-text);
+  text-decoration-thickness: 2px;
+}
+
+.warning-diff__added {
+  background: var(--accent-wash);
+  color: var(--accent);
+  text-decoration-thickness: 2px;
+}

@@ -63,6 +63,9 @@ export function warningDetail(overrides: Partial<WarningResult> = {}): WarningRe
     body_matches_regulation: true,
     bold_type_checked: false,
     bold_type_note: BOLD_TYPE_NOTE,
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
     ...overrides,
   }
 }

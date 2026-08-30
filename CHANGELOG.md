@@ -67,6 +67,30 @@ application or picture."
   offering the photo upload, which is an FR-9 message rather than a validation
   error on a field.
 
+- **A government warning that differs by one or two characters goes to a person**
+  ([ADR 0012](docs/adr/0012-warning-near-miss.md)). The comparison is unchanged
+  and still exact: a statement is a match only when it is identical to
+  27 CFR 16.21 after whitespace normalization. What changed is what a very small
+  difference is reported **as**.
+  - The author's own artwork OCRs the statement with exactly one character
+    wrong, `MPAIRS` for `IMPAIRS`. Reported as a flat mismatch, that tells an
+    agent their label is defective when the truth is that the scan is imperfect.
+  - A difference of at most `TTB_WARNING_NEAR_MISS_EDITS` characters, two by
+    default, is reported as needing human review, with the exact character-level
+    difference shown. **It is never a pass**: it is one of the two failing
+    outcomes, and the reason says "This is not a match" in those words.
+  - Anything beyond the threshold is still a mismatch. A capitalization failure
+    on the prefix is never a near miss: it is a defect a person caught on a real
+    submission, not something OCR produces from a compliant label.
+  - The difference is shown on a mismatch too, because it is evidence either
+    way, and each run is marked by text as well as by styling so the distinction
+    survives greyscale.
+  - **This is not a fuzzy match.** A fuzzy match would let a label through on a
+    similarity score. Nothing here lets anything through; what changed is which
+    sentence the agent reads and whether they are handed the difference to look
+    at. The existing FR-5 fixtures are unchanged in outcome, and that is
+    asserted.
+
 ### The limitation, stated rather than implied
 
 Checking a label lifted out of an application against that same application is

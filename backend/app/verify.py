@@ -45,6 +45,7 @@ from app.schemas import (
     PhotoResult,
     ReadPathDetail,
     VerificationResult,
+    WarningDiffSegment,
     WarningResult,
 )
 from app.warning import WARNING_STATEMENT, WarningCheck
@@ -629,6 +630,12 @@ def build_result(
             prefix_as_printed=parsed.warning.prefix_found,
             prefix_is_capitalized=parsed.warning.prefix_is_upper_case,
             body_matches_regulation=parsed.warning.body_matches,
+            edit_distance=parsed.warning.body_edit_distance,
+            near_miss=parsed.warning.near_miss,
+            diff=[
+                WarningDiffSegment(kind=segment.kind, text=segment.text)
+                for segment in parsed.warning.body_diff
+            ],
         ),
         ocr_confidence=ocr_confidence,
         elapsed_ms=round(ocr_ms if elapsed_ms is None else elapsed_ms, 1),
@@ -645,13 +652,32 @@ def build_result(
 def _warning_field(
     warning: WarningCheck, warning_text: str | None, source_photo: int | None = None
 ) -> FieldResult:
-    """The warning as one field row, with no review band (FR-5).
+    """The warning as one field row (FR-5, FR-6, ADR 0012).
 
     The comparison side is the regulation rather than the application form: the
     required text is fixed by 27 CFR 16.21, so there is nothing for an applicant
     to declare and nothing to type in.
+
+    **There is still no review band, and this is not one.** FR-5 excludes fuzzy
+    tolerance and the comparison is unchanged: a statement passes only when it is
+    identical to the regulation after whitespace normalization. What the third
+    outcome carries is a difference too small for the tool to attribute. The
+    author's own COLA artwork reads the statement with one character wrong, and
+    reporting that as a mismatch tells an agent the label is defective when the
+    truth is that the scan is imperfect. Neither failing outcome passes; they
+    differ in what the agent is asked to do.
+
+    A capitalization failure is never a near miss. It is a defect a person
+    already caught on a real submission (FR-6, Jenny Park), it is not something
+    OCR produces from a compliant label, and it is reported as the mismatch it
+    is.
     """
-    outcome = Outcome.MATCH if warning.passes else Outcome.MISMATCH
+    if warning.passes:
+        outcome = Outcome.MATCH
+    elif warning.near_miss and warning.prefix_is_upper_case:
+        outcome = Outcome.NEEDS_REVIEW
+    else:
+        outcome = Outcome.MISMATCH
     return FieldResult(
         name="government_warning",
         display_name=FIELD_LABELS["government_warning"],

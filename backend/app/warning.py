@@ -9,6 +9,21 @@ OOS-4 (bold type is out of scope). Decision reference: D-5, ADR 0004.
 The statement is quoted verbatim from 27 CFR 16.21 as recorded in
 docs/03_REQUIREMENTS.md section 1, retrieved from eCFR on 2026-08-20.
 
+**A near miss is routed to a person, not passed.** FR-5's exactness is not
+loosened by anything here, and the distinction matters enough to state twice:
+this is not a fuzzy match. The body still has to be identical to 27 CFR 16.21
+after whitespace normalization to be reported as a match, and
+``body_matches`` is still that comparison and nothing else. What changed on
+2026-08-29 is what a *very* small difference is reported *as*. The author's own
+COLA artwork OCRs the statement with exactly one character wrong, ``MPAIRS`` for
+``IMPAIRS``, and calling that a mismatch tells an agent their label is defective
+when the truth is that the scan is imperfect. A difference within
+``TTB_WARNING_NEAR_MISS_EDITS`` characters is therefore reported as needing
+human review, with the exact character-level difference shown so the agent can
+see at a glance whether it is an artifact of reading or a real defect. Anything
+beyond it is still a mismatch, and nothing is ever passed on a near miss. See
+[ADR 0012](../../docs/adr/0012-warning-near-miss.md).
+
 Why the prefix and the body are compared separately. FR-6 requires the
 capitalization failure to be reportable as its own reason, which is UAT row 3:
 a title-case ``Government Warning:`` must fail the capitalization check and name
@@ -19,8 +34,14 @@ prefix is split off and the body is the remainder beginning at ``(1)``.
 
 from __future__ import annotations
 
+import difflib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Literal
+
+from rapidfuzz.distance import Levenshtein
+
+from app.config import settings
 
 # Verbatim from 27 CFR 16.21, via docs/03_REQUIREMENTS.md section 1.
 WARNING_PREFIX = "GOVERNMENT WARNING:"
@@ -85,9 +106,33 @@ def join_line_break_hyphens(text: str) -> str:
     return _LINE_BREAK_HYPHEN.sub("", text)
 
 
+# One run of the character-level comparison between the statement as printed and
+# the statement as the regulation fixes it.
+#
+# ``kind`` reads from the label's point of view, because that is what the agent
+# is looking at: ``same`` is text the two agree on, ``added`` is text on the
+# label that the regulation does not have, and ``missing`` is text the
+# regulation requires that the label does not show.
+DiffKind = Literal["same", "added", "missing"]
+
+
+@dataclass(frozen=True)
+class DiffSegment:
+    """One run of characters, and whether the two texts agree about it."""
+
+    kind: DiffKind
+    text: str
+
+
 @dataclass(frozen=True)
 class WarningCheck:
-    """The outcome of both warning checks, reported separately (FR-6)."""
+    """The outcome of both warning checks, reported separately (FR-6).
+
+    ``body_matches`` is the FR-5 comparison and is unchanged: identical after
+    whitespace normalization, or not. ``body_edit_distance`` and ``near_miss``
+    are about what a difference is *reported* as, and neither can turn a
+    mismatch into a match.
+    """
 
     found: bool
     prefix_found: str | None
@@ -97,11 +142,52 @@ class WarningCheck:
     reason: str
     bold_type_checked: bool = False
     bold_type_note: str = BOLD_TYPE_NOTE
+    # How many single-character edits separate the statement as printed from the
+    # statement the regulation fixes. 0 when they match; None when no statement
+    # was found, because there is nothing to measure a distance from.
+    body_edit_distance: int | None = None
+    # Whether that distance is small enough to be worth a person's judgement
+    # rather than a flat mismatch. Never true when the body matches exactly.
+    near_miss: bool = False
+    # The character-level difference, for the agent to look at. Empty when the
+    # body matches, and when nothing was found.
+    body_diff: list[DiffSegment] = field(default_factory=list)
 
     @property
     def passes(self) -> bool:
-        """True only when both the body and the capitalization check pass."""
+        """True only when both the body and the capitalization check pass.
+
+        Unchanged by the near-miss routing, deliberately: a near miss does not
+        pass, it is routed to a person. ``app.verify`` reads ``near_miss`` to
+        decide between the two failing outcomes.
+        """
         return self.found and self.body_matches and bool(self.prefix_is_upper_case)
+
+
+def body_diff(found: str, expected: str) -> list[DiffSegment]:
+    """The character-level difference between two normalized statements.
+
+    Character level rather than word level, because the differences worth
+    telling apart here are inside words: ``MPAIRS`` against ``IMPAIRS`` is one
+    missing character, and a word-level diff would report the whole word as
+    changed and hide which kind of difference it was.
+
+    ``autojunk`` is off. ``SequenceMatcher`` otherwise treats any character
+    appearing in more than 1 percent of a long sequence as junk, which over a
+    232-character sentence means the spaces and most vowels, and the resulting
+    diff is unreadable.
+    """
+    matcher = difflib.SequenceMatcher(None, found, expected, autojunk=False)
+    segments: list[DiffSegment] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            segments.append(DiffSegment(kind="same", text=found[i1:i2]))
+            continue
+        if found[i1:i2]:
+            segments.append(DiffSegment(kind="added", text=found[i1:i2]))
+        if expected[j1:j2]:
+            segments.append(DiffSegment(kind="missing", text=expected[j1:j2]))
+    return segments
 
 
 def locate_warning(text: str) -> tuple[str, str] | None:
@@ -155,7 +241,13 @@ def check_warning(text: str) -> WarningCheck:
     expected_body = normalize_whitespace(WARNING_BODY)
     body_matches = body_found == expected_body
 
-    reason = _reason_for(prefix_normalized, prefix_is_upper, body_matches)
+    # Measured only when the exact comparison has already failed, so nothing
+    # about a matching statement depends on it.
+    distance = 0 if body_matches else Levenshtein.distance(body_found, expected_body)
+    near_miss = not body_matches and distance <= settings.warning_near_miss_edits
+    diff = [] if body_matches else body_diff(body_found, expected_body)
+
+    reason = _reason_for(prefix_normalized, prefix_is_upper, body_matches, distance, near_miss)
     return WarningCheck(
         found=True,
         prefix_found=prefix_normalized,
@@ -163,17 +255,49 @@ def check_warning(text: str) -> WarningCheck:
         body_found=body_found,
         body_matches=body_matches,
         reason=reason,
+        body_edit_distance=distance,
+        near_miss=near_miss,
+        body_diff=diff,
     )
 
 
-def _reason_for(prefix: str, prefix_is_upper: bool, body_matches: bool) -> str:
+def _near_miss_reason(distance: int) -> str:
+    """What a difference of one or two characters is reported as, and why.
+
+    It names the number of characters and it names the judgement being asked
+    for. It does not say the statement is compliant, and it does not say it is
+    defective: the point of routing this to a person is that the tool cannot
+    tell an OCR artifact from a real defect at this size, and pretending
+    otherwise in either direction would be the tool overstating what it knows.
+    """
+    characters = "character" if distance == 1 else "characters"
+    return (
+        f"The statement differs from 27 CFR 16.21 by {distance} {characters}. "
+        "That is small enough to be a reading error rather than a defect on the "
+        "label, so this is for you to judge rather than for the tool to call. "
+        "The exact difference is shown; check it against the label itself. This "
+        "is not a match: the comparison is exact and the text is not identical."
+    )
+
+
+def _reason_for(
+    prefix: str,
+    prefix_is_upper: bool,
+    body_matches: bool,
+    distance: int = 0,
+    near_miss: bool = False,
+) -> str:
     """Name the rule that failed, so an agent can see which one it was (FR-6)."""
+    body_detail = (
+        _near_miss_reason(distance)
+        if near_miss
+        else "The statement text does not match 27 CFR 16.21 word for word."
+    )
     if not prefix_is_upper and not body_matches:
         return (
             f"Two failures. The prefix reads {prefix!r} rather than "
             f"{WARNING_PREFIX!r}, which fails the capitalization check required "
-            "by 27 CFR 16.22(a)(2), and the statement text does not match "
-            "27 CFR 16.21 word for word."
+            f"by 27 CFR 16.22(a)(2). {body_detail}"
         )
     if not prefix_is_upper:
         return (
@@ -182,10 +306,7 @@ def _reason_for(prefix: str, prefix_is_upper: bool, body_matches: bool) -> str:
             "The statement text itself matches 27 CFR 16.21."
         )
     if not body_matches:
-        return (
-            "The statement text does not match 27 CFR 16.21 word for word. "
-            "The prefix capitalization is correct."
-        )
+        return f"{body_detail} The prefix capitalization is correct."
     return (
         "The statement matches 27 CFR 16.21 word for word after whitespace "
         "normalization, and the prefix is in capital letters."

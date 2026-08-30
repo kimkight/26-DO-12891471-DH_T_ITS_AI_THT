@@ -149,6 +149,7 @@ function WarningDetail({ warning }: { warning: WarningResult }) {
 
   return (
     <div className="card__detail">
+      {warning.diff.length ? <WarningDiff warning={warning} /> : null}
       <h4 className="card__subtitle">Capitalization of the prefix</h4>
       <p
         className={
@@ -160,5 +161,71 @@ function WarningDetail({ warning }: { warning: WarningResult }) {
       <h4 className="card__subtitle">Bold type</h4>
       <p className="card__detail--note">{warning.bold_type_note}</p>
     </div>
+  )
+}
+
+/**
+ * The character-level difference against 27 CFR 16.21 (FR-5, ADR 0012).
+ *
+ * **Shown so the agent can tell an OCR artifact from a real defect.** The
+ * author's own COLA artwork reads the statement with one character wrong, and
+ * "does not match word for word" is true of that and of a missing clause alike.
+ * The difference between those two is the whole of the agent's decision, and
+ * they cannot make it from a verdict.
+ *
+ * Each run is marked by text as well as by styling: a run the regulation
+ * requires and the label does not show is prefixed "missing:", and a run on the
+ * label the regulation does not have is prefixed "extra:". NFR-5's greyscale
+ * rule applies here as much as to the outcome chips, and a difference conveyed
+ * by a background colour would be invisible in print and to anyone who cannot
+ * distinguish the two tints.
+ *
+ * `<del>` and `<ins>` rather than styled spans, because the two elements mean
+ * exactly this and assistive technology already knows what they are.
+ */
+function WarningDiff({ warning }: { warning: WarningResult }) {
+  const distance = warning.edit_distance ?? 0
+  const characters = distance === 1 ? 'character' : 'characters'
+
+  return (
+    <>
+      <h4 className="card__subtitle">
+        {warning.near_miss
+          ? `Difference from 27 CFR 16.21: ${distance} ${characters}`
+          : 'Difference from 27 CFR 16.21'}
+      </h4>
+      {warning.near_miss ? (
+        <p className="card__detail--note">
+          A difference this small is as likely to be a reading error as a defect on the label. It is
+          not a match, and it is not automatically a problem: check the label itself against the
+          difference below.
+        </p>
+      ) : null}
+      <p className="warning-diff">
+        {warning.diff.map((segment, index) => {
+          if (segment.kind === 'same') {
+            return <span key={index}>{segment.text}</span>
+          }
+          if (segment.kind === 'missing') {
+            return (
+              <del className="warning-diff__missing" key={index}>
+                <span className="visually-hidden"> missing: </span>
+                {segment.text}
+              </del>
+            )
+          }
+          return (
+            <ins className="warning-diff__added" key={index}>
+              <span className="visually-hidden"> extra: </span>
+              {segment.text}
+            </ins>
+          )
+        })}
+      </p>
+      <p className="card__detail--note">
+        Struck-through text is required by 27 CFR 16.21 and was not read from the label. Underlined
+        text was read from the label and is not in the regulation.
+      </p>
+    </>
   )
 }

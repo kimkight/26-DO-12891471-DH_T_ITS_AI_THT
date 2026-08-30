@@ -454,6 +454,16 @@ reads records the application emitted rather than what CloudWatch received.
 | 65 | Upload a document that answers all but one, without touching the keyboard | Exactly one editable field is on screen, the cursor is in it, and a screen reader says which value is missing and that it can be entered or a clearer image uploaded | The author's evidence, 2026-08-29; FR-13; NFR-5 |
 | 66 | Load the page and look at it before uploading anything | Unchanged from Session 10: one collapsed disclosure over the five boxes, and no summaries of values that do not exist yet | FR-13; US-24 |
 
+| 67 | Submit the mezcal COLA PDF alone and read the government warning card | The outcome is needs human review, not "does not match". The card names the number of characters, shows the exact difference with the missing character struck through, and says in words that this is not a match | The author's evidence, 2026-08-29; FR-5; ADR 0012 |
+| 68 | Submit a label whose warning is missing the clause "or operate machinery" | The outcome is a mismatch. **Needs human review on a missing clause is a failure of this test.** The difference is still shown, because it is evidence either way | FR-5; ADR 0012 |
+| 69 | Submit a label whose warning is word for word correct and whose prefix reads "Government Warning:" | The outcome is a mismatch, and the reason names capitalization. **A capitalization failure routed to needs human review is a failure of this test**: it is a defect a person caught on a real submission, not something OCR produces from a compliant label | Jenny Park interview; FR-6; ADR 0012 |
+
+Rows 67 to 69 come from the author's first problem report of 2026-08-29 read
+through to its consequence. The artwork embedded in their filing reads the
+statement with one character wrong, and rows 68 and 69 are the two ways the
+routing must not overreach: a real wording difference and a real capitalization
+defect both stay mismatches.
+
 Rows 64 to 66 come from the author's design instruction of 2026-08-29:
 "Collapse the form fields and only expand if there is something that isn't read
 in from the application or picture." Row 66 is the regression half: US-24's

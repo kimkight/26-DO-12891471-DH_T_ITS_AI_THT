@@ -135,6 +135,19 @@ export interface PhotoResult {
   error: ErrorDetail | null
 }
 
+/**
+ * One run of the character-level difference against 27 CFR 16.21 (FR-5).
+ *
+ * `kind` reads from the label's point of view, because that is what the agent
+ * is looking at: `same` is text the two agree on, `added` is text on the label
+ * the regulation does not have, and `missing` is text the regulation requires
+ * that the label does not show.
+ */
+export interface WarningDiffSegment {
+  kind: 'same' | 'added' | 'missing'
+  text: string
+}
+
 /** The warning's two checks, reported separately (FR-6, OOS-4). */
 export interface WarningResult {
   statement_found: boolean
@@ -143,6 +156,19 @@ export interface WarningResult {
   body_matches_regulation: boolean
   bold_type_checked: boolean
   bold_type_note: string
+  /**
+   * How many single-character edits separate the statement as printed from
+   * 27 CFR 16.21. Zero when they match; null when none was found.
+   */
+  edit_distance: number | null
+  /**
+   * Whether the difference is small enough to be routed to a person rather than
+   * reported as a flat mismatch (ADR 0012). **Never a pass**: the comparison is
+   * still exact, and this is one of the two failing outcomes.
+   */
+  near_miss: boolean
+  /** The character-level difference, in reading order. */
+  diff: WarningDiffSegment[]
 }
 
 export interface VerificationResult {
