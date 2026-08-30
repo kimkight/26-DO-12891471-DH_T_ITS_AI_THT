@@ -31,7 +31,7 @@
 import { useId, useState } from 'react'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
-import { ScanFrame, TileHeading } from './Ui'
+import { FilePreview, TileHeading } from './Ui'
 import { SIDES, announce } from '../lib/uploadAnnouncement'
 import { classifyUploads } from '../lib/api'
 import type { UiError } from '../lib/api'
@@ -45,7 +45,7 @@ export const ACCEPTED_UPLOADS = 'application/pdf,image/jpeg,image/png,image/webp
 const PATHS: Record<ApplicationDocumentResult['extraction_path'], string> = {
   form_fields: 'read from the boxes you filled in on the form',
   embedded_text: 'read from the text in the file',
-  ocr: 'read by looking at the pages as pictures, the way we read a label photo',
+  ocr: 'read by looking at the pages as pictures, the way we read a label image',
 }
 
 interface Props {
@@ -129,14 +129,14 @@ export function UploadPanel({
     <section className="upload-panel" aria-labelledby={headingId}>
       <TileHeading glyph="document" tone="gold">
         <h3 className="upload-panel__heading" id={headingId}>
-          Upload the label application, a photo of the label, or both
+          Upload the label application, an image of the label, or both
         </h3>
       </TileHeading>
       <p className="field__hint" id={`${headingId}-hint`}>
-        One place for everything. PDFs and photos, one file or several. We work out what each one
-        is: an application tells us what the label should say, a photo shows us what it does say. An
-        application that carries its own label artwork is enough on its own. Files are read here and
-        are not sent to TTB or kept.
+        One place for everything. PDFs and images, one file or several. We work out what each one
+        is: an application tells us what the label should say, an image of the label shows us what
+        it does say. An application that carries its own label artwork is enough on its own. Files
+        are read here and are not sent to TTB or kept.
       </p>
 
       <DropZone
@@ -160,7 +160,7 @@ export function UploadPanel({
                   on screen and a duplicate for a screen reader.
                 */}
                 {file.type.startsWith('image/') ? (
-                  <ScanFrame file={file} />
+                  <FilePreview file={file} />
                 ) : (
                   <span className="upload-panel__name">{file.name}</span>
                 )}
@@ -221,12 +221,12 @@ export function UploadPanel({
               {fromArtwork.map((entry) => entry.display_name).join(', ')}{' '}
               {fromArtwork.length === 1 ? 'was' : 'were'} read from the label artwork inside this
               application, not from its text. Those went through the same reading we use on a label
-              photo, so check them.
+              image, so check them.
             </p>
           ) : null}
           {document.label_artwork_available && !result?.label_images ? (
             <p className="field__hint">
-              This application carries its own label artwork, so you do not have to add a photo. We
+              This application carries its own label artwork, so you do not have to add an image. We
               will check that artwork. Checking the physical bottle still needs a photo of the
               bottle.
             </p>

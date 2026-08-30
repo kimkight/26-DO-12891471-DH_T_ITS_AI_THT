@@ -120,7 +120,7 @@ describe('the upload tells the agent what came out of the pictures', () => {
         screen.getByText(/were read from the label artwork inside this application/i),
       ).toBeInTheDocument(),
     )
-    expect(screen.getByText(/you do not have to add a photo/i)).toBeInTheDocument()
+    expect(screen.getByText(/you do not have to add an image/i)).toBeInTheDocument()
     // The honest half of the same sentence, in the same place.
     expect(screen.getByText(/still needs a photo of the bottle/i)).toBeInTheDocument()
   })
@@ -147,7 +147,7 @@ describe('a result checked against the application’s own artwork', () => {
     render(<SingleLabelTab />)
 
     await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
-    await waitFor(() => expect(screen.getByText(/you do not have to add a photo/i)).toBeVisible())
+    await waitFor(() => expect(screen.getByText(/you do not have to add an image/i)).toBeVisible())
     await user.click(screen.getByRole('button', { name: /check this label/i }))
 
     await waitFor(() => expect(screen.getByText(ARTWORK_LABEL_LINE)).toBeInTheDocument())

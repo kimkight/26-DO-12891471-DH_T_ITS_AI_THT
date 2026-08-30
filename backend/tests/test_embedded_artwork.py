@@ -336,5 +336,5 @@ class TestAnApplicationDocumentOnTheApiWithNoPhotograph:
         assert response.status_code == 422
         body = response.json()
         assert body["error"]["code"] == "no_label_to_check"
-        assert "photo of the label" in body["error"]["message"]
+        assert "image of the label" in body["error"]["message"]
         assert "fields" not in body

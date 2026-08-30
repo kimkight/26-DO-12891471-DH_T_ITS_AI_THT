@@ -107,7 +107,7 @@ describe('what greets the agent on the single-label view', () => {
   it('no longer frames the upload as the alternative to typing', () => {
     render(<SingleLabelTab />)
     const heading = screen.getByRole('heading', {
-      name: /Upload the label application, a photo of the label, or both/i,
+      name: /Upload the label application, an image of the label, or both/i,
     })
     expect(heading).not.toHaveTextContent(/instead/i)
     expect(screen.getByText(/One place for everything/i)).toBeInTheDocument()
@@ -116,7 +116,7 @@ describe('what greets the agent on the single-label view', () => {
   it('tells the flow in the empty state: upload, then check', () => {
     render(<SingleLabelTab />)
     const placeholder = screen.getByText(
-      /Upload the label application, a photo of the label, or both, then select/i,
+      /Upload the label application, an image of the label, or both, then select/i,
     )
     expect(placeholder).toBeInTheDocument()
     expect(placeholder).toHaveTextContent(/Check this label/i)

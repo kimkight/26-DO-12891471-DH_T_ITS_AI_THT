@@ -133,7 +133,7 @@ describe('an error', () => {
     await submitOneLabel(user)
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("We couldn't read this label. Try a clearer photo.")
+    expect(alert).toHaveTextContent("We couldn't read this label. Try a clearer image.")
     // The API's own message is kept as the detail rather than discarded.
     expect(alert).toHaveTextContent('Could not decode.')
     expect(screen.queryByText('Match')).not.toBeInTheDocument()
@@ -192,7 +192,7 @@ describe('the form', () => {
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
     expect(
       screen.getByText(
-        /Upload something to turn on the check: the label application, a photo of the label, or both/i,
+        /Upload something to turn on the check: the label application, an image of the label, or both/i,
       ),
     ).toBeInTheDocument()
   })

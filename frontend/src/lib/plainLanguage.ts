@@ -13,8 +13,8 @@
  */
 
 const MESSAGES: Record<string, string> = {
-  unreadable_image: "We couldn't read this label. Try a clearer photo.",
-  no_text_found: "We couldn't find any text on this image. Try a clearer photo.",
+  unreadable_image: "We couldn't read this label. Try a clearer image.",
+  no_text_found: "We couldn't find any text on this image. Try a clearer image.",
   unsupported_media_type: 'That file is not an image we can read. Send a JPEG, PNG, WebP or TIFF.',
   file_too_large: 'That image is too large. Send a smaller one.',
   all_photos_unreadable:

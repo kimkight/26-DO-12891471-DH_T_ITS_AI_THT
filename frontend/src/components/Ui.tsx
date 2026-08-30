@@ -1,10 +1,10 @@
 /**
  * The small presentational pieces the restyle introduced, in one place.
  *
- * A kicker, a status chip, a rounded icon tile, and the scan frame that
- * previews a chosen photograph. They are here rather than inlined because each
- * appears in more than one view, and a chip whose padding differs by a pixel
- * between two panels is the kind of thing nobody fixes later.
+ * A kicker, a status chip, a rounded icon tile, and the frame that previews a
+ * chosen file. They are here rather than inlined because each appears in more
+ * than one view, and a chip whose padding differs by a pixel between two panels
+ * is the kind of thing nobody fixes later.
  *
  * **None of them carries meaning on its own.** Every glyph is `aria-hidden`,
  * because in every case the text beside it says the same thing; NFR-5's rule
@@ -15,18 +15,20 @@
 import { useEffect, useRef } from 'react'
 
 /** The glyphs the kickers and tiles use. Geometric, and none of them a mark. */
-type GlyphName = 'scan' | 'document' | 'stack' | 'check'
+type GlyphName = 'label' | 'document' | 'stack' | 'check'
 
 const PATHS: Record<GlyphName, React.ReactNode> = {
-  // A viewfinder: four corner brackets, which is the same shape the scan frame
-  // draws in CSS at full size.
-  scan: (
+  // A bottle label: a rectangle with two lines of type on it.
+  //
+  // **It replaced a viewfinder**, four corner brackets, which was the same
+  // shape the preview frame used to draw at full size. Corner brackets mean one
+  // thing: align the subject here and the device will capture it. This
+  // application has no camera and captures nothing, and an icon that says
+  // otherwise is the same promise the old "Point." heading made (US-27).
+  label: (
     <>
-      <path d="M2.5 6V3.5A1 1 0 0 1 3.5 2.5H6" />
-      <path d="M14 2.5h2.5a1 1 0 0 1 1 1V6" />
-      <path d="M17.5 14v2.5a1 1 0 0 1-1 1H14" />
-      <path d="M6 17.5H3.5a1 1 0 0 1-1-1V14" />
-      <path d="M5.5 10h9" />
+      <path d="M2.5 4.5h15a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-15a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z" />
+      <path d="M5 8.5h10M5 11.5h6" />
     </>
   ),
   document: (
@@ -163,13 +165,25 @@ export function TileHeading({
 const CAN_PREVIEW = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
 
 /**
- * The chosen photograph, inside a scan frame with gold corner brackets.
+ * The chosen file, previewed so an agent can see what they picked.
  *
- * It exists for a reason beyond looking like a scanner. Before it, an agent who
- * chose a file got the filename back and nothing else, so a photograph of the
- * wrong bottle looked exactly like a photograph of the right one until the
- * results came back. The brackets are drawn in CSS and are decoration; the
- * image carries an alt attribute naming the file it is showing.
+ * **The panel stays; the viewfinder brackets do not** (US-27). The reason the
+ * preview exists is good and unchanged: before it, an agent who chose a file
+ * got the filename back and nothing else, so a picture of the wrong bottle
+ * looked exactly like a picture of the right one until the results came back.
+ *
+ * The four gold corner brackets were a different thing, and they fail the same
+ * test the old "Point. Upload. Check." heading failed. Corner brackets are the
+ * universal signifier of a live camera viewfinder: they mean align the subject
+ * here and the device will capture it. Nothing here is being aligned and
+ * nothing is being captured. By the time this renders the file has been chosen,
+ * uploaded and read. The brackets told an agent the tool was looking through a
+ * lens at something, which is not true, and a small untruth in the furniture is
+ * exactly what a sceptical user learns to distrust a tool over.
+ *
+ * So the frame, the image and the caption stay, because they do the job; the
+ * brackets are gone, and the class names say `preview` rather than `scan`, so
+ * the code stops calling it a scan too.
  *
  * The object URL is written straight onto the element and revoked on cleanup,
  * rather than being held in state. That is what an effect is for: synchronising
@@ -177,7 +191,7 @@ const CAN_PREVIEW = typeof URL !== 'undefined' && typeof URL.createObjectURL ===
  * render pass whose only purpose is to carry a string that the DOM node could
  * have held itself.
  */
-export function ScanFrame({ file }: { file: File }) {
+export function FilePreview({ file }: { file: File }) {
   const imageRef = useRef<HTMLImageElement>(null)
 
   useEffect(() => {
@@ -192,19 +206,15 @@ export function ScanFrame({ file }: { file: File }) {
   }, [file])
 
   return (
-    <div className="scan">
-      <div className="scan__viewport">
+    <div className="preview">
+      <div className="preview__viewport">
         {CAN_PREVIEW ? (
-          <img className="scan__image" ref={imageRef} alt={`Preview of ${file.name}`} />
+          <img className="preview__image" ref={imageRef} alt={`Preview of ${file.name}`} />
         ) : (
-          <p className="scan__fallback">Preview unavailable in this browser.</p>
+          <p className="preview__fallback">Preview unavailable in this browser.</p>
         )}
-        <span className="scan__bracket scan__bracket--tl" aria-hidden="true" />
-        <span className="scan__bracket scan__bracket--tr" aria-hidden="true" />
-        <span className="scan__bracket scan__bracket--bl" aria-hidden="true" />
-        <span className="scan__bracket scan__bracket--br" aria-hidden="true" />
       </div>
-      <p className="scan__caption">{file.name}</p>
+      <p className="preview__caption">{file.name}</p>
     </div>
   )
 }

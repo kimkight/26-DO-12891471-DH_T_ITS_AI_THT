@@ -14,7 +14,7 @@ import type { ClassificationResult, FileClassification } from '../types'
 /** The short name for each side, for the chip beside a file and for the announcement. */
 export const SIDES: Record<FileClassification['classified_as'], string> = {
   application_document: 'Label application',
-  label_image: 'Label picture',
+  label_image: 'Label image',
 }
 
 export function announce(result: ClassificationResult): string {

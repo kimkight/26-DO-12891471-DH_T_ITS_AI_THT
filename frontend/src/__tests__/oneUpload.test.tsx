@@ -105,7 +105,7 @@ describe('one control for everything', () => {
     render(<SingleLabelTab />)
     expect(
       screen.getByRole('heading', {
-        name: /Upload the label application, a photo of the label, or both/i,
+        name: /Upload the label application, an image of the label, or both/i,
       }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText('Files for this label')).toBeInTheDocument()
@@ -155,7 +155,7 @@ describe('one control for everything', () => {
     await user.upload(screen.getByLabelText('Files for this label'), [pdfFile(), pngFile()])
 
     await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
-    expect(screen.getByText('Label picture')).toBeInTheDocument()
+    expect(screen.getByText('Label image')).toBeInTheDocument()
     expect(
       screen.getByText('This is a PDF, so we read it as the label application.'),
     ).toBeInTheDocument()
@@ -300,7 +300,7 @@ describe('what the form does not carry', () => {
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() =>
-      expect(screen.getByText(/as pictures, the way we read a label photo/i)).toBeInTheDocument(),
+      expect(screen.getByText(/as pictures, the way we read a label image/i)).toBeInTheDocument(),
     )
   })
 
