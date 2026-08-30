@@ -35,6 +35,7 @@ updates every artifact the answer affects.
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size floor and the coverage claim for the embedded artwork path (ADR 0010) |
 | [OQ-25](#oq-25) | Open | Nothing; it decides which failing outcome the FR-7 proof contradiction carries |
+<!-- feature/honest-timing adds OQ-26 on the line below; keep both, in numeric order. -->
 
 ---
 
