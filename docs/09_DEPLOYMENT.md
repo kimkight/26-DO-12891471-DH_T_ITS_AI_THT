@@ -358,6 +358,31 @@ including the load balancer and the network between you and it, which is what
 NFR-1's "about 5 seconds" is actually about. The `elapsed_ms` the response body
 reports is the server's own time and will be smaller.
 
+**Take the difference between those two as unattributed, not as network time.**
+Before v1.1.0 `elapsed_ms` measured only the label-side OCR span, and the
+difference between it and the wall clock was three quarters server work.
+It now covers the whole handler, and the response carries a `timings` block
+whose phases are each measured by a timer around the work they name. If you want
+to know where a slow request went, read that block; do not subtract two numbers
+and name the remainder.
+
+**8.3a The application-document path, which is the one that missed NFR-1.**
+
+```bash
+curl -s -o /tmp/verify.json -w 'total %{time_total}s\n' \
+  -F 'files=@/path/to/your-cola-application.pdf' \
+  "$URL/api/verify"
+
+python -c "import json;t=json.load(open('/tmp/verify.json'))['timings'];print(json.dumps(t,indent=2))"
+```
+
+One file and nothing else, so the artwork embedded in it is the label side
+(ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
+reporting 3.2 s; section 9 carries the numbers and what was wrong with them. The
+`timings` block printed by the second command is the phase breakdown, and
+`ocr_passes` is the figure to look at first: a document-only submission should
+read one picture once.
+
 **8.4 The stream is a stream, and this is the step that cannot be skipped.**
 
 `X-Accel-Buffering: no` is a hint to intermediaries, not a guarantee. If
@@ -445,6 +470,54 @@ This section is the record of the runs; the README is the summary of them.
       **1.5 s end to end, 1.4 s of it inside the checker.** All five fields
       matched, and the rotation was detected and reported. **NFR-1's roughly
       five seconds is met with margin on this path.**
+- [x] **NFR-1 on the application-document path, which is a different path and
+      does not meet it.** Measured 2026-08-30, build 1.1.0, from the author's
+      browser against the deployed URL. Sample: the author's own mezcal COLA
+      document, a 382 KB PDF, submitted **alone**, so that the label artwork
+      embedded in it is the label side (ADR 0010). Three consecutive runs:
+
+      | run | wall clock | server `elapsed_ms` | server `ocr_ms` |
+      | --- | --- | --- | --- |
+      | 1 | 6883 ms | 3323 ms | 3321 ms |
+      | 2 | 6786 ms | 3214 ms | 3213 ms |
+      | 3 | 6781 ms | 3198 ms | 3196 ms |
+
+      **6.8 s end to end is outside NFR-1's roughly five seconds.** It is
+      recorded here as a miss rather than absorbed into the image path's 1.5 s,
+      because they are two different paths and one number covering both would
+      be a claim about neither.
+
+      **The instrumentation was also wrong, and wrong in the flattering
+      direction.** `elapsed_ms` and `ocr_ms` are within 2 ms of each other on
+      every run above, because `elapsed_ms` was measuring the label-side OCR
+      span rather than the request. The interface then printed the wall clock,
+      subtracted that figure and attributed the remainder to "sending the image
+      and receiving the answer". Two controls from the same page and session
+      bound what the network could have been:
+
+      - `GET /api/health` round trip: 22, 19, 25, 23, 18 ms.
+      - `POST` of the identical 382 KB file to a nonexistent path, so the bytes
+        cross the wire and nothing processes them: 68, 86, 111 ms.
+
+      About 3.5 seconds of real server work per request was therefore both
+      missing from the instrumentation and mislabelled as network time.
+      `elapsed_ms` now starts on entry to the handler and stops when the
+      response is built, and the response carries a measured phase breakdown
+      (`timings`).
+
+      **What the honest measurement found.** The picture chosen as the label
+      side was read twice: once to fill the application values and again as the
+      label side, through the identical pipeline for an identical result. That
+      read is now handed on, and reading stops once every value has been found.
+      On a session container, which is not production hardware and is quoted
+      only as a before-and-after on one machine: a one-image document went from
+      2.19 s to 1.12 s and a two-image document from 3.17 s to 1.15 s, with the
+      Tesseract passes going from two and three respectively to one.
+
+      **The 6.8 s figure above is not superseded by that.** It stands until the
+      same document is submitted to the deployed URL on a build carrying the
+      fix. Re-run it and replace this entry with the new numbers; do not
+      substitute the arithmetic.
 - [x] **One full batch at the configured cap**: 300 label images plus 300 COLA
       documents, which is 600 files in one envelope (ADR 0009).
 

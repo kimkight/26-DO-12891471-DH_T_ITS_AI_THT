@@ -45,6 +45,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
+from app import timing
 from app.application_form import UnreadableDocumentError, parse_application_document
 from app.config import settings
 from app.schemas import BatchLine, ErrorDetail, VerificationResult
@@ -228,6 +229,23 @@ def _verify_one(
         return image.filename, reconciliation, None
 
     document = table.documents[pairing_stem(image.filename)]
+    # **One recording per row, not one per batch** (NFR-1). A batch line's
+    # `elapsed_ms` is the time that row took; a share of the batch's wall clock
+    # would be a different number that happened to have the same units. This is
+    # also why the context variable in app/timing.py is deliberately not
+    # propagated into worker threads: each worker opens its own here.
+    with timing.recording():
+        return _verify_one_row(image, document)
+
+
+def _verify_one_row(
+    image: SubmittedImage, document: SubmittedDocument
+) -> tuple[str, ErrorDetail | None, VerificationResult | None]:
+    """One row's work, inside the recording opened above.
+
+    Split out so that the recording is a `with` block around the whole of it
+    rather than a try/finally around several return paths.
+    """
     try:
         # Both guards run before anything is decoded or parsed (NFR-7).
         check_media_type(image.content_type)

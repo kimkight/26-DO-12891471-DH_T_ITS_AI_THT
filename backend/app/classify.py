@@ -46,6 +46,7 @@ import re
 from dataclasses import dataclass
 from typing import Literal
 
+from app import timing
 from app.application_form import PDF_MAGIC, reads_as_application
 from app.ocr import OcrResult, UndecodableImageError, extract_text
 
@@ -153,7 +154,8 @@ def _classify_one(file: SubmittedFile) -> ClassifiedFile:
         )
 
     try:
-        result = extract_text(file.content)
+        with timing.phase("classify_ocr"):
+            result = extract_text(file.content)
     except UndecodableImageError as exc:
         return ClassifiedFile(file=file, side="label_image", basis="undecodable", error=str(exc))
 

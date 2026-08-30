@@ -98,8 +98,14 @@ import type { SingleOutcome } from '../lib/api'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { announcement, summary } from '../lib/outcomes'
+import { readingNote, spans, timingSummary } from '../lib/timing'
 import { EMPTY_APPLICATION } from '../types'
-import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
+import type {
+  ApplicationData,
+  ApplicationDocumentResult,
+  ClassificationResult,
+  PhaseTimings,
+} from '../types'
 
 /**
  * Keep only the values the agent typed themselves.
@@ -374,13 +380,20 @@ export function SingleLabelTab() {
 
         {result ? (
           <>
+            {/*
+              Two measured numbers and one honestly named difference (NFR-1).
+              This used to attribute the gap between them to "sending the image
+              and receiving the answer", which was an explanation nobody had
+              measured and which a control run showed was wrong by about three
+              and a half seconds. See src/lib/timing.ts.
+            */}
             <p className="timing">
               Checked in {outcome!.seconds.toFixed(1)} seconds.{' '}
               <span className="timing__detail">
-                {result.elapsed_ms.toFixed(0)} ms of that was inside the checker, the rest was
-                sending the image and receiving the answer.
+                {timingSummary(outcome!.seconds, result.elapsed_ms)}
               </span>
             </p>
+            {result.timings ? <TimingBreakdown timings={result.timings} /> : null}
             {/*
               One short line, once, when the label being checked came out of the
               application document rather than off a bottle (ADR 0010). It is
@@ -427,5 +440,44 @@ export function SingleLabelTab() {
         ) : null}
       </section>
     </div>
+  )
+}
+
+/**
+ * Where the server's time actually went, behind a disclosure (NFR-1).
+ *
+ * **Behind a disclosure because an agent checking a label does not need it, and
+ * on the page at all because the person who does need it has nowhere else to
+ * look.** NFR-4's benchmark is an agent who should not have to read past
+ * anything, so a phase table above the results would be the tool talking about
+ * itself in the middle of somebody's work. But a prototype that takes longer
+ * than Sarah Chen's five seconds should be able to say where the time went
+ * without anyone attaching a profiler, and until 2026-08-30 it could not: the
+ * only figure it published was measuring the wrong span.
+ *
+ * Every row is a timer around the work it names. The last row, where there is
+ * one, is what no timer covered, and it says so.
+ */
+function TimingBreakdown({ timings }: { timings: PhaseTimings }) {
+  const rows = spans(timings)
+  if (!rows.length) return null
+
+  return (
+    <details className="timing-detail">
+      <summary>Where the time went</summary>
+      <p className="field__hint">{readingNote(timings)}</p>
+      <dl className="timing-detail__list">
+        {rows.map((span) => (
+          <div className="timing-detail__row" key={span.label}>
+            <dt>{span.label}</dt>
+            <dd>{span.ms.toFixed(0)} ms</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="field__hint">
+        These are measured, not estimated. They cover the server only; time in your browser and on
+        the network is not something the server can see.
+      </p>
+    </details>
   )
 }

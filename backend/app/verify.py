@@ -25,6 +25,7 @@ import time
 from dataclasses import dataclass
 from typing import Literal
 
+from app import timing
 from app.application_form import (
     APPLICATION_FIELDS,
     SELF_CONSISTENCY_NOTE,
@@ -42,6 +43,7 @@ from app.schemas import (
     FieldResult,
     OrientationDetail,
     ParsedApplicationField,
+    PhaseTimings,
     PhotoResult,
     ReadPathDetail,
     VerificationResult,
@@ -350,7 +352,15 @@ def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _
     image rather than two.
     """
     try:
-        ocr = extract_text(content) if already is None else already
+        # The phase opens only around a read that actually happens. A handed-on
+        # result is not a Tesseract pass, and counting it as one would put the
+        # reuse this release added back out of sight in the figure that shows
+        # it worked (NFR-1).
+        if already is not None:
+            ocr = already
+        else:
+            with timing.phase("label_ocr"):
+                ocr = extract_text(content)
     except UndecodableImageError as exc:
         # Distinct from "no text found" below, because the agent's next action
         # differs: a corrupt file needs resending, a blank one needs a better
@@ -633,54 +643,66 @@ def build_result(
     function always returned: every supplied application value reads as typed,
     which is what it was, and no parsed block is reported.
     """
-    attribution = sources or {}
-    value_sources = application_sources or {}
-    comparisons = {
-        "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
-        "class_type": compare_text(parsed.class_type, application.get("class_type")),
-        "alcohol_content": compare_abv(parsed.alcohol_content, application.get("alcohol_content")),
-        "net_contents": compare_net_contents(parsed.net_contents, application.get("net_contents")),
-    }
-    label_values = {
-        "brand_name": parsed.brand_name,
-        "class_type": parsed.class_type,
-        "alcohol_content": parsed.alcohol_content,
-        "net_contents": parsed.net_contents,
-    }
-
-    # The circularity overlay (FR-14, ADR 0013), applied after the comparisons
-    # and before the rows are built, so that exactly one place decides what a
-    # row says and the comparison layer stays a function of two strings.
-    comparisons = {
-        name: (
-            _artwork_derived(name, comparison)
-            if comparison.outcome is Outcome.MATCH
-            and _is_circular(name, value_sources, label_source)
-            else comparison
-        )
-        for name, comparison in comparisons.items()
-    }
-
-    fields = [
-        FieldResult(
-            name=name,
-            display_name=FIELD_LABELS[name],
-            found_on_label=label_values[name] is not None,
-            label_value=label_values[name],
-            application_value=application.get(name) or None,
-            score=comparison.score,
-            outcome=comparison.outcome,
-            reason=comparison.reason,
-            source_photo=attribution.get(name),
-            application_value_source=value_sources.get(
-                name, "typed" if application.get(name) else "absent"
+    recorded = timing.current()
+    # The comparison itself, timed like everything else rather than left as
+    # the remainder. It is milliseconds next to a Tesseract pass, and
+    # measuring it is how that stays a fact rather than an assumption.
+    with timing.phase("compare"):
+        attribution = sources or {}
+        value_sources = application_sources or {}
+        comparisons = {
+            "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
+            "class_type": compare_text(parsed.class_type, application.get("class_type")),
+            "alcohol_content": compare_abv(
+                parsed.alcohol_content, application.get("alcohol_content")
             ),
+            "net_contents": compare_net_contents(
+                parsed.net_contents, application.get("net_contents")
+            ),
+        }
+        label_values = {
+            "brand_name": parsed.brand_name,
+            "class_type": parsed.class_type,
+            "alcohol_content": parsed.alcohol_content,
+            "net_contents": parsed.net_contents,
+        }
+
+        # The circularity overlay (FR-14, ADR 0013), applied after the
+        # comparisons and before the rows are built, so that exactly one place
+        # decides what a row says and the comparison layer stays a function of
+        # two strings.
+        comparisons = {
+            name: (
+                _artwork_derived(name, comparison)
+                if comparison.outcome is Outcome.MATCH
+                and _is_circular(name, value_sources, label_source)
+                else comparison
+            )
+            for name, comparison in comparisons.items()
+        }
+
+        fields = [
+            FieldResult(
+                name=name,
+                display_name=FIELD_LABELS[name],
+                found_on_label=label_values[name] is not None,
+                label_value=label_values[name],
+                application_value=application.get(name) or None,
+                score=comparison.score,
+                outcome=comparison.outcome,
+                reason=comparison.reason,
+                source_photo=attribution.get(name),
+                application_value_source=value_sources.get(
+                    name, "typed" if application.get(name) else "absent"
+                ),
+            )
+            for name, comparison in comparisons.items()
+        ]
+        fields.append(
+            _warning_field(
+                parsed.warning, parsed.warning_text, attribution.get("government_warning")
+            )
         )
-        for name, comparison in comparisons.items()
-    ]
-    fields.append(
-        _warning_field(parsed.warning, parsed.warning_text, attribution.get("government_warning"))
-    )
 
     return VerificationResult(
         fields=fields,
@@ -717,14 +739,57 @@ def build_result(
             ],
         ),
         ocr_confidence=ocr_confidence,
-        elapsed_ms=round(ocr_ms if elapsed_ms is None else elapsed_ms, 1),
-        ocr_ms=round(ocr_ms, 1),
+        # **The recording wins where there is one, and the reason is the defect
+        # this replaced.** ``ocr_ms`` as passed in here is the label side's OCR
+        # only, and ``elapsed_ms`` as passed in is the span around reading the
+        # label images. Neither has ever included parsing the uploaded document,
+        # lifting the pictures out of it, or reading those pictures, which on
+        # the application-document path is most of the request. Where a request
+        # is recording, both figures come from the recording and cover the whole
+        # of it; where nothing is recording, which is scripts/measure.py and the
+        # comparison tests, the old figures stand and are the truth about what
+        # those callers did.
+        elapsed_ms=(
+            recorded.total_ms
+            if recorded is not None
+            else round(ocr_ms if elapsed_ms is None else elapsed_ms, 1)
+        ),
+        ocr_ms=recorded.ocr_ms if recorded is not None else round(ocr_ms, 1),
+        timings=_timings(recorded),
         external_call_made=False,
         application_document=application_document,
         label_source=label_source,
         self_consistency_note=(
             SELF_CONSISTENCY_NOTE if label_source == "application_artwork" else None
         ),
+    )
+
+
+def _timings(recorded: timing.Recording | None) -> PhaseTimings | None:
+    """The phase block, or None where nothing was recording (NFR-1).
+
+    ``unaccounted_ms`` is a subtraction and it is the only one, which is the
+    point of reporting it separately: every other figure was measured by a timer
+    around the work it names, and what is left over is named as leftover rather
+    than attributed to whichever phase would make the numbers look tidiest.
+    """
+    if recorded is None:
+        return None
+    total = recorded.total_ms
+    accounted = recorded.accounted_ms
+    return PhaseTimings(
+        total_ms=total,
+        classify_ocr_ms=recorded.get("classify_ocr"),
+        document_pdfium_ms=recorded.get("document_pdfium"),
+        document_ocr_ms=recorded.get("document_ocr"),
+        page_ocr_ms=recorded.get("page_ocr"),
+        artwork_ocr_ms=recorded.get("artwork_ocr"),
+        label_ocr_ms=recorded.get("label_ocr"),
+        compare_ms=recorded.get("compare"),
+        ocr_ms=recorded.ocr_ms,
+        ocr_passes=recorded.ocr_passes,
+        accounted_ms=accounted,
+        unaccounted_ms=round(max(total - accounted, 0.0), 1),
     )
 
 

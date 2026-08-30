@@ -78,6 +78,7 @@ from typing import Literal
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
 
+from app import timing
 from app.config import settings
 from app.ocr import OcrLine, OcrResult, UndecodableImageError, extract_text
 from app.parse import parse_fields
@@ -187,6 +188,14 @@ class ParsedApplication:
     # The embedded image the label side can be taken from when the agent
     # supplied no photograph of their own (ADR 0010, FR-1).
     label_artwork: EmbeddedArtwork | None = None
+    # **What that image was already read to say, so it is read once.** The
+    # picture chosen as the label side is by construction a picture this module
+    # has just put through the OCR pipeline to fill the application values. The
+    # label side used to put the identical bytes through the identical pipeline
+    # again, which on the author's own filing was a second three-second pass for
+    # a result already in memory. Handing the read on is the same trick ADR 0011
+    # plays with the classifier's read, for the same reason.
+    label_artwork_read: OcrResult | None = None
 
     @property
     def found_any(self) -> bool:
@@ -263,7 +272,7 @@ class _PdfContents:
 
 def _parse_pdf(content: bytes) -> ParsedApplication:
     """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
-    with _PDFIUM_LOCK:
+    with _PDFIUM_LOCK, timing.phase("document_pdfium"):
         contents = _read_pdf_with_pdfium(content)
 
     # The artwork read happens here, outside the lock, for the reason the page
@@ -285,7 +294,8 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     # the read it precedes (see app.ocr).
     ocr_lines: list[OcrLine] = []
     for rendered in contents.rendered_pages:
-        ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
+        with timing.phase("page_ocr"):
+            ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
     if not ocr_lines and not artwork.values:
         raise UnreadableDocumentError(
             "No text could be read from the uploaded PDF, either from the file "
@@ -393,7 +403,13 @@ def _parse_image(content: bytes, *, pre_read: OcrResult | None = None) -> Parsed
     is already going through the label pipeline.
     """
     try:
-        result = extract_text(content) if pre_read is None else pre_read
+        # As in app.verify._read_one: a read handed on by the classifier is not
+        # a pass, and is not counted as one.
+        if pre_read is not None:
+            result = pre_read
+        else:
+            with timing.phase("document_ocr"):
+                result = extract_text(content)
     except UndecodableImageError as exc:
         raise UnreadableDocumentError(
             "The uploaded application document could not be decoded as an image "
@@ -423,6 +439,9 @@ class _ArtworkReading:
     images_found: int
     images_read: int
     label_artwork: EmbeddedArtwork | None
+    # The OCR result for ``label_artwork``, carried so that the label side does
+    # not read the same picture a second time. See ParsedApplication.
+    label_artwork_read: OcrResult | None = None
 
 
 def _embedded_images(
@@ -533,11 +552,14 @@ def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
     values: dict[str, str] = {}
     read_count = 0
     with_values: EmbeddedArtwork | None = None
+    with_values_read: OcrResult | None = None
     any_read: EmbeddedArtwork | None = None
+    any_read_result: OcrResult | None = None
 
     for image in images:
         try:
-            result = extract_text(image.content)
+            with timing.phase("artwork_ocr"):
+                result = extract_text(image.content)
         except UndecodableImageError as exc:
             logger.warning(
                 "embedded image could not be decoded",
@@ -547,22 +569,40 @@ def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
         if not result.has_text:
             continue
         read_count += 1
-        any_read = any_read or image
+        if any_read is None:
+            any_read, any_read_result = image, result
 
         parsed = parse_fields(result.lines)
         found = {
             name: value for name in ARTWORK_FIELDS if (value := getattr(parsed, name)) is not None
         }
-        if found:
-            with_values = with_values or image
+        if found and with_values is None:
+            with_values, with_values_read = image, result
         for name, value in found.items():
             values.setdefault(name, value)
+
+        # **Stop once there is nothing left to find.** Every remaining picture
+        # costs a full Tesseract pass, and a picture can only ever add a value
+        # no earlier picture showed: values are taken in size order and never
+        # overwritten. So once all four are in hand, the passes still to come
+        # cannot change a single thing in the response.
+        #
+        # It does not weaken the front-and-back case ADR 0010 reads several
+        # pictures for. That case is a largest picture answering only some of
+        # the four, and it does not trigger this: reading continues exactly as
+        # before until either the values are complete or the pictures run out.
+        # Nor does it change which picture becomes the label side, because the
+        # candidates arrive largest first, so the first one to yield values is
+        # the one that would have been chosen anyway.
+        if len(values) == len(ARTWORK_FIELDS):
+            break
 
     return _ArtworkReading(
         values=values,
         images_found=len(images),
         images_read=read_count,
         label_artwork=with_values or any_read,
+        label_artwork_read=with_values_read if with_values is not None else any_read_result,
     )
 
 
@@ -590,6 +630,7 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
         artwork_images_found=artwork.images_found,
         artwork_images_read=artwork.images_read,
         label_artwork=artwork.label_artwork,
+        label_artwork_read=artwork.label_artwork_read,
     )
 
 
@@ -1048,4 +1089,5 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
         artwork_images_found=parsed.artwork_images_found,
         artwork_images_read=parsed.artwork_images_read,
         label_artwork=parsed.label_artwork,
+        label_artwork_read=parsed.label_artwork_read,
     )

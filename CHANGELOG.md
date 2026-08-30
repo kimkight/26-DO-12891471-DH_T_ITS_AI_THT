@@ -306,6 +306,72 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
   a paired document's embedded artwork now fills application values its text
   layer left empty. The simplification left on the table is named as such.
 
+### Fixed
+
+- **`elapsed_ms` is elapsed, and the interface stops inventing an explanation
+  for the difference** (NFR-1). The field was measured inside
+  `verify_photos`, which starts after the multipart form is parsed, after the
+  files are classified and after the COLA document is read. On the
+  application-document path those three are most of the request. Measured
+  against the deployed build on 2026-08-30 with the author's own mezcal COLA
+  PDF, `elapsed_ms` and `ocr_ms` came back within 2 ms of each other on all
+  three runs: the field was reporting the label-side OCR span and calling itself
+  the request.
+  - The panel then printed the browser's wall clock, subtracted that figure and
+    told the agent the remainder was "sending the image and receiving the
+    answer". A control POST of the identical 382 KB file to a path that
+    processes nothing crossed the wire in 68 to 111 ms, and a health round trip
+    took 18 to 25 ms. About 3.5 seconds of real server work per request was both
+    missing from the instrumentation and mislabelled as network time.
+  - `elapsed_ms` now starts on entry to the handler and stops when the response
+    is built. The response carries a `timings` block whose phases are each
+    measured by a timer around the work they name: sorting the upload, PDFium
+    work, page OCR, artwork OCR, label OCR, and the comparison. The phases are
+    disjoint, and what no timer covered is reported as `unaccounted_ms` rather
+    than attributed to whichever phase is nearest.
+  - The panel reports the wall clock and the server's total and names their
+    difference as time in the browser and on the network, which is a location
+    rather than a mechanism. The phase breakdown is on the page behind a closed
+    disclosure.
+  - A batch line gets its own recording per row, so its figures are that row's
+    work rather than a share of the batch's.
+
+### Performance
+
+- **The label artwork is read once instead of twice** (NFR-1). The honest
+  measurement above exposed it immediately: the picture chosen as the label side
+  is by construction a picture the document parser has just put through the OCR
+  pipeline to fill the application values, and the label side was putting the
+  identical bytes through the identical pipeline again for an identical result.
+  The read is now handed on, the same way ADR 0011 already hands on the
+  classifier's read.
+- **Reading stops once every value has been found.** A further embedded picture
+  can only add a value no earlier picture showed, because values are taken in
+  size order and never overwritten. Once all four are in hand the remaining
+  passes cannot change one thing in the response, so they are not run. The
+  front-and-back case ADR 0010 reads several pictures for is untouched: a
+  largest picture that answers only some of the four does not trigger it.
+- Measured on a session container, which is not production hardware and is
+  quoted only as a before-and-after on one machine: a one-image document went
+  from **2.19 s to 1.12 s** and a two-image document from **3.17 s to 1.15 s**,
+  with Tesseract passes going from two and three respectively to **one**.
+
+### The acceptance criterion this release reports missing
+
+**The application-document path measured 6.8 s against NFR-1's roughly five
+seconds**, on the deployed target on 2026-08-30, build 1.1.0, with the author's
+own mezcal COLA PDF submitted alone: 6883, 6786 and 6781 ms over three runs. The
+image path meets NFR-1 at 1.5 s and is a different path; one number covering
+both would be a claim about neither.
+
+The figure is written into the README's performance section, into
+`docs/09_DEPLOYMENT.md` section 9 as its own line with the date, the build and
+the sample named, and raised as OQ-26. **It stands until the same document is
+submitted to the deployed URL on a build carrying the fixes above.** Halving the
+OCR passes on hardware where each pass took about 3.3 seconds should put this
+near 3.5 seconds, but that is arithmetic, and this repository does not publish
+arithmetic as measurement.
+
 ### Known limits
 
 - The size floor is a judgement about what a filing looks like, not a

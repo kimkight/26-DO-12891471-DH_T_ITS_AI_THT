@@ -488,6 +488,104 @@ class PhotoResult(BaseModel):
     )
 
 
+class PhaseTimings(BaseModel):
+    """Where a request's time went, measured rather than inferred (NFR-1).
+
+    **Every figure here was recorded by a timer around the work it names. None
+    is a subtraction.** That distinction is the whole reason this block exists:
+    the field the response used to call `elapsed_ms` measured only the label-side
+    OCR, and the interface presented the difference between it and the browser's
+    wall clock as network time. It was not network time. It was document
+    parsing, artwork extraction and a second OCR pass nobody was counting.
+
+    The phase fields are **disjoint**: no phase is opened inside another, so they
+    sum to `accounted_ms`. What `total_ms` has left over is in
+    `unaccounted_ms`, reported as its own line rather than folded into whichever
+    phase is nearest. That is multipart handling, response construction, and the
+    small change between spans; if it ever grows, it is visible instead of
+    hiding inside a number that claims to mean something else.
+    """
+
+    total_ms: float = Field(
+        description=(
+            "Everything inside the request handler, from entry to the response "
+            "being built. This is the figure NFR-1's five-second target is "
+            "about. It does not include time on the wire or in the browser, "
+            "which the server cannot see and does not guess at."
+        )
+    )
+    classify_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Reading an uploaded image to decide whether it is a form or a label (ADR 0011)."
+        ),
+    )
+    document_pdfium_ms: float = Field(
+        default=0.0,
+        description=(
+            "Everything the uploaded PDF gives up without recognition: its text "
+            "layer, its AcroForm fields, the embedded images lifted out of it, "
+            "and any page rendered for the OCR fallback. Serialized behind one "
+            "lock, because PDFium is not thread-safe."
+        ),
+    )
+    document_ocr_ms: float = Field(
+        default=0.0,
+        description="Reading an application document that arrived as an image rather than a PDF.",
+    )
+    page_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Reading PDF pages as images, which happens only when the file carried no text layer."
+        ),
+    )
+    artwork_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Reading the label artwork embedded in the application document "
+            "(ADR 0010). On a filing whose form states no alcohol content and no "
+            "net contents, which is the ordinary case under A-17, this is where "
+            "those values come from."
+        ),
+    )
+    label_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Reading the label side. Zero when the label side is artwork already "
+            "read under artwork_ocr_ms, because that read is reused rather than "
+            "repeated."
+        ),
+    )
+    compare_ms: float = Field(
+        default=0.0, description="Comparing the fields and assembling this response."
+    )
+    ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Every Tesseract pass in this request, wherever it ran: the sum of "
+            "classify_ocr_ms, document_ocr_ms, page_ocr_ms, artwork_ocr_ms and "
+            "label_ocr_ms."
+        ),
+    )
+    ocr_passes: int = Field(
+        default=0,
+        description=(
+            "How many separate reads that was. The count is the half that makes "
+            "the duration diagnosable: three passes where one would do is a fact "
+            "about the code, and a slow machine is not."
+        ),
+    )
+    accounted_ms: float = Field(default=0.0, description="The sum of the named phases above.")
+    unaccounted_ms: float = Field(
+        default=0.0,
+        description=(
+            "total_ms minus accounted_ms: multipart handling, response "
+            "construction, and the gaps between spans. Reported rather than "
+            "attributed, because nobody measured what is in it."
+        ),
+    )
+
+
 class VerificationResult(BaseModel):
     """The full single-label response (US-1, FR-1 through FR-7, ADR 0007)."""
 
@@ -505,8 +603,31 @@ class VerificationResult(BaseModel):
             "that read. Per-photograph figures are in `photos`."
         )
     )
-    elapsed_ms: float = Field(description="End-to-end time inside the request handler (NFR-1).")
-    ocr_ms: float = Field(description="Of which, decode, preprocessing and OCR.")
+    elapsed_ms: float = Field(
+        description=(
+            "End-to-end time inside the request handler (NFR-1): from entry to "
+            "the response being built, covering multipart handling, "
+            "classification, document parsing, embedded image extraction, every "
+            "OCR pass, the comparison and response construction. **Before "
+            "v1.1.0 this field measured only the label-side OCR span**, which on "
+            "the application-document path was about half the request; see "
+            "`timings` for the breakdown."
+        )
+    )
+    ocr_ms: float = Field(
+        description=(
+            "Of which, decode, preprocessing and OCR, across every pass in the "
+            "request rather than the label side alone."
+        )
+    )
+    timings: PhaseTimings | None = Field(
+        default=None,
+        description=(
+            "The phase breakdown, present on any response produced inside a "
+            "request. Null where the pipeline was called directly, for example "
+            "by scripts/measure.py, which opens no recording."
+        ),
+    )
     external_call_made: bool = Field(
         default=False,
         description=(
