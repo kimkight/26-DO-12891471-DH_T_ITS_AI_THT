@@ -248,8 +248,8 @@ export function ApplicationFields({
             {gaps.length === 1 ? 'One value was not read' : `${gaps.length} values were not read`}
           </h3>
           <p className="field__hint">
-            Enter it here, or upload a clearer picture and we will try again. Leave it empty and
-            that field is reported as not compared rather than as a mismatch.
+            Enter it here, or upload a clearer file and we will try again. Leave it empty and that
+            field is reported as not compared rather than as a mismatch.
           </p>
           {gaps.map((field, index) => textField(field, index === 0))}
         </div>

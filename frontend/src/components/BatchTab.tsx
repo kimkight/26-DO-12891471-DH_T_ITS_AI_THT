@@ -103,7 +103,7 @@ export function BatchTab() {
         <form onSubmit={submit} noValidate>
           <DropZone
             label="Label images"
-            hint="Drag files here, or choose several at once. One photograph for each label."
+            hint="Drag files here, or choose several at once. One image for each label."
             accept="image/jpeg,image/png,image/webp,image/tiff"
             multiple
             files={images}
@@ -185,8 +185,8 @@ export function BatchTab() {
       </section>
 
       <section className="panel" aria-labelledby="batch-results-heading">
-        <Kicker glyph="scan" tone="navy">
-          {running ? 'Scanning' : 'Results'}
+        <Kicker glyph="check" tone="navy">
+          {running ? 'Reading' : 'Results'}
         </Kicker>
         <h2 id="batch-results-heading">Results</h2>
 
@@ -199,14 +199,14 @@ export function BatchTab() {
         </div>
 
         {/*
-          The scanning line, while the stream is open. Decoration over the live
+          The reading line, while the stream is open. Decoration over the live
           region below it, which says the same thing to a screen reader and is
           unchanged; the dots are aria-hidden and stop moving for anyone who has
           asked for reduced motion.
         */}
         {running ? (
-          <p className="scanning">
-            <span className="scanning__pulse" aria-hidden="true">
+          <p className="reading-line">
+            <span className="reading-line__pulse" aria-hidden="true">
               <span />
               <span />
               <span />

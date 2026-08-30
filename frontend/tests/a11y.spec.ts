@@ -347,9 +347,7 @@ test.describe('what axe cannot check', () => {
     expect(family).toContain('Inter Variable')
   })
 
-  test('the chosen photograph is previewed in the scan frame, and it is decoration', async ({
-    page,
-  }) => {
+  test('the chosen file is previewed, and the viewfinder brackets are gone', async ({ page }) => {
     await page.goto('/')
     await page.getByLabel('Files for this label').setInputFiles({
       name: 'stones-throw.png',
@@ -361,15 +359,30 @@ test.describe('what axe cannot check', () => {
       ),
     })
 
-    // The preview carries the file's name as its alternative text, and the
-    // frame's corner brackets are decoration with no accessible name of their
-    // own.
+    // The preview carries the file's name as its alternative text.
     const preview = page.getByAltText('Preview of stones-throw.png')
     await expect(preview).toBeVisible()
     await expect(preview).toHaveJSProperty('naturalWidth', 1)
 
+    // **The four gold corner brackets are gone** (US-27). They were a
+    // viewfinder, and a viewfinder promises that something is about to be
+    // captured; by the time this renders the file has been chosen, uploaded
+    // and read. Asserted against the built page rather than the source,
+    // because the brackets were drawn in CSS and a stale stylesheet would put
+    // them back without touching a component.
+    await expect(page.locator('.scan__bracket')).toHaveCount(0)
+    await expect(page.locator('.preview__viewport')).toHaveCount(1)
+
     const found = await violations(page)
     expect(report(found)).toBe('')
+  })
+
+  test('the heading names what the interface does, and no longer a camera', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Upload. Read. Check.' })).toBeVisible()
+    await expect(page.getByText('Point. Upload. Check.')).toHaveCount(0)
+    await expect(page.getByText('Label scanning')).toHaveCount(0)
+    await expect(page.locator('.kicker').filter({ hasText: 'Label check' })).toBeVisible()
   })
 
   test('the primary task is on the landing page with no navigation (NFR-4)', async ({ page }) => {
@@ -406,7 +419,7 @@ test.describe('what axe cannot check', () => {
     // Each file is listed with what it was taken to be, so a misclassification
     // is visible rather than silent.
     await expect(panel.getByText('Label application', { exact: true })).toBeVisible()
-    await expect(panel.getByText('Label picture', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Label image', { exact: true })).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Remove label.png' })).toBeVisible()
 
@@ -414,9 +427,7 @@ test.describe('what axe cannot check', () => {
     await expect(panel.getByLabel('Your uploads')).toContainText(
       'application.pdf, read as a label application',
     )
-    await expect(panel.getByLabel('Your uploads')).toContainText(
-      'label.png, read as a label picture',
-    )
+    await expect(panel.getByLabel('Your uploads')).toContainText('label.png, read as a label image')
 
     expect(report(await violations(page))).toBe('')
   })

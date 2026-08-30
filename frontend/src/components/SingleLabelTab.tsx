@@ -302,8 +302,15 @@ export function SingleLabelTab() {
   return (
     <div className="layout">
       <section className="panel" aria-labelledby="submit-heading">
-        <Kicker glyph="scan">Label scanning</Kicker>
-        <h2 id="submit-heading">Point. Upload. Check.</h2>
+        <Kicker glyph="label">Label check</Kicker>
+        {/*
+          The heading names three things this interface actually performs.
+          It used to read "Point. Upload. Check.", inherited from a pattern
+          built for a phone camera; there is no camera here and nothing is
+          pointed at anything, so the first verb promised a capability the
+          tool does not have (US-27).
+        */}
+        <h2 id="submit-heading">Upload. Read. Check.</h2>
 
         <form onSubmit={submit} noValidate>
           <UploadPanel
@@ -345,8 +352,8 @@ export function SingleLabelTab() {
           </button>
           {!canCheck ? (
             <p className="field__hint">
-              Upload something to turn on the check: the label application, a photo of the label, or
-              both.
+              Upload something to turn on the check: the label application, an image of the label,
+              or both.
             </p>
           ) : null}
         </form>
@@ -425,7 +432,7 @@ export function SingleLabelTab() {
 
         {!result && !outcome?.error && !checking ? (
           <p className="placeholder">
-            Upload the label application, a photo of the label, or both, then select
+            Upload the label application, an image of the label, or both, then select
             <strong> Check this label</strong>. The five results appear here. Nothing to upload for
             the application side? Open <strong>Or type the application values</strong> and type them
             instead.

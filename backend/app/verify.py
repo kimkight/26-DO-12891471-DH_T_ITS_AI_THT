@@ -264,12 +264,12 @@ def verify_image(
 NO_LABEL_MESSAGE = (
     "There is nothing to check the application against. The application "
     "document was read, but it carries no label artwork this tool could read, "
-    "so there is no label side to compare. Add a photo of the label and run the "
+    "so there is no label side to compare. Add an image of the label and run the "
     "check again."
 )
 
 NO_FILES_MESSAGE = (
-    "No files were sent. Upload the label application, a photo of the label, or "
+    "No files were sent. Upload the label application, an image of the label, or "
     "both, and run the check again."
 )
 
