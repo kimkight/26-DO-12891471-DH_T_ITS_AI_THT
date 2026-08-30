@@ -39,7 +39,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app import batch
+from app import batch, timing
 from app.application_form import UnreadableDocumentError, parse_application_document
 from app.classify import ClassifiedFile, SubmittedFile, classify, describe
 from app.config import settings
@@ -272,6 +272,41 @@ async def verify(
 
     Nothing is persisted and nothing is logged about it.
     """
+    # **The recording opens here, which is the point of it** (NFR-1). Before
+    # v1.1.0 the clock started inside `verify_photos`, after the multipart form
+    # had been parsed, after the files had been classified and after the COLA
+    # document had been read. On the application-document path those three are
+    # most of the request, and none of them was in the number the response
+    # called `elapsed_ms`. See app/timing.py for the measurement that showed it.
+    with timing.recording() as record:
+        return await _verify(
+            record,
+            files,
+            image,
+            application_document,
+            {
+                "brand_name": brand_name,
+                "class_type": class_type,
+                "alcohol_content": alcohol_content,
+                "net_contents": net_contents,
+                "beverage_type": beverage_type,
+            },
+        )
+
+
+async def _verify(
+    record: timing.Recording,
+    files: list[UploadFile],
+    image: list[UploadFile],
+    application_document: UploadFile | None,
+    application_values: dict[str, str],
+) -> JSONResponse:
+    """The handler proper, inside the recording opened by the route.
+
+    Split out only so that the recording is a `with` block around the whole of
+    it rather than a try/finally wrapped around four return paths, each of which
+    would be a place for the clock to stop early.
+    """
     try:
         submitted = await _read_parts(files, image, application_document)
     except VerificationError as exc:
@@ -349,19 +384,17 @@ async def verify(
             if artwork is None:
                 raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
             contents = [artwork.content]
-            pre_read = [None]
+            # **The read comes with it, so this picture is read once** (NFR-1).
+            # `parse_application_document` has just put these exact bytes through
+            # this exact pipeline to fill the application values; running them
+            # through it again produced an identical result for a second full
+            # Tesseract pass, which measurement on 2026-08-30 showed was about
+            # half of this path's total time. This is the same reuse ADR 0011
+            # already does with the classifier's read.
+            pre_read = [parsed_application.label_artwork_read if parsed_application else None]
             label_source = "application_artwork"
 
-        application, sources = resolve_application(
-            {
-                "brand_name": brand_name,
-                "class_type": class_type,
-                "alcohol_content": alcohol_content,
-                "net_contents": net_contents,
-                "beverage_type": beverage_type,
-            },
-            parsed_application,
-        )
+        application, sources = resolve_application(application_values, parsed_application)
         result = verify_photos(
             contents,
             application,
@@ -388,7 +421,7 @@ async def verify(
             "files_received": len(sorted_files),
             "documents_classified": len(documents),
             "ocr_ms": result.ocr_ms,
-            "beverage_type_supplied": bool(beverage_type.strip()),
+            "beverage_type_supplied": bool(application_values["beverage_type"].strip()),
             # Counts and a path name only. No item value, no filename, nothing
             # the document said (NFR-6).
             "application_document_bytes": document_bytes,
@@ -401,6 +434,14 @@ async def verify(
             "label_source": result.label_source,
         },
     )
+    # Stamped here rather than in `build_result`, so that assembling the
+    # response body is inside the number too. It is the last thing measured and
+    # the last thing before serialisation, which is what "end to end inside the
+    # handler" has to mean if it is to mean anything (NFR-1).
+    result.elapsed_ms = record.total_ms
+    if result.timings is not None:
+        result.timings.total_ms = record.total_ms
+        result.timings.unaccounted_ms = round(max(record.total_ms - record.accounted_ms, 0.0), 1)
     return JSONResponse(status_code=200, content=result.model_dump())
 
 

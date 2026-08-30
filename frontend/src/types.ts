@@ -171,13 +171,46 @@ export interface WarningResult {
   diff: WarningDiffSegment[]
 }
 
+/**
+ * Where the server's time went, measured rather than inferred (NFR-1).
+ *
+ * Every figure is a timer around the work it names. `unaccounted_ms` is the
+ * only subtraction, and it is reported as leftover rather than attributed to
+ * anything, which is the whole difference from what this replaced: the panel
+ * used to subtract the server's figure from the browser's wall clock and tell
+ * the agent the remainder was "sending the image".
+ */
+export interface PhaseTimings {
+  /** Everything inside the request handler, from entry to response built. */
+  total_ms: number
+  classify_ocr_ms: number
+  document_pdfium_ms: number
+  document_ocr_ms: number
+  page_ocr_ms: number
+  artwork_ocr_ms: number
+  label_ocr_ms: number
+  compare_ms: number
+  /** Every Tesseract pass in the request, and how many there were. */
+  ocr_ms: number
+  ocr_passes: number
+  accounted_ms: number
+  unaccounted_ms: number
+}
+
 export interface VerificationResult {
   fields: FieldResult[]
   warning_detail: WarningResult
   photos: PhotoResult[]
   ocr_confidence: number
+  /**
+   * End to end inside the request handler: multipart handling, classification,
+   * document parsing, image extraction, every OCR pass, the comparison and the
+   * response. Before v1.1.0 this measured the label-side OCR span alone.
+   */
   elapsed_ms: number
   ocr_ms: number
+  /** The phase breakdown. Null on a response the server produced without one. */
+  timings: PhaseTimings | null
   external_call_made: boolean
   application_document: ApplicationDocumentResult | null
   /** What each submitted file was taken to be, in submission order (FR-12). */

@@ -34,6 +34,7 @@ updates every artifact the answer affects.
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size floor and the coverage claim for the embedded artwork path (ADR 0010) |
+| [OQ-26](#oq-26) | Open | Nothing; it is the deployed re-measurement that would close or confirm the NFR-1 miss on the application-document path |
 
 ---
 
@@ -1223,3 +1224,48 @@ label has it reported as the label side, in the response and on screen, where
 the agent can see it. It bounds the claim that this works across filings, and it
 is the reason no such claim is made.
 
+
+
+## OQ-26
+**Does the application-document path meet NFR-1 once the duplicated OCR pass is
+gone, on the deployed target rather than on a session container?**
+
+**Status: Open, 2026-08-30.**
+
+*(OQ-25 is added on `feature/artwork-derived-values`. If both branches land, the
+index above carries both rows; keep them in numeric order.)*
+
+**What is measured.** The author submitted their own mezcal COLA document, a
+382 KB PDF, alone to the deployed URL on 2026-08-30, build 1.1.0, three
+consecutive runs from the browser: 6883, 6786 and 6781 ms wall clock. That is
+outside NFR-1's roughly five seconds, and it is recorded as a miss in the README
+and in [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9.
+
+**What was wrong with the number beside it.** The response reported `elapsed_ms`
+of 3323, 3214 and 3198 ms, within 2 ms of `ocr_ms` on every run, because
+`elapsed_ms` was measuring the label-side OCR span rather than the request. Two
+controls from the same session bound the network at 18 to 25 ms for a health
+round trip and 68 to 111 ms for a POST of the same file to a path that processes
+nothing, so the roughly 3.5 seconds the interface was calling "sending the
+image" was server work nobody was counting.
+
+**What changed.** `elapsed_ms` now covers the handler end to end, the response
+carries a measured phase breakdown, and the picture chosen as the label side is
+read once instead of twice. On a session container a one-image document went
+from 2.19 s to 1.12 s and a two-image document from 3.17 s to 1.15 s, with the
+Tesseract passes going from two and three to one.
+
+**Why this is still open.** A session container is not a Fargate task behind a
+load balancer, and halving the number of OCR passes on hardware where each pass
+took about 3.3 seconds *should* put this near 3.5 seconds, but that is
+arithmetic. This repository does not publish arithmetic as measurement
+([README](../README.md), "Measured performance and accuracy"). The 6.8 s figure
+stands until it is re-measured.
+
+**What would answer it:** deploy a build carrying this change and re-run
+`docs/09_DEPLOYMENT.md` step 8.3a with the same document, recording the wall
+clock and the `timings` block. `ocr_passes` should read 1.
+
+**Who can answer:** the author, with the deployed URL and that PDF.
+**Blocks:** nothing in the prototype. It blocks any claim that NFR-1 is met on
+this path, which is why no such claim is made.

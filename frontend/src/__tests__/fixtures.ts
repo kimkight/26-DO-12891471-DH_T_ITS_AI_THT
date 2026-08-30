@@ -7,6 +7,7 @@ import type {
   FileClassification,
   Outcome,
   ParsedApplicationField,
+  PhaseTimings,
   PhotoResult,
   VerificationResult,
   WarningResult,
@@ -70,6 +71,29 @@ export function warningDetail(overrides: Partial<WarningResult> = {}): WarningRe
   }
 }
 
+/**
+ * The phase breakdown as the API returns it (NFR-1). The defaults are the shape
+ * of a photograph submission: one label read, a little comparison, and no
+ * document work at all.
+ */
+export function phaseTimings(overrides: Partial<PhaseTimings> = {}): PhaseTimings {
+  return {
+    total_ms: 540,
+    classify_ocr_ms: 0,
+    document_pdfium_ms: 0,
+    document_ocr_ms: 0,
+    page_ocr_ms: 0,
+    artwork_ocr_ms: 0,
+    label_ocr_ms: 530,
+    compare_ms: 0.3,
+    ocr_ms: 530,
+    ocr_passes: 1,
+    accounted_ms: 530.3,
+    unaccounted_ms: 9.7,
+    ...overrides,
+  }
+}
+
 export function verification(outcomes: Outcome[] = ['match', 'match', 'match', 'match', 'match']) {
   const names = [
     'brand_name',
@@ -85,6 +109,7 @@ export function verification(outcomes: Outcome[] = ['match', 'match', 'match', '
     ocr_confidence: 95.4,
     elapsed_ms: 540,
     ocr_ms: 530,
+    timings: phaseTimings(),
     external_call_made: false,
     application_document: null,
     files: [],

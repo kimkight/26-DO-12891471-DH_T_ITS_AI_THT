@@ -140,6 +140,23 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     await page.getByRole('button', { name: 'Check this label' }).click()
     await expect(page.getByText(/Checked in/).first()).toBeVisible()
 
+    // The panel names the difference between the two clocks as a location, and
+    // no longer as a mechanism nobody measured (NFR-1).
+    await expect(page.locator('.timing__detail')).toContainText(
+      'in your browser and on the network',
+    )
+    await expect(page.getByText(/sending the image/)).toHaveCount(0)
+
+    // The breakdown is on the page and closed, and axe checks it open too,
+    // because a disclosure nobody opens is not a disclosure that was checked.
+    await expect(page.getByText('Where the time went')).toBeVisible()
+    const before = await violations(page)
+    expect(report(before)).toBe('')
+
+    await page.getByText('Where the time went').click()
+    await expect(page.getByText('Reading the label')).toBeVisible()
+    await expect(page.getByText(/These are measured, not estimated/)).toBeVisible()
+
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
@@ -597,6 +614,23 @@ const RESULT = {
   ocr_confidence: 94.1,
   elapsed_ms: 540,
   ocr_ms: 530,
+  // The phase breakdown (NFR-1). Present so that axe sees the disclosure and
+  // the definition list inside it, which are the markup this release added
+  // below the results.
+  timings: {
+    total_ms: 540,
+    classify_ocr_ms: 0,
+    document_pdfium_ms: 0,
+    document_ocr_ms: 0,
+    page_ocr_ms: 0,
+    artwork_ocr_ms: 0,
+    label_ocr_ms: 530,
+    compare_ms: 0.3,
+    ocr_ms: 530,
+    ocr_passes: 2,
+    accounted_ms: 530.3,
+    unaccounted_ms: 9.7,
+  },
   external_call_made: false,
   application_document: null,
 }
