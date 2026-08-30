@@ -217,6 +217,57 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
   `POST /api/read-application` does: the parsed values have to reach the agent as
   editable fields before the comparison runs.
 
+### Changed: the interface stops talking about taking a picture
+
+- **The heading is "Upload. Read. Check."** (US-27). It read "Point. Upload.
+  Check.", transcribed in Session 9 from a pattern written for a phone camera.
+  This application has no camera. Nothing is pointed at anything; a file is
+  chosen and uploaded, and the first word described a capability the tool does
+  not have.
+- **The rule applied across the sweep is narrower than "remove the word
+  photo".** A word that implies the tool takes the picture goes. A word that
+  names a file the agent already has stays: "photo", "photograph" and "scan"
+  are all correct as nouns for something being uploaded, and replacing them
+  would make the copy vaguer without making it truer.
+- Strings changed: the `LABEL SCANNING` kicker is now `LABEL CHECK`; the batch
+  results kicker says `READING` rather than `SCANNING` while the stream is
+  open; "Upload the label application, a photo of the label, or both" is "an
+  image of the label", in the upload heading, the results empty state, the
+  disabled-check hint and the API's own `no_files` message; "PDFs and photos"
+  is "PDFs and images", and "a photo shows us what it does say" is "an image of
+  the label shows us what it does say"; "One photograph for each label" on the
+  batch picker is "One image for each label"; "upload a clearer picture" is
+  "upload a clearer file"; "Try a clearer photo" is "Try a clearer image" on
+  both unreadable-image messages; a file classified as the label side is a
+  "Label image" rather than a "Label picture"; "the way we read a label photo"
+  and "the same reading we use on a label photo" both say "label image"; "you
+  do not have to add a photo" says "add an image"; and the API's
+  `no_label_to_check` message says "Add an image of the label".
+- Strings deliberately kept, and asserted so a later sweep does not take them:
+  "Try clearer photos, in better light" for a submission where every photograph
+  failed, because those are the agent's own photographs and retaking them is
+  the right advice; "a photo or scan of the form" and "A PDF, or a scan or
+  photograph of the form", because both name files an agent holds; "Your
+  photos", "Photo 2" and "Read from photo 2"; and "it was saved sideways by the
+  camera", which is a fact the EXIF tag states about the file.
+- **The viewfinder brackets are gone; the preview stays.** The four gold corner
+  brackets around the chosen file failed the same test the heading did: corner
+  brackets mean align the subject here and the device will capture it, and by
+  the time that panel renders the file has been chosen, uploaded and read. The
+  frame, the image and the caption stay, because the reason they exist is good
+  and unrelated: before them, an agent who chose the wrong file could not tell
+  until the results came back. The `scan*` class names are now `preview*`, the
+  batch progress line's `scanning*` classes are `reading-line*`, and the
+  viewfinder kicker glyph is replaced by a label glyph, so the code stops
+  calling it a scan too.
+- Everything from Session 9 that does not concern capture is untouched: the
+  palette, the pill controls, the key-value result rows, the status chips, the
+  persistent prototype banner and its exact wording, and the footer.
+- Regression-gated as always: axe green over the built page including the
+  removed brackets and the new heading, the computed-contrast check green, the
+  keyboard walk unchanged, and the live-region announcements updated to the new
+  strings.
+
 ### Documented, not built
 
 - **A judged scope line on bottle photography**

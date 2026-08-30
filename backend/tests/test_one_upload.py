@@ -204,7 +204,7 @@ class TestWhatIsRefused:
         body = response.json()
         assert body["error"]["code"] == "no_files"
         assert (
-            "Upload the label application, a photo of the label, or both"
+            "Upload the label application, an image of the label, or both"
             in (body["error"]["message"])
         )
         assert "fields" not in body
@@ -218,7 +218,7 @@ class TestWhatIsRefused:
         assert response.status_code == 422
         body = response.json()
         assert body["error"]["code"] == "no_label_to_check"
-        assert "Add a photo of the label" in body["error"]["message"]
+        assert "Add an image of the label" in body["error"]["message"]
         assert "fields" not in body
 
     def test_more_than_one_application_document(self):

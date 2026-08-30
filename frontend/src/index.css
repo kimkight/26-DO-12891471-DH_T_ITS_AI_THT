@@ -746,21 +746,25 @@ main {
   margin-bottom: 0.75rem;
 }
 
-/* ------------------------------------------------------------- scan frame */
+/* ----------------------------------------------------------- file preview */
 
 /*
- * The chosen photograph, previewed inside a rounded panel with gold corner
- * brackets: a scan frame. It is the centrepiece of the single-label view and it
- * exists for a reason beyond looking like one. Before it, an agent choosing a
- * file got the filename back and nothing else, and a photograph of the wrong
- * bottle looked exactly like a photograph of the right one until the results
- * came back five seconds later.
+ * The chosen file, previewed inside a rounded panel.
  *
- * The brackets are drawn in CSS, from the same gold as the rest of the accent.
- * They are decoration, and the image beside them carries an alt attribute
- * naming the file, so nothing here is load-bearing for a screen reader.
+ * **The panel earns its place; the gold corner brackets did not** (US-27).
+ * Before this preview existed an agent choosing a file got the filename back
+ * and nothing else, and a picture of the wrong bottle looked exactly like a
+ * picture of the right one until the results came back. That is worth a frame.
+ *
+ * The four brackets were a viewfinder, and a viewfinder is a promise that
+ * something is about to be captured. Nothing is: by the time this renders the
+ * file has been chosen, uploaded and read. They went with the "Point." in the
+ * heading above them, for the same reason.
+ *
+ * What is left carries no meaning a screen reader needs: the image has an alt
+ * attribute naming the file, and the caption names it again in text.
  */
-.scan {
+.preview {
   position: relative;
   margin: 0 0 0.75rem;
   padding: 0.875rem;
@@ -769,7 +773,7 @@ main {
   border-radius: var(--radius-control);
 }
 
-.scan__viewport {
+.preview__viewport {
   position: relative;
   display: flex;
   align-items: center;
@@ -780,7 +784,7 @@ main {
   background: var(--page);
 }
 
-.scan__image {
+.preview__image {
   display: block;
   max-width: 100%;
   max-height: 14rem;
@@ -789,7 +793,7 @@ main {
 
 /* Shown where the browser cannot make an object URL, and in the test
    environment, which has no such API. The frame still reads as a frame. */
-.scan__fallback {
+.preview__fallback {
   margin: 0;
   padding: 2rem 1rem;
   color: var(--text-muted);
@@ -797,47 +801,7 @@ main {
   text-align: center;
 }
 
-.scan__bracket {
-  position: absolute;
-  width: 1.125rem;
-  height: 1.125rem;
-  border: 2px solid var(--gold);
-  pointer-events: none;
-}
-
-.scan__bracket--tl {
-  top: 0.375rem;
-  left: 0.375rem;
-  border-right: 0;
-  border-bottom: 0;
-  border-top-left-radius: 6px;
-}
-
-.scan__bracket--tr {
-  top: 0.375rem;
-  right: 0.375rem;
-  border-left: 0;
-  border-bottom: 0;
-  border-top-right-radius: 6px;
-}
-
-.scan__bracket--bl {
-  bottom: 0.375rem;
-  left: 0.375rem;
-  border-right: 0;
-  border-top: 0;
-  border-bottom-left-radius: 6px;
-}
-
-.scan__bracket--br {
-  bottom: 0.375rem;
-  right: 0.375rem;
-  border-left: 0;
-  border-top: 0;
-  border-bottom-right-radius: 6px;
-}
-
-.scan__caption {
+.preview__caption {
   margin: 0.625rem 0 0;
   font-size: 0.8125rem;
   color: var(--text-muted);
@@ -1305,15 +1269,15 @@ main {
   text-align: center;
 }
 
-/* --------------------------------------------------------- scanning widget */
+/* ---------------------------------------------------------- reading line */
 
 /*
- * The batch run, as a live scanning panel: a status line while the NDJSON
- * stream is open, rows arriving one at a time, and a running total pinned under
+ * The batch run, as a live status line while the NDJSON stream is open, rows
+ * arriving one at a time, and a running total pinned under
  * them. Presentation only. The stream, the progress element and the live-region
  * announcements are unchanged; this is what they look like.
  */
-.scanning {
+.reading-line {
   display: flex;
   align-items: center;
   gap: 0.625rem;
@@ -1332,29 +1296,29 @@ main {
  * it again to a screen reader. Anyone who has asked for reduced motion gets
  * three static dots, which still reads as a state.
  */
-.scanning__pulse {
+.reading-line__pulse {
   display: inline-flex;
   gap: 0.25rem;
   flex: none;
 }
 
-.scanning__pulse span {
+.reading-line__pulse span {
   width: 0.375rem;
   height: 0.375rem;
   border-radius: 50%;
   background: currentColor;
-  animation: scanning-pulse 1.1s ease-in-out infinite;
+  animation: reading-pulse 1.1s ease-in-out infinite;
 }
 
-.scanning__pulse span:nth-child(2) {
+.reading-line__pulse span:nth-child(2) {
   animation-delay: 0.18s;
 }
 
-.scanning__pulse span:nth-child(3) {
+.reading-line__pulse span:nth-child(3) {
   animation-delay: 0.36s;
 }
 
-@keyframes scanning-pulse {
+@keyframes reading-pulse {
   0%,
   100% {
     opacity: 0.3;

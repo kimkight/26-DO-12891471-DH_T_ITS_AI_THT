@@ -1221,3 +1221,82 @@ box belongs, rather than a panel opening onto five of which one matters. What is
 kept from the disclosure idea is everything that made it good, and it is in the
 acceptance criteria above: focus lands on the missing field, the view scrolls to
 it, and a live region says which one and why.
+
+### US-27 Do not tell me to point something at a label
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, FR-12 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's observation, 2026-08-30 |
+
+**As a** compliance agent at a desk with a mouse and a folder of files,
+**I want** the interface to describe what it actually does,
+**So that** I can tell the difference between the things it is right about and
+the things it is not.
+
+**Acceptance criteria**
+
+```
+Given the single-label view
+When  it loads
+Then  its heading names three actions this application performs
+And   none of them is pointing a camera at anything
+```
+
+```
+Given any string the interface renders
+When  it refers to how a file gets here
+Then  it describes uploading a file I already have
+And   it never implies the tool takes a picture
+```
+
+```
+Given a word that names a file I am holding, such as "photo" or "scan"
+When  it appears in the copy
+Then  it stays, because it is correct there
+```
+
+```
+Given the panel that previews the file I chose
+When  it renders
+Then  it shows the file and its name
+And   it carries no viewfinder brackets
+```
+
+```
+Given every change above
+When  the accessibility gates run
+Then  axe reports no violation, the computed contrast check passes,
+And   the keyboard walk is unchanged
+And   the live-region announcements say the new strings
+```
+
+**Why this is a story rather than a copy tweak.** The application has no camera.
+Nothing is pointed at anything; a file is chosen and uploaded. The heading read
+"Point. Upload. Check.", transcribed in Session 9 from a ConductorIQ pattern
+built for a phone, and the first word described a capability this tool does not
+have.
+
+That matters more here than it would elsewhere, and the reason is in the
+interviews. Dave Morrison's account of tools like this is that they get trusted
+or they get worked around, and Jenny Park rejected a real filing over title
+case. These are people who read closely and who notice when a thing does not do
+what it says. Copy that promises a camera to an agent holding a mouse is small,
+and it is the same kind of small as a match chip on a comparison that could not
+have failed: it costs nothing to fix and it costs trust to leave.
+
+**What the rule is not.** It is not "remove the word photo". "Photo",
+"photograph" and "scan" are correct nouns for a file an agent already has, and
+replacing them would make the copy vaguer without making it truer. The word to
+remove is the one that implies the tool takes the picture.
+
+**The viewfinder brackets go with it.** The four gold corner brackets around the
+file preview fail the same test the heading failed: corner brackets mean align
+the subject here and the device will capture it. By the time that panel renders,
+the file has been chosen, uploaded and read. The preview itself stays, because
+the reason it exists is good and unrelated: before it, an agent who chose the
+wrong file could not tell until the results came back.
