@@ -185,6 +185,7 @@ class TestElapsedIsElapsed:
             "compare_ms",
             "ocr_ms",
             "ocr_passes",
+            "tesseract_reads",
             "accounted_ms",
             "unaccounted_ms",
             "total_ms",
@@ -211,6 +212,22 @@ class TestThePictureIsReadOnce:
         assert body["timings"]["ocr_passes"] == 1
         assert body["timings"]["artwork_ocr_ms"] > 0
         assert body["timings"]["label_ocr_ms"] == 0
+
+    def test_the_engine_invocations_inside_that_pass_are_counted_too(self, artwork):
+        """One pass is not one invocation, and the response says both (v1.1.0).
+
+        A pass is one picture read end to end; a read is one call into
+        Tesseract. The arms added in v1.1.0 all happen inside a pass, so a
+        release that tripled the engine calls would leave `ocr_passes` at 1 and
+        nothing would show it. That is the same class of mistake the 2026-08-30
+        finding was, which is what this module exists for.
+        """
+        body, _ = verify(document([artwork]))
+
+        timings = body["timings"]
+        assert timings["tesseract_reads"] >= timings["ocr_passes"]
+        # The orientation call plus at least one image read, per picture read.
+        assert timings["tesseract_reads"] >= 2
 
     def test_the_reused_read_produces_the_same_answers(self, artwork):
         """Reuse is only worth having if it changes nothing but the clock."""

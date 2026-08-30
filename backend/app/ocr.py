@@ -121,10 +121,14 @@ LOW_ORIENTATION_CONFIDENCE = 1.0
 #
 # So: mean word confidence ranks, and only a tie on it is broken by how much
 # text was recovered. One point is above both measured gaps and far below every
-# gap the v1.0.1 measurement recorded between a variant that helped and one
-# that did not: over the twelve-label sample set the preprocessed and plain
-# reads were never closer than 26.6 points apart in a case where they
-# disagreed. Nothing that release decided is decided differently here.
+# gap the v1.0.1 comparison actually has to settle. Re-measured over the
+# twelve-label sample set on 2026-08-30: on the clean renderings the comparison
+# never runs at all, because the preprocessed read clears
+# PREPROCESS_SHORT_CIRCUIT_CONFIDENCE on all twelve and nothing else is read;
+# on the same set degraded to a photograph-like fixture, where both arms are
+# read every time, the two are never closer than 29.0 points apart. So the band
+# fires on no case in that set, and nothing v1.0.1 decided is decided
+# differently here.
 EQUAL_CONFIDENCE_BAND = 1.0
 
 # What counts as colour a grayscale conversion would discard. Both figures are
