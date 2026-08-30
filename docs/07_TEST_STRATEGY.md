@@ -79,9 +79,8 @@ rather than leaving this paragraph stale.
 
 Both OSD misreads were on the sample with the least text on it, and both
 reported an orientation confidence below 1.0 where every correct answer was
-above 11. The figure is reported in the response rather than used to override
-the answer: there is nothing better to fall back to, and an agent who can see
-that the tool was unsure can retake the photograph.
+above 11. That figure is the floor, and until v1.1.0 it was only reported. See
+"What v1.1.0 added below the floor" below.
 
 Downscaling the image before the OSD call was measured and rejected: at a
 900-pixel long edge accuracy fell to 38 of 48, and at 600 pixels to 22 of 48,
@@ -108,6 +107,47 @@ soft-contrast image produces noise rather than glyphs, and OSD cannot judge
 noise. That is the whole of the reported blackout: the EXIF tag was applied
 correctly, the threshold destroyed the image, OSD turned what was left the wrong
 way, and the read came back empty.
+
+**What v1.1.0 added below the floor.** The 46 of 48 above is untouched and above
+the floor OSD still decides alone. What is added is that a verdict *below* the
+floor stops being applied on trust. The author's mezcal COLA artwork produced
+one on 2026-08-30: 180 degrees at a confidence of 0.03, applied, and the brand
+read as `AMoviy TS`.
+
+The four-rotation sweep rejected above is not what was added, and the difference
+is the reason this is safe. That sweep loses because it cannot separate 0 from
+90; below is the same score on the same artwork, over all four rotations:
+
+| Image variant | rot 0 | rot 90 | rot 180 | rot 270 |
+| --- | --- | --- | --- | --- |
+| Colour | 257 words, 89.1 | 257 words, 89.7 | 254 words, 35.3 | 253 words, 35.5 |
+| Grayscale | 106 words, 89.9 | 109 words, 88.4 | 107 words, 30.4 | 116 words, 31.9 |
+
+0 against 90 is a difference of 0.6 and 1.5 points, which is nothing. 0 against
+180 is more than fifty. So below the floor the verdict is scored against its
+opposite alone, two rotations and never four, and a tie leaves Tesseract's
+answer in place. `backend/tests/test_orientation_floor.py` asserts the
+mechanism, both directions of override, and that a verdict at or above the floor
+is not second-guessed at all.
+
+**And what v1.1.0 added beside the grayscale: the colour image.** Every variant
+in the tables above is grayscale, and none of them is the image the file holds.
+On a label printed in more than two tones a threshold separates two luminance
+classes and not three, so an ink class dissolves; and mean word confidence
+cannot detect that, because a word that was never read contributes no confidence
+to lower. On the author's artwork the grayscale read scored 89.9 against the
+colour read's 89.1 while being the one that lost `42% ALC BY VOL` outright.
+
+| Where the read is taken | Words | Mean confidence | `42% ALC BY VOL` |
+| --- | --- | --- | --- |
+| Colour, as the file holds it | 257 | 89.1 | read |
+| Upright grayscale | 106 | 89.9 | not read |
+
+The decision, the chroma measurement that decides which images pay for it, and
+the one-point band that lets coverage break a tie on confidence, are
+[ADR 0014](adr/0014-colour-as-an-ocr-candidate.md).
+`backend/tests/test_colour_arm.py` carries the assertions, including the
+regression guard that more words never beats a materially higher confidence.
 
 **Preprocessing is compared against no preprocessing, per image.** The same
 degradation shows that thresholding can be worse than nothing at the read as
@@ -534,5 +574,14 @@ says is manual by nature, is the screen reader pass and the greyscale check.
   that limit is OQ-22.
 - Sample label artwork is generated or sourced by the contributor and is
   git-ignored; see `samples/README.md` for why.
+- **No extracted image is written, logged, or kept, and a signature is not read
+  at all.** A filed application carries the applicant's handwritten signature,
+  which is the most personal artefact on the form. Nothing lifts an embedded
+  image out of a document to disk or to a log line at any point, and the
+  rejection record the response carries holds a page number, two dimensions and
+  a named reason and nothing else, asserted on the record's fields in
+  `backend/tests/test_embedded_artwork.py` rather than on one instance of it.
+  The signature-shaped fixtures in that module are strokes drawn from
+  arithmetic; no signature, real or imitated, is committed.
 - Ground truth lives in `samples/expected.csv` and is version controlled once it
   exists, because accuracy numbers are meaningless without a fixed reference.

@@ -16,7 +16,9 @@ fixture is generated at test time by ``samples/formmaker.py`` and
 from __future__ import annotations
 
 import io
+import math
 import sys
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,36 @@ from app.application_form import (  # noqa: E402
     parse_application_document,
 )
 from app.config import settings  # noqa: E402
+from app.verify import document_result  # noqa: E402
 from tests.conftest import requires_fonts, requires_tesseract  # noqa: E402
+
+
+def signature_strip(width: int, height: int) -> bytes:
+    """A picture shaped like a handwritten signature, drawn here, never real.
+
+    Ink strokes rather than a solid mark, so that what rejects it is the floor
+    and not an empty image failing to decode, and so that a floor which let it
+    through would demonstrably hand OCR something to misread. Nothing about it
+    resembles any person's signature: it is three sine-ish strokes drawn from
+    arithmetic.
+    """
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    baseline = height // 2
+    amplitude = height // 3
+    for offset, step in ((0, 7), (width // 3, 11), (2 * width // 3, 5)):
+        points = [
+            (
+                offset + x,
+                baseline + int(amplitude * math.sin(x / max(1, step)) * math.cos(x / 40)),
+            )
+            for x in range(0, width // 3, 3)
+        ]
+        if len(points) > 1:
+            draw.line(points, fill="black", width=max(2, height // 60), joint="curve")
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def solid_png(width: int, height: int) -> bytes:
@@ -213,6 +244,125 @@ class TestTheSizeFloor:
         )
 
         assert parsed.artwork_images_found == 0
+
+
+class TestTheApplicantsSignatureIsNeverLabelArtwork:
+    """The shape test, which is the one a better scanner cannot defeat (v1.1.0).
+
+    A filed TTB F 5100.31 carries the applicant's handwritten signature. It is
+    not label artwork, and it is the most personal artefact on the form: the
+    standing rule on this repository is that no real applicant's data is
+    handled or committed, and reading a signature through an OCR pipeline and
+    letting what comes back fill a compliance field is the opposite of that.
+
+    The author's own document carries the signature at 687 by 195, which the two
+    absolute floors reject twice over. That is not the interesting case. The
+    interesting case is the same strip scanned at 300 dpi rather than 100: about
+    2000 by 580, which clears the short-edge floor and clears the area floor by
+    more than four times, and is still a signature. An absolute size is a
+    property of the scanner. The shape is a property of the thing scanned.
+    """
+
+    def test_the_authors_own_signature_is_rejected_on_size(self):
+        """687 by 195, and the reason reported is the first floor it fails."""
+        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[signature_strip(687, 195)])
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert parsed.artwork_images_found == 0
+        assert [image.reason for image in parsed.artwork_images_rejected] == ["short_edge"]
+
+    def test_the_same_signature_scanned_larger_is_rejected_on_shape(self):
+        """The case no absolute floor catches, asserted against both of them.
+
+        Both size floors are asserted to pass here rather than assumed to, so
+        that this test cannot quietly start passing for the wrong reason if
+        somebody raises one of them.
+        """
+        width, height = 2000, 580
+        assert min(width, height) >= settings.min_artwork_edge_px
+        assert width * height >= settings.min_artwork_pixels
+
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()), images=[signature_strip(width, height)]
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert parsed.artwork_images_found == 0
+        assert [image.reason for image in parsed.artwork_images_rejected] == ["aspect_ratio"]
+
+    def test_a_rejection_carries_no_trace_of_the_picture(self):
+        """NFR-6. The page, the size, the reason, and nothing else.
+
+        Asserted on the fields of the record rather than on one instance,
+        because the thing being prevented is somebody adding the bytes to it
+        later for debugging and shipping it.
+        """
+        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[signature_strip(2000, 580)])
+
+        parsed = parse_application_document(pdf, "application/pdf")
+        rejected = parsed.artwork_images_rejected[0]
+
+        assert {field.name for field in fields(rejected)} == {"page", "width", "height", "reason"}
+        assert rejected.page == 2
+
+
+@requires_tesseract
+@requires_fonts
+class TestTheArtworkIsChosenOverTheSignature:
+    """The author's document, in the shape it actually has.
+
+    Page 1 is the form, page 2 carries the signature, page 3 carries the label
+    artwork. The artwork is what the check has to run on, and the response has
+    to say so: which page it came from, what else was in the file, and why each
+    of those was not used.
+    """
+
+    def test_the_artwork_is_read_and_the_signature_is_not(self, label_artwork):
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(2000, 580), label_artwork],
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert parsed.artwork_images_found == 1
+        assert parsed.artwork_images_read == 1
+        assert parsed.label_artwork is not None
+        assert parsed.label_artwork.page == 3
+        assert [image.reason for image in parsed.artwork_images_rejected] == ["aspect_ratio"]
+
+    def test_the_values_come_off_the_artwork_and_not_off_the_signature(self, label_artwork):
+        """The failure this prevents, stated as the values it would corrupt.
+
+        OCR of a signature returns short garbage of the same shape as the
+        "AMoviy TS" the deployed build reported for a brand name. A pipeline
+        that reads it is one bad sort order away from filling a compliance
+        field with somebody's handwriting.
+        """
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(2000, 580), label_artwork],
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert parsed.values["alcohol_content"] == "45% Alc./Vol. (90 Proof)"
+        assert parsed.values["net_contents"] == "750 mL"
+
+    def test_the_response_says_which_page_the_label_came_from(self, label_artwork):
+        """An agent reading a poor result has to know which picture was read."""
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(2000, 580), label_artwork],
+        )
+
+        document = document_result(parse_application_document(pdf, "application/pdf"))
+
+        assert document.label_artwork_page == 3
+        assert [image.reason for image in document.artwork_images_rejected] == ["aspect_ratio"]
+        assert [image.page for image in document.artwork_images_rejected] == [2]
 
 
 @requires_tesseract

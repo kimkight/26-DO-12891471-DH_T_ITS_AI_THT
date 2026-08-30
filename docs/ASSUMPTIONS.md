@@ -411,8 +411,8 @@ instead of leaving a stale claim in a document.
 
 Both OSD misreads were on the sample carrying the least text, and both reported
 an orientation confidence below 1.0 where every correct answer reported above
-11. The confidence is carried out to the response rather than used to override
-the answer, because there is nothing better to fall back to.
+11. That figure is the floor `LOW_ORIENTATION_CONFIDENCE` names, and what is
+done with it is refined in v1.1.0 below.
 
 **What is deliberately not attempted:** perspective and cylinder dewarping. The
 label wraps a round bottle, so no single photograph shows it flat and the far
@@ -463,6 +463,48 @@ itself was correct at v1.0.0 and is now asserted against all eight orientation
 values rather than one. And preprocessing is no longer trusted to be an
 improvement: both the preprocessed and the plain upright grayscale are read, and
 the higher-scoring result is kept, with the choice reported in `read_path`.
+
+### What v1.1.0 refined in the orientation rule
+
+Until v1.1.0 the confidence floor above was a caption and nothing more. The
+response said the verdict had been made on almost no evidence, and the rotation
+was applied anyway. The author's mezcal COLA artwork made that visible on
+2026-08-30: OSD returned 180 degrees at a confidence of 0.03, the label was
+turned upside down on the strength of it, and the brand read as `AMoviy TS`
+against `DEL MAGUEY`.
+
+"There is nothing better to fall back to" was the wrong conclusion from a right
+measurement, and the correction is narrow. The 46 of 48 figure stands and is
+untouched: above the floor OSD still decides alone. What the 7 of 48 hides is
+*which* cases the sweep loses, and it loses the quarter-turns, for the reason
+already given three paragraphs up: Tesseract corrects them itself, so the score
+is identical on the two cases it would have to separate. It says nothing at all
+about a turn against its opposite, where the same score separates the two
+cleanly. Measured on the author's mezcal artwork:
+
+| Image variant | rot 0 | rot 90 | rot 180 | rot 270 |
+| --- | --- | --- | --- | --- |
+| Colour | 257 words, 89.1 | 257 words, 89.7 | 254 words, 35.3 | 253 words, 35.5 |
+| Grayscale | 106 words, 89.9 | 109 words, 88.4 | 107 words, 30.4 | 116 words, 31.9 |
+
+0 and 90 are indistinguishable, exactly as the 2026-08-26 measurement says. 0
+and 180 differ by more than fifty points.
+
+So below the floor the verdict is scored against its own opposite and the better
+one is kept. Two rotations, never four, chosen so that every case the check can
+decide is one the score can actually decide; a tie leaves Tesseract's answer
+standing. Both readings go out on the response: the verdict, its confidence, the
+floor it fell under, what each candidate scored, and which was kept.
+`backend/tests/test_orientation_floor.py` asserts the mechanism, including that
+a verdict at or above the floor is never second-guessed.
+
+### What v1.1.0 added beside it: the colour image
+
+The same submission exposed a second thing, and it is a different mistake with
+the same shape. Preprocessing to grayscale can lose an entire class of ink on a
+label printed in more than two tones, and nothing in the surviving text scores
+lower for it. That decision and its measurements are
+[ADR 0014](adr/0014-colour-as-an-ocr-candidate.md).
 
 **Confirmed or falsified by:** running the engine over a set of real
 photographed labels rather than one. One bottle establishes that hyphenated

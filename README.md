@@ -22,10 +22,10 @@ seconds, or agents go back to doing it manually.
 > are in [Measured performance and accuracy](#measured-performance-and-accuracy)
 > below. A single label image comes back in 1.5 seconds and a batch of 300
 > finishes in under seven minutes, both through the load balancer. A COLA
-> document submitted alone took 6.8 seconds on 2026-08-30, which is **over**
-> NFR-1's roughly five seconds; the instrumentation that hid it is fixed and the
-> duplicated OCR pass behind it is removed, and the figure stands until it is
-> re-measured against the deployed URL. What those runs did not
+> document submitted alone came back in 3.5 seconds on 2026-08-30 against
+> deploy #11, **inside** NFR-1's roughly five seconds, once the instrumentation
+> that hid the real figure was fixed and the duplicated OCR pass behind it was
+> removed. What those runs did not
 > settle is accuracy on real label artwork: three phone photographs of a round
 > bottle still leave the brand and the class unreadable on curved glass, which is
 > the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
@@ -281,18 +281,21 @@ values against its checklist.
 | --- | --- | --- | --- |
 | One label: the synthetic 1200x1600 fixture rotated 90 degrees, submitted with a Public COLA Registry printout attached | **1.5 s** | 1.4 s | All five fields matched. The rotation was detected and reported. |
 | One label: three real phone photographs of a round bottle, which is the hard case | **7.8 s** | Not recorded separately | Brand name and class or type stayed unreadable on that bottle's curved glass and were reported honestly as mismatch and not found. |
-| One label: the author's own mezcal COLA document (382 KB PDF) submitted **alone**, so its embedded artwork is the label side | **6.8 s** | Reported as 3.2 s, and that figure was wrong; see below | All five fields returned. Measured 2026-08-30, build 1.1.0, three runs: 6883, 6786, 6781 ms. |
+| One label: the author's own mezcal COLA document (382 KB PDF) submitted **alone**, so its embedded artwork is the label side | **3.5 s** | 3.4 s, and this time the figure measures the request | All five fields returned. Re-measured 2026-08-30 against deploy #11, three runs: 3468, 3505, 3543 ms wall clock; `elapsed_ms` 3387, 3411, 3463 ms; `unaccounted_ms` 1.3 ms; one OCR pass. |
 | A batch at the configured cap: 300 label images with their 300 paired COLA documents in one submission | **Approximately 6.5 to 7 minutes**, roughly **1.3 s per label** | Not recorded separately | 300 of 300 rows returned. Results streamed progressively through the load balancer: 83 labels complete at the 109 second mark, observed live. |
 
-**NFR-1 is met on the image path and was not met on the application-document
-path.** The two are different paths and the honest statement names both:
+**NFR-1 is met on both single-label paths.** They are different paths and the
+honest statement names both:
 
 - **The image path meets NFR-1 at 1.5 s.** One photograph and its application
   document came back in 1.5 seconds end to end through the load balancer,
   against a target of roughly five seconds.
-- **The application-document path did not, at 6.8 s.** Measured 2026-08-30 on
-  build 1.1.0 with the author's own mezcal COLA PDF submitted alone. That is
-  over the bar, and the instrumentation was hiding it.
+- **The application-document path meets it at about 3.5 s.** Re-measured
+  2026-08-30 against deploy #11 with the author's own mezcal COLA PDF submitted
+  alone: 3468, 3505 and 3543 ms wall clock over three consecutive runs. The
+  same document measured 6883, 6786 and 6781 ms earlier the same day, against
+  the build that read its label artwork twice and reported only the OCR span as
+  `elapsed_ms`. The margin against the bar is about 1.5 seconds.
 
 **The instrumentation was wrong, and it was wrong in the flattering
 direction.** On all three of those runs `elapsed_ms` and `ocr_ms` came back
@@ -318,11 +321,28 @@ only as a before-and-after on the same machine:
 | One embedded label image | 2.19 s | 1.12 s | 2 to 1 |
 | Two embedded label images | 3.17 s | 1.15 s | 3 to 1 |
 
-**The 6.8 s figure above stands until the author re-measures it.** Removing one
-of the two OCR passes on a path whose two passes were about 3.3 seconds each
-should bring it near 3.5 seconds, but that is arithmetic and this section does
-not publish arithmetic as measurement. The deployed figure will be replaced when
-the same document is submitted to the same URL on the next build.
+**And it was re-measured, which is why the table above says 3.5 s.** The earlier
+edition of this section said the 6.8 s figure would stand until the same
+document was submitted to the same URL on a build carrying the fix, because
+halving the OCR passes on a path whose passes were about 3.3 seconds each
+*should* land near 3.5 seconds and "should" is arithmetic rather than
+measurement. It was submitted, on 2026-08-30 against deploy #11, three
+consecutive runs. The figures are in the table and in
+[09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9. The response's own
+`unaccounted_ms` came back at 1.3 ms, which is what says the phase breakdown
+beside it is measuring the request rather than a part of it.
+
+**One caveat on that 3.5 s, and it is not a rounding error.** Those runs were
+taken while the artwork OCR on this document was still failing: the label was
+being turned 180 degrees on a Tesseract verdict of 0.03 confidence and then
+flattened to grayscale, so the 3.5 seconds was the cost of reading a wrongly
+turned, wrongly rendered image. v1.1.0 changes what is read, which changes what
+the read costs. The figure is re-measured against the next deploy and updated
+here if it moves. On a session container, which is not production hardware and
+is reported only as a before-and-after on one machine, the same document shape
+with colour artwork measured 1512 / 1563 / 1547 ms before the change and
+1526 / 1425 / 1587 ms after it, at one OCR pass either way: the colour read
+replaces two reads rather than adding a third.
 
 **The three-photograph case is over that target, and that is a measurement
 rather than a failure to report.** 7.8 seconds for three photographs of one
@@ -374,6 +394,21 @@ five fields did not come back at all.
   and the plain image and keeps the better one. What that does not do is make
   the point below untrue. One label read correctly is not a measurement, and the
   same degraded fixture still leaves half the sample set unreadable.
+- **And flat artwork is not a rendered label either, which is what v1.1.0
+  cost.** The author's own mezcal COLA artwork, lifted out of the filed PDF and
+  therefore flat, crisp and not a photograph at all, read as `AMoviy TS` against
+  `DEL MAGUEY` on two consecutive deploys. Two causes, and both were a number
+  that looked confident about text it had never seen. Tesseract answered the
+  orientation with 180 degrees at a confidence of 0.03, and the floor that would
+  have rejected that verdict had been in the code since v1.0.1 as a caption
+  only; below it the verdict is now scored against its opposite. And converting
+  a label printed in three tones to grayscale drops an entire ink class, which
+  mean word confidence structurally cannot detect, because a word that was never
+  read lowers no score: the read that lost `42% ALC BY VOL` outright scored
+  89.9 against the colour read's 89.1. The colour image is now read too
+  ([ADR 0014](docs/adr/0014-colour-as-an-ocr-candidate.md)). The same caution
+  applies as above: this is one document, and per-field accuracy against real
+  label artwork is still unmeasured.
 - **A label wrapped on a round bottle is not a supported input, and the scope
   line is written down.** The author's mezcal test of 2026-08-29 established
   three things about that case, and they are evidence rather than opinion. The
@@ -405,18 +440,19 @@ five fields did not come back at all.
   balancer unbuffered, which it does. The one box still open is the CloudWatch
   `MemoryUtilization` figure for the batch window, and the README says "memory
   utilization measurement pending" rather than a number until it is in hand.
-- **NFR-1 is met on one path and was missed on two others, and the miss is
-  published rather than redefined.** One label image with its application
-  document measures 1.5 seconds against NFR-1's roughly five. Three photographs
-  of a round bottle measured 7.8 seconds on the same hardware on the same day. A
-  COLA document submitted alone measured 6.8 seconds on 2026-08-30, build 1.1.0,
-  and until that day the instrumentation reported 3.2 seconds for it and told
-  the agent the difference was the network. It was not the network; it was a
-  picture being read twice. The measurement is fixed, the duplicate read is
-  gone, and the 6.8 second figure stands in this README until the same document
-  is submitted to the deployed URL again. A prototype that reports missing its
-  own acceptance criterion is worth more than one that quietly moves the
-  criterion. It is recorded rather than tuned away, and both
+- **NFR-1 is met on both single-label paths and is still missed on the
+  three-photograph case, and the miss is published rather than redefined.** One
+  label image with its application document measures 1.5 seconds against
+  NFR-1's roughly five. A COLA document submitted alone measures 3.5 seconds,
+  re-measured against deploy #11 on 2026-08-30; earlier the same day it was
+  6.8 seconds, and until that day the instrumentation reported 3.2 seconds for
+  it and told the agent the difference was the network. It was not the network;
+  it was a picture being read twice. The measurement was fixed, the duplicate
+  read removed, and the figure re-taken against the deployed URL rather than
+  inferred. Three photographs of a round bottle measured 7.8 seconds on the same
+  hardware, which is over the bar and stays reported as over it. A prototype
+  that reports missing its own acceptance criterion is worth more than one that
+  quietly moves the criterion. It is recorded rather than tuned away, and both
   levers are task environment variables rather than code:
   `TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`. No source states a batch
   latency target at all (OQ-6), so the batch figure is reported without one.

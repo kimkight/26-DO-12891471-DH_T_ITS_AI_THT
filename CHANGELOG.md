@@ -45,11 +45,14 @@ application or picture."
   and read through the same OCR pipeline label artwork goes through, with the
   v1.0.1 orientation and preprocessing decisions unchanged. What it says fills
   application values the text layer left empty.
-  - The floor has two halves, both of which have to be met: at least 400 pixels
-    on the shortest edge, which rejects a barcode or a signature strip, and at
-    least 250,000 pixels of area, which rejects a seal or a logo. Both are
-    settings (`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`), and
-    `TTB_MAX_ARTWORK_IMAGES` bounds how many are read.
+  - The floor has three parts, all of which have to be met: at least 400 pixels
+    on the shortest edge and at least 250,000 pixels of area, which between them
+    reject a seal or a logo, and a long-to-short edge ratio no greater than 3.0,
+    which rejects a signature strip at any scanning resolution. All three are
+    settings (`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`,
+    `TTB_MAX_ARTWORK_ASPECT_RATIO`), and `TTB_MAX_ARTWORK_IMAGES` bounds how
+    many are read. The ratio was added later in this release; see
+    "Fixed: the label artwork is turned the right way and read in colour".
   - Extracted rather than rendered. A page rasterized at a fixed scale loses
     resolution the embedded picture already has and hands the engine the form's
     own printed captions along with the label text. The alternatives rejected,
@@ -356,21 +359,97 @@ because a limitation that lives only in an ADR is a limitation nobody reads.
   from **2.19 s to 1.12 s** and a two-image document from **3.17 s to 1.15 s**,
   with Tesseract passes going from two and three respectively to **one**.
 
-### The acceptance criterion this release reports missing
+### The acceptance criterion this release reported missing, and then re-measured
 
 **The application-document path measured 6.8 s against NFR-1's roughly five
-seconds**, on the deployed target on 2026-08-30, build 1.1.0, with the author's
-own mezcal COLA PDF submitted alone: 6883, 6786 and 6781 ms over three runs. The
-image path meets NFR-1 at 1.5 s and is a different path; one number covering
-both would be a claim about neither.
+seconds** on the deployed target on 2026-08-30, build 1.1.0 as first deployed,
+with the author's own mezcal COLA PDF submitted alone: 6883, 6786 and 6781 ms
+over three runs. The image path meets NFR-1 at 1.5 s and is a different path;
+one number covering both would be a claim about neither.
 
-The figure is written into the README's performance section, into
-`docs/09_DEPLOYMENT.md` section 9 as its own line with the date, the build and
-the sample named, and raised as OQ-26. **It stands until the same document is
-submitted to the deployed URL on a build carrying the fixes above.** Halving the
-OCR passes on hardware where each pass took about 3.3 seconds should put this
-near 3.5 seconds, but that is arithmetic, and this repository does not publish
-arithmetic as measurement.
+That entry said the figure would stand until the same document was submitted to
+the deployed URL on a build carrying the fixes above, because halving the OCR
+passes on hardware where each took about 3.3 seconds *should* land near 3.5
+seconds and "should" is arithmetic rather than measurement.
+
+**It was submitted, against deploy #11, the same day, the same URL, the same
+document.** Three consecutive runs:
+
+| run | wall clock | server `elapsed_ms` | `unaccounted_ms` | `ocr_passes` |
+| --- | --- | --- | --- | --- |
+| 1 | 3468 ms | 3387 ms | 1.3 ms | 1 |
+| 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
+| 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
+
+**NFR-1 is met on this path at about 3.5 s, with about 1.5 s of margin.**
+`elapsed_ms` now sits within 80 ms of the browser's wall clock instead of 3.5
+seconds away from it, `unaccounted_ms` of 1.3 ms is what says the phase
+breakdown covers the request rather than a part of it, and `ocr_passes` reads 1
+against the 2 the same document paid before. The traceability matrix row, the
+README performance section and `docs/09_DEPLOYMENT.md` section 9 all carry these
+figures with the date, the build and the sample named. OQ-26 is closed with
+them.
+
+**One caveat, recorded rather than assumed away.** Those runs were taken while
+the artwork OCR on this document was still failing: the label was being turned
+180 degrees on an orientation verdict of 0.03 confidence and then flattened to
+grayscale, so the 3.5 seconds was the cost of reading a wrongly turned, wrongly
+rendered image. The fixes below change what is read. The figure is re-measured
+against the next deploy and updated everywhere it appears if it moves.
+
+### Fixed: the label artwork is turned the right way and read in colour
+
+The same document, on the same deploy, still read `AMoviy TS` for `DEL MAGUEY`,
+`CLI).` for the class, and did not find the government warning at all. Three
+causes, one branch, and each was a number that looked confident about text it
+had never seen.
+
+- **An orientation verdict of 0.03 confidence was applied on trust, and the
+  floor to reject it already existed.** `LOW_ORIENTATION_CONFIDENCE` has been in
+  `app/ocr.py` since v1.0.1 and was only ever a caption: the response said the
+  engine had guessed, and the rotation was applied regardless. Below the floor
+  the verdict is now scored against its own opposite by mean word confidence and
+  the better one is kept.
+
+  This refines [ADR 0003](docs/adr/0003-local-ocr-default-bedrock-optional.md)
+  rather than contradicting it. Its 46 of 48 for OSD against 7 of 48 for a
+  four-rotation sweep stands untouched, and above the floor OSD still decides
+  alone. What the 7 of 48 hides is *which* cases the sweep loses: it loses the
+  quarter-turns, because Tesseract corrects those itself and returns identical
+  output either way, so the score is equal on the two cases it would have to
+  separate. On this very artwork it separates 0 from 180 by more than fifty
+  points. Two rotations, never four, and a tie leaves the engine's answer
+  standing. A-15 carries the refinement.
+- **Flattening a coloured label to grayscale dropped an entire ink class, and
+  mean word confidence could not see it**
+  ([ADR 0014](docs/adr/0014-colour-as-an-ocr-candidate.md)). Filed artwork
+  carries dark-on-light and light-on-dark text on one ground; a threshold
+  separates two luminance classes, not three. On this artwork the colour image
+  read 257 words at 89.1 including `42% ALC BY VOL`, and the grayscale read 106
+  at 89.9 without it: the arm that lost a required field scored *higher*,
+  because a word that was never read lowers no score.
+
+  The colour image is now a first-class candidate and on a coloured source it is
+  read first. Ranking stays mean word confidence; ties inside one point are
+  broken by how much text was recovered, which never overrides a real difference
+  in confidence and fires on no case in the twelve-label sample set. Whether a
+  source has colour to lose is measured as chroma rather than assumed from the
+  channel count, so every image in the sample set and every grayscale scan takes
+  the v1.0.1 path at the v1.0.1 cost. A coloured label that reads cleanly now
+  costs one Tesseract read where this document paid two.
+- **The embedded-image floor was made only of absolute sizes, and a signature
+  clears them at a better scanning resolution.** The author's signature sits on
+  page 2 at 687 by 195 and is rejected twice over; the same strip at 300 dpi is
+  about 2000 by 580 and clears both. A long-to-short edge ratio above 3.0 is now
+  rejected too (`TTB_MAX_ARTWORK_ASPECT_RATIO`), which is the one part of the
+  floor a better scanner cannot defeat. Every rejection is reported with its
+  page, its size and a named reason. The picture never is: not to the response,
+  not to a log, not to disk.
+
+`ocr_passes` still counts pictures. `tesseract_reads` is added beside it,
+because every arm above happens inside one pass, and a release that tripled the
+engine invocations while the reported pass count held at 1 would be the same
+mistake the timing finding above was.
 
 ### Known limits
 

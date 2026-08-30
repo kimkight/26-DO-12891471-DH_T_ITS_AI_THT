@@ -72,6 +72,8 @@ import io
 import logging
 import re
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -160,6 +162,23 @@ class EmbeddedArtwork:
 
 
 @dataclass(frozen=True)
+class RejectedImage:
+    """One embedded image that was not treated as candidate label artwork.
+
+    Carries the page it sat on, how big it was, and the named reason. It
+    deliberately does not carry the picture, or anything read out of it: on a
+    filed application the commonest rejection is the applicant's own
+    handwritten signature, which is personal data and has no business in a
+    response, a log, or a fixture (NFR-6).
+    """
+
+    page: int
+    width: int
+    height: int
+    reason: RejectionReason
+
+
+@dataclass(frozen=True)
 class ParsedApplication:
     """What an uploaded COLA document said, and how it was read.
 
@@ -185,6 +204,9 @@ class ParsedApplication:
     # files its labels separately.
     artwork_images_found: int = 0
     artwork_images_read: int = 0
+    # Every embedded image that did not clear the floor, with the reason. See
+    # RejectedImage: the picture itself never travels.
+    artwork_images_rejected: list[RejectedImage] = field(default_factory=list)
     # The embedded image the label side can be taken from when the agent
     # supplied no photograph of their own (ADR 0010, FR-1).
     label_artwork: EmbeddedArtwork | None = None
@@ -267,6 +289,7 @@ class _PdfContents:
     rendered_pages: list[bytes]
     artwork: list[EmbeddedArtwork]
     artwork_found: int
+    artwork_rejected: list[RejectedImage]
     pages: int
 
 
@@ -278,7 +301,7 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     # The artwork read happens here, outside the lock, for the reason the page
     # OCR below does: Tesseract is the expensive part and there is no reason for
     # one document's reading to block another's.
-    artwork = _read_artwork(contents.artwork)
+    artwork = _read_artwork(contents.artwork, contents.artwork_rejected)
 
     if contents.text_side is not None:
         return _with_notes(
@@ -315,6 +338,41 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     )
 
 
+@contextmanager
+def _open_page(document: pdfium.PdfDocument, index: int) -> Iterator[pdfium.PdfPage]:
+    """One page, closed when the caller is done with it rather than by the GC.
+
+    **This is the page-level half of the rule ``_read_pdf_with_pdfium`` already
+    applies to the document, and it is not tidiness.** Every pypdfium2 handle is
+    an ``AutoCloseable``, and each one registers a weakref of itself in its
+    parent's ``_kids`` set. A page left to the garbage collector takes that
+    weakref with it whenever the collector happens to run, and the collector is
+    free to run in the middle of ``PdfDocument.close()``, which walks exactly
+    that set. It raised on CI on 2026-08-30:
+
+        File "pypdfium2/internal/bases.py", line 168, in close
+          for k_wref in self._kids:
+        RuntimeError: Set changed size during iteration
+
+    The library defers the child closes to avoid mutating the set from inside
+    its own loop; what it cannot defend against is a weakref callback firing
+    from a collection it did not ask for. So the pages are closed here, in
+    order, while they are still referenced, and ``_kids`` is empty by the time
+    the document is closed. ``PdfDocument.get_page`` caches nothing, so each
+    call was adding another weakref for the collector to drop later.
+
+    It is the same argument the document's own ``close()`` rests on: a
+    collection running on another thread would call into PDFium outside
+    ``_PDFIUM_LOCK``. That is true of a page handle as much as of a document
+    one, and it was only ever half enforced.
+    """
+    page = document[index]
+    try:
+        yield page
+    finally:
+        page.close()
+
+
 def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
     """Everything that touches PDFium, in one place, for one document.
 
@@ -349,7 +407,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
         # text is read has nothing to say about where the pictures are. The cost
         # is bounded by the count of images actually read rather than by the
         # page count (ADR 0010).
-        artwork, artwork_found = _embedded_images(document, page_count)
+        artwork, artwork_found, artwork_rejected = _embedded_images(document, page_count)
 
         from_fields = _from_form_fields(document, pages)
         lines = _pdf_text_lines(document, pages)
@@ -369,6 +427,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
                 rendered_pages=[],
                 artwork=artwork,
                 artwork_found=artwork_found,
+                artwork_rejected=artwork_rejected,
                 pages=pages,
             )
 
@@ -389,6 +448,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
             rendered_pages=rendered_pages,
             artwork=artwork,
             artwork_found=artwork_found,
+            artwork_rejected=artwork_rejected,
             pages=pages,
         )
     finally:
@@ -439,6 +499,7 @@ class _ArtworkReading:
     images_found: int
     images_read: int
     label_artwork: EmbeddedArtwork | None
+    rejected: list[RejectedImage] = field(default_factory=list)
     # The OCR result for ``label_artwork``, carried so that the label side does
     # not read the same picture a second time. See ParsedApplication.
     label_artwork_read: OcrResult | None = None
@@ -446,7 +507,7 @@ class _ArtworkReading:
 
 def _embedded_images(
     document: pdfium.PdfDocument, page_count: int
-) -> tuple[list[EmbeddedArtwork], int]:
+) -> tuple[list[EmbeddedArtwork], int, list[RejectedImage]]:
     """Lift every embedded raster image out of the document, largest first.
 
     **Extracted rather than rendered, and the difference is the decision.**
@@ -458,55 +519,85 @@ def _embedded_images(
     printed captions mixed in with the label text. Lifting the image object out
     gives the pipeline the artwork at its native size and nothing else.
 
-    Only images clearing both halves of the size floor survive; see
-    ``Settings.min_artwork_edge_px``. They are returned largest first, and no
-    more than ``max_artwork_images`` of them, because each one costs a full OCR
-    read. The count returned alongside is how many cleared the floor, which is
-    not the same as how many were read.
+    Only images clearing every part of the floor survive; see ``_rejection`` and
+    ``Settings.max_artwork_aspect_ratio``. They are returned largest first, and
+    no more than ``max_artwork_images`` of them, because each one costs a full
+    OCR read. The count returned alongside is how many cleared the floor, which
+    is not the same as how many were read.
+
+    **What was rejected is returned too, with the reason (v1.1.0).** A filed
+    application carries the applicant's handwritten signature, and a rejection
+    that happens silently is one an agent cannot check. Only the page number,
+    the dimensions and the named reason travel: never the picture, never
+    anything read out of it. The signature in particular is the most personal
+    artefact on the form, and nothing here writes an extracted image to disk,
+    puts one in a log line, or keeps one past the request (NFR-6).
 
     Called under ``_PDFIUM_LOCK``. Every failure here is one image skipped, not
     a document failing: a PDF can carry an image in a colour space or a filter
     PDFium will not hand back, and the rest of the file is still readable.
     """
     candidates: list[EmbeddedArtwork] = []
+    rejected: list[RejectedImage] = []
     for index in range(page_count):
-        page = document[index]
-        for obj in page.get_objects():
-            if not isinstance(obj, pdfium.PdfImage):
-                continue
-            try:
-                width, height = obj.get_px_size()
-            except Exception as exc:
-                logger.warning(
-                    "embedded image size could not be read",
-                    extra={"page": index + 1, "cause": type(exc).__name__},
+        with _open_page(document, index) as page:
+            for obj in page.get_objects():
+                if not isinstance(obj, pdfium.PdfImage):
+                    continue
+                try:
+                    width, height = obj.get_px_size()
+                except Exception as exc:
+                    logger.warning(
+                        "embedded image size could not be read",
+                        extra={"page": index + 1, "cause": type(exc).__name__},
+                    )
+                    continue
+                reason = _rejection(width, height)
+                if reason is None and (content := _artwork_png(obj, index)) is None:
+                    reason = "unreadable"
+                if reason is not None:
+                    rejected.append(
+                        RejectedImage(page=index + 1, width=width, height=height, reason=reason)
+                    )
+                    continue
+                candidates.append(
+                    EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
                 )
-                continue
-            if not _clears_floor(width, height):
-                continue
-            content = _artwork_png(obj, index)
-            if content is None:
-                continue
-            candidates.append(
-                EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
-            )
 
     candidates.sort(key=lambda art: (-art.pixels, art.page))
-    return candidates[: settings.max_artwork_images], len(candidates)
+    rejected.sort(key=lambda image: (image.page, -image.width * image.height))
+    return candidates[: settings.max_artwork_images], len(candidates), rejected
 
 
-def _clears_floor(width: int, height: int) -> bool:
-    """Whether one embedded image is big enough to be label artwork.
+# Why one embedded image was not treated as candidate label artwork. Named
+# rather than free text so that the reason is a value an agent's tooling can
+# read, and so that adding a test to the floor forces a name for what it
+# rejects.
+RejectionReason = Literal["short_edge", "area", "aspect_ratio", "unreadable"]
 
-    Both halves have to be met. The edge floor rejects a long thin barcode or
-    signature strip whatever its area; the area floor rejects a small square
-    seal or logo. Agency seals, barcodes and signature blocks are small; label
-    artwork is not.
+
+def _rejection(width: int, height: int) -> RejectionReason | None:
+    """Why this embedded image is not label artwork, or None if it might be.
+
+    Three tests, and the first one that fails is the reason reported. Agency
+    seals, barcodes, logos and signature strips are furniture on the form;
+    label artwork is the thing the form is about.
+
+    ``short_edge`` and ``area`` are absolute sizes, and an absolute size is a
+    property of the scanner as much as of the thing scanned: the same signature
+    strip clears both of them at 300 dpi and fails both at 100.
+    ``aspect_ratio`` is the test that does not move with resolution. A signature
+    is wide and short at every resolution it is ever scanned at; label artwork
+    is large in both directions. See ``Settings.max_artwork_aspect_ratio`` for
+    the numbers and for the neck-label case this deliberately trades away.
     """
-    return (
-        min(width, height) >= settings.min_artwork_edge_px
-        and width * height >= settings.min_artwork_pixels
-    )
+    if min(width, height) < settings.min_artwork_edge_px:
+        return "short_edge"
+    if width * height < settings.min_artwork_pixels:
+        return "area"
+    if max(width, height) > settings.max_artwork_aspect_ratio * min(width, height):
+        return "aspect_ratio"
+    return None
 
 
 def _artwork_png(image: pdfium.PdfImage, page_index: int) -> bytes | None:
@@ -529,7 +620,9 @@ def _artwork_png(image: pdfium.PdfImage, page_index: int) -> bytes | None:
         return None
 
 
-def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
+def _read_artwork(
+    images: list[EmbeddedArtwork], rejected: list[RejectedImage] | None = None
+) -> _ArtworkReading:
     """Read every surviving embedded picture through the label OCR pipeline.
 
     **The pipeline is the one label artwork goes through, unchanged.**
@@ -543,8 +636,15 @@ def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
     show, which is the front-and-back case. ``label_artwork`` is the image the
     label side can be taken from: the largest one that both read and yielded a
     label value, falling back to the largest one that read at all. Preferring
-    the one that yielded values keeps a large scan of a signature page from
-    being offered as the label when a smaller picture of the label was there.
+    the one that yielded values keeps a large scan of a page of prose from being
+    offered as the label when a smaller picture of the label was there; it never
+    passes over a larger picture that did yield values, so the rule is still
+    "the largest that qualifies".
+
+    Nothing shaped like a signature reaches this function at all. That is
+    ``_rejection``'s job, done before any picture is decoded, and it is done on
+    shape as well as size so that a signature scanned at a higher resolution
+    does not clear a floor a smaller one failed.
 
     A picture that will not decode is skipped rather than fatal. It is a picture
     inside a document, and the document may have answered already.
@@ -599,6 +699,7 @@ def _read_artwork(images: list[EmbeddedArtwork]) -> _ArtworkReading:
 
     return _ArtworkReading(
         values=values,
+        rejected=list(rejected or []),
         images_found=len(images),
         images_read=read_count,
         label_artwork=with_values or any_read,
@@ -629,6 +730,7 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
         value_sources=sources,
         artwork_images_found=artwork.images_found,
         artwork_images_read=artwork.images_read,
+        artwork_images_rejected=artwork.rejected,
         label_artwork=artwork.label_artwork,
         label_artwork_read=artwork.label_artwork_read,
     )
@@ -653,12 +755,16 @@ def _render_page(document: pdfium.PdfDocument, index: int) -> bytes:
     template, and the OCR fallback would find captions and no answers.
     """
     document.init_forms()
-    page = document[index]
-    scale = max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
-    bitmap = page.render(scale=scale)
-    buffer = io.BytesIO()
-    bitmap.to_pil().save(buffer, format="PNG")
-    return buffer.getvalue()
+    with _open_page(document, index) as page:
+        scale = max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
+        bitmap = page.render(scale=scale)
+        buffer = io.BytesIO()
+        bitmap.to_pil().save(buffer, format="PNG")
+        # Materialized before the page is closed. ``to_pil`` can hand back an
+        # image sharing the bitmap's buffer, and the bitmap is the page's child,
+        # so closing the page frees it. The encode happens above, inside the
+        # block, and only the bytes leave it.
+        return buffer.getvalue()
 
 
 def _pdf_text_lines(document: pdfium.PdfDocument, pages: int) -> list[OcrLine]:
@@ -672,7 +778,8 @@ def _pdf_text_lines(document: pdfium.PdfDocument, pages: int) -> list[OcrLine]:
     position = 0
     for index in range(pages):
         try:
-            text = document[index].get_textpage().get_text_bounded()
+            with _open_page(document, index) as page:
+                text = page.get_textpage().get_text_bounded()
         except Exception as exc:
             # As above: the page is skipped, and the log records the class name
             # and the page number rather than anything the page said (NFR-6).
@@ -837,24 +944,24 @@ def _from_form_fields(document: pdfium.PdfDocument, pages: int) -> ParsedApplica
         return ParsedApplication(values=values)
 
     for index in range(pages):
-        page = document[index]
-        for annotation in _widgets(page):
-            name = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldName, formenv, annotation)
-            value = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldValue, formenv, annotation)
-            if _PRODUCT_TYPE_FIELD.search(name) and pdfium_raw.FPDFAnnot_IsChecked(
-                formenv, annotation
-            ):
-                export = _widget_text(
-                    pdfium_raw.FPDFAnnot_GetFormFieldExportValue, formenv, annotation
-                )
-                values["beverage_type"] = values["beverage_type"] or _product_type(export)
-            if not value:
-                continue
-            if _FIELD_NAME_PATTERNS["brand_name"].search(name):
-                values["brand_name"] = values["brand_name"] or value
-            elif _FIELD_NAME_PATTERNS["fanciful_name"].search(name):
-                fanciful = fanciful or value
-            pdfium_raw.FPDFPage_CloseAnnot(annotation)
+        with _open_page(document, index) as page:
+            for annotation in _widgets(page):
+                name = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldName, formenv, annotation)
+                value = _widget_text(pdfium_raw.FPDFAnnot_GetFormFieldValue, formenv, annotation)
+                if _PRODUCT_TYPE_FIELD.search(name) and pdfium_raw.FPDFAnnot_IsChecked(
+                    formenv, annotation
+                ):
+                    export = _widget_text(
+                        pdfium_raw.FPDFAnnot_GetFormFieldExportValue, formenv, annotation
+                    )
+                    values["beverage_type"] = values["beverage_type"] or _product_type(export)
+                if not value:
+                    continue
+                if _FIELD_NAME_PATTERNS["brand_name"].search(name):
+                    values["brand_name"] = values["brand_name"] or value
+                elif _FIELD_NAME_PATTERNS["fanciful_name"].search(name):
+                    fanciful = fanciful or value
+                pdfium_raw.FPDFPage_CloseAnnot(annotation)
 
     return ParsedApplication(values=values, fanciful_name=fanciful, path="form_fields")
 
@@ -1088,6 +1195,7 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
         value_sources=parsed.value_sources,
         artwork_images_found=parsed.artwork_images_found,
         artwork_images_read=parsed.artwork_images_read,
+        artwork_images_rejected=parsed.artwork_images_rejected,
         label_artwork=parsed.label_artwork,
         label_artwork_read=parsed.label_artwork_read,
     )

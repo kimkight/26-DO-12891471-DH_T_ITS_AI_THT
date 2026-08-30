@@ -43,12 +43,15 @@ export function photo(index = 1, overrides: Partial<PhotoResult> = {}): PhotoRes
       rotation_degrees: 0,
       method: 'osd',
       confidence: 13.7,
+      check: null,
     },
     ocr_confidence: 95.4,
     read_path: {
       variant: 'preprocessed',
       preprocessed_confidence: 95.4,
       plain_confidence: null,
+      colour_confidence: null,
+      decided_by: 'short_circuit',
     },
     text_found: true,
     error: null,
@@ -88,6 +91,7 @@ export function phaseTimings(overrides: Partial<PhaseTimings> = {}): PhaseTiming
     compare_ms: 0.3,
     ocr_ms: 530,
     ocr_passes: 1,
+    tesseract_reads: 2,
     accounted_ms: 530.3,
     unaccounted_ms: 9.7,
     ...overrides,
@@ -185,6 +189,8 @@ export function applicationDocument(
     // document. The ADR 0010 fixtures override all three.
     artwork_images_found: 0,
     artwork_images_read: 0,
+    artwork_images_rejected: [],
+    label_artwork_page: null,
     label_artwork_available: false,
     notes: [
       'The class or type designation is not an item on TTB F 5100.31 (04/2023).',

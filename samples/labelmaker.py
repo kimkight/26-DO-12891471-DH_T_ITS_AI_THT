@@ -159,3 +159,130 @@ def render_png_bytes(spec: LabelSpec) -> bytes:
     buffer = io.BytesIO()
     render(spec).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# --------------------------------------------------------------------------
+# Colour artwork (v1.1.0).
+# --------------------------------------------------------------------------
+
+# The three inks and the ground of a label printed in more than two tones.
+#
+# Chosen so that the three text classes fall into three luminance bands rather
+# than two, which is the property that breaks a single global threshold and the
+# reason app.ocr reads the colour image. On a green ground of luminance 96:
+# the warning is near-black on a cream panel, the brand and the body copy are
+# near-white directly on the ground, and the alcohol content and net contents
+# are a red of luminance 102, which is to say all but isoluminant with the
+# ground behind it and separable from it by hue alone.
+COLOUR_GROUND = (60, 120, 70)
+COLOUR_PANEL = (238, 236, 226)
+COLOUR_DARK_INK = (16, 20, 18)
+COLOUR_LIGHT_INK = (250, 250, 245)
+COLOUR_CHROMA_INK = (200, 60, 60)
+
+COLOUR_CANVAS = (1400, 1200)
+
+# Body copy, and it is not decoration. Tesseract's orientation detection needs
+# a paragraph of ordinary prose to answer confidently: without this block it
+# reports the script as Japanese and returns a confidence of 1.5, and with it
+# the script is Latin and the confidence is around 9. A fixture built to test
+# the colour arm should not also be testing the orientation floor, so this is
+# here to keep the two apart.
+COLOUR_BODY_COPY = (
+    "Distilled and bottled by the named producer in Oaxaca, Mexico. Imported by "
+    "the named importer. Each village produces a mezcal of its own character, "
+    "and this bottling is drawn from a single village and a single family of "
+    "producers."
+)
+
+
+@dataclass
+class ColourLabelSpec:
+    """The text to print on one multi-tone label.
+
+    Deliberately a separate type from ``LabelSpec`` rather than a flag on it.
+    The twelve committed sample specs describe a black-on-white label and the
+    accuracy tier's expectations are written against exactly that rendering;
+    adding a colour mode to the same renderer would put a branch inside the
+    thing those expectations are measured on.
+    """
+
+    brand_name: str = "DEL MAGUEY"
+    class_type: str = "SINGLE VILLAGE MEZCAL"
+    alcohol_content: str = "42% ALC BY VOL"
+    net_contents: str = "750 ML"
+    warning: str = ""
+    body_copy: str = COLOUR_BODY_COPY
+
+
+def render_colour(spec: ColourLabelSpec) -> Image.Image:
+    """Draw one label in three inks on one ground.
+
+    The ink each element is printed in is the point of the fixture, so it is
+    stated here rather than varied: the brand, the class or type and the body
+    copy are light on the dark ground, the warning is dark on a light panel, and
+    the alcohol content and net contents are in the chroma ink that a grayscale
+    conversion collapses into the ground behind them.
+    """
+    fonts = available_fonts()
+    if fonts is None:
+        raise RuntimeError("No usable TrueType font was found on this machine.")
+    bold_path, regular_path = fonts
+
+    width, height = COLOUR_CANVAS
+    image = Image.new("RGB", (width, height), COLOUR_GROUND)
+    draw = ImageDraw.Draw(image)
+
+    brand_font = ImageFont.truetype(bold_path, 96)
+    class_font = ImageFont.truetype(regular_path, 52)
+    detail_font = ImageFont.truetype(bold_path, 46)
+    body_font = ImageFont.truetype(regular_path, 26)
+    warning_font = ImageFont.truetype(regular_path, 24)
+
+    margin = 60
+    text_width = width - 2 * margin
+    y = 50
+
+    draw.text((margin, y), spec.brand_name, font=brand_font, fill=COLOUR_LIGHT_INK)
+    y += 128
+    draw.text((margin, y), spec.class_type, font=class_font, fill=COLOUR_LIGHT_INK)
+    y += 92
+    draw.text((margin, y), spec.alcohol_content, font=detail_font, fill=COLOUR_CHROMA_INK)
+    y += 68
+    draw.text((margin, y), spec.net_contents, font=detail_font, fill=COLOUR_CHROMA_INK)
+    y += 80
+
+    for line in _wrap(draw, spec.body_copy, body_font, text_width):
+        draw.text((margin, y), line, font=body_font, fill=COLOUR_LIGHT_INK)
+        y += 34
+    y += 20
+
+    if spec.warning:
+        lines = _wrap(draw, spec.warning, warning_font, text_width - 40)
+        panel_height = len(lines) * 32 + 40
+        draw.rectangle([margin, y, width - margin, y + panel_height], fill=COLOUR_PANEL)
+        y += 20
+        for line in lines:
+            draw.text((margin + 20, y), line, font=warning_font, fill=COLOUR_DARK_INK)
+            y += 32
+
+    return image
+
+
+def render_colour_png_bytes(spec: ColourLabelSpec, *, turned_degrees: int = 0) -> bytes:
+    """Render to PNG bytes, optionally turned clockwise by a quarter-turn.
+
+    PNG rather than JPEG so that the pixels a test asserts on are the pixels
+    that were drawn: a lossy encoder would put its own chroma into an image
+    whose whole subject is chroma.
+    """
+    import io
+
+    image = render_colour(spec)
+    if turned_degrees % 360:
+        # Pillow turns counter-clockwise, and every rotation in this codebase is
+        # stated clockwise, which is Tesseract's convention.
+        image = image.rotate(-turned_degrees, expand=True)
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()

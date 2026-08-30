@@ -33,7 +33,14 @@ from app.application_form import (
 )
 from app.compare import Comparison, Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
-from app.ocr import OcrResult, Orientation, ReadPath, UndecodableImageError, extract_text
+from app.ocr import (
+    OcrResult,
+    Orientation,
+    OrientationCheck,
+    ReadPath,
+    UndecodableImageError,
+    extract_text,
+)
 from app.parse import ParsedFields, parse_fields
 from app.schemas import (
     FIELD_LABELS,
@@ -41,11 +48,14 @@ from app.schemas import (
     ApplicationSource,
     ErrorDetail,
     FieldResult,
+    OrientationCheckDetail,
     OrientationDetail,
     ParsedApplicationField,
     PhaseTimings,
     PhotoResult,
     ReadPathDetail,
+    RejectedImageDetail,
+    RotationScoreDetail,
     VerificationResult,
     WarningDiffSegment,
     WarningResult,
@@ -205,6 +215,16 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
         notes=parsed.notes,
         artwork_images_found=parsed.artwork_images_found,
         artwork_images_read=parsed.artwork_images_read,
+        artwork_images_rejected=[
+            RejectedImageDetail(
+                page=image.page,
+                width=image.width,
+                height=image.height,
+                reason=image.reason,
+            )
+            for image in parsed.artwork_images_rejected
+        ],
+        label_artwork_page=None if parsed.label_artwork is None else parsed.label_artwork.page,
         label_artwork_available=parsed.label_artwork is not None,
     )
 
@@ -525,6 +545,27 @@ def _pick_warning(reads: list[_Read]) -> _Read | None:
     )
 
 
+def _orientation_check(check: OrientationCheck | None) -> OrientationCheckDetail | None:
+    """The second opinion on a low-confidence orientation verdict, or nothing."""
+    if check is None:
+        return None
+    return OrientationCheckDetail(
+        osd_rotation_degrees=check.osd_rotation_degrees,
+        osd_confidence=check.osd_confidence,
+        floor=check.floor,
+        candidates=[
+            RotationScoreDetail(
+                rotation_degrees=candidate.rotation_degrees,
+                confidence=candidate.confidence,
+                words=candidate.words,
+            )
+            for candidate in check.candidates
+        ],
+        chosen_rotation_degrees=check.chosen_rotation_degrees,
+        overrode_osd=check.overrode_osd,
+    )
+
+
 def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs") -> PhotoResult:
     return PhotoResult(
         index=read.index,
@@ -535,12 +576,15 @@ def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs
             rotation_degrees=read.orientation.rotation_degrees,
             method=read.orientation.method,
             confidence=read.orientation.confidence,
+            check=_orientation_check(read.orientation.check),
         ),
         ocr_confidence=read.confidence,
         read_path=ReadPathDetail(
             variant=read.read_path.variant,
             preprocessed_confidence=read.read_path.preprocessed_confidence,
             plain_confidence=read.read_path.plain_confidence,
+            colour_confidence=read.read_path.colour_confidence,
+            decided_by=read.read_path.decided_by,
         ),
         text_found=read.parsed is not None,
         error=None
@@ -788,6 +832,7 @@ def _timings(recorded: timing.Recording | None) -> PhaseTimings | None:
         compare_ms=recorded.get("compare"),
         ocr_ms=recorded.ocr_ms,
         ocr_passes=recorded.ocr_passes,
+        tesseract_reads=recorded.tesseract_reads,
         accounted_ms=accounted,
         unaccounted_ms=round(max(total - accounted, 0.0), 1),
     )
