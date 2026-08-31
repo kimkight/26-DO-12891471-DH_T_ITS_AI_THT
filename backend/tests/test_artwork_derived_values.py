@@ -125,12 +125,21 @@ class TestTheFormIsSilentAndTheArtworkIsNot:
             assert entry["application_value_source"] == "parsed_from_artwork"
 
     def test_the_row_says_where_the_value_came_from_without_a_footnote(self):
-        """An agent must see why this row is different from the row itself."""
+        """An agent must see why this row is different, from the row itself.
+
+        In one sentence since v1.2.0. The reason ran to ninety words and said the
+        same thing three times, and two of the three tellings are already on the
+        row without prose: the outcome chip reads "Read from the artwork" and the
+        row carries "Label artwork (same source as the label)". What is asserted
+        here is the one thing neither of those states.
+        """
         by_name = rows(submit(document_only()))
         reason = by_name["alcohol_content"]["reason"]
-        assert "label artwork inside the application document" in reason
-        assert "same artwork is the label being checked" in reason
-        assert "rather than as a match" in reason
+        assert "artwork that is also the label side" in reason
+        assert "nothing about what the applicant declared" in reason
+        # One sentence, and short enough to read at a glance (NFR-4).
+        assert reason.count(".") == 1
+        assert len(reason.split()) < 40
 
     def test_the_tally_counts_only_the_fields_that_could_have_disagreed(self):
         """The summary line stops saying five of five.

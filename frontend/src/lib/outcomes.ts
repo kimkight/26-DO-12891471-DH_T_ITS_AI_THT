@@ -132,11 +132,16 @@ export function summary(outcomes: Outcome[]): string {
  *
  * It opens with the same summary the panel prints, so what is heard and what is
  * seen are one sentence rather than two that can drift apart.
+ *
+ * **The elapsed time came out of it on 2026-08-31**, when it came off the screen.
+ * That is the same rule and not a second one: an announcement that reads out a
+ * number nobody can see is exactly the drift this docstring warns about, and
+ * NFR-5 asks the announcement to say what changed, which is the outcomes. It
+ * says no less about them than it did.
  */
-export function announcement(outcomes: Outcome[], seconds: number): string {
+export function announcement(outcomes: Outcome[]): string {
   const counts = tally(outcomes)
-  const parts = [`Checked in ${seconds.toFixed(1)} seconds.`]
-  parts.push(`${summary(outcomes)}.`)
+  const parts = [`${summary(outcomes)}.`]
   if (counts.needs_review > 0) {
     parts.push(`${counts.needs_review} needs your review.`)
   }

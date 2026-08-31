@@ -78,6 +78,17 @@
  * Uploading is not the COLA integration OOS-1 excludes: the document is read
  * locally and nothing reaches TTB.
  *
+ * **The screen says what happened and stops (2026-08-31).** The author, on the
+ * released build: "I don't need the time listed on the screen think about what a
+ * regular application looks like do not put all these extra words on the screen
+ * that should not be there." So the timing line and the phase disclosure are
+ * gone from the panel. The phases are still measured and still in the API
+ * response, where the deployment runbook reads them; what has gone is the tool
+ * talking about itself in the middle of somebody's work. Every notice is said
+ * once, where it is first relevant, rather than in the upload card and the
+ * results header and every affected row. `quietScreen.test.tsx` holds the
+ * budget.
+ *
  * **Beverage type is demoted rather than removed.** It is never compared, and
  * no per-field comparison reads it: A-12's proof cross-check keys off a proof
  * statement the label itself carries and A-13's range handling keys off a range
@@ -100,14 +111,8 @@ import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { PRESENCE_LIMIT, anySearched } from '../lib/labelSearch'
 import { announcement, summary } from '../lib/outcomes'
-import { readingNote, spans, timingSummary } from '../lib/timing'
 import { EMPTY_APPLICATION } from '../types'
-import type {
-  ApplicationData,
-  ApplicationDocumentResult,
-  ClassificationResult,
-  PhaseTimings,
-} from '../types'
+import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
 /**
  * Keep only the values the agent typed themselves.
@@ -297,12 +302,7 @@ export function SingleLabelTab() {
   const result = outcome?.result ?? null
   // The live region text. Empty while checking so that the "Checking" line and
   // the result are not both announced as one run-on sentence.
-  const spoken = result
-    ? announcement(
-        result.fields.map((field) => field.outcome),
-        outcome?.seconds ?? 0,
-      )
-    : ''
+  const spoken = result ? announcement(result.fields.map((field) => field.outcome)) : ''
 
   return (
     <div className="layout">
@@ -386,26 +386,6 @@ export function SingleLabelTab() {
         {result ? (
           <>
             {/*
-              Two measured numbers and one honestly named difference (NFR-1).
-              This used to attribute the gap between them to "sending the image
-              and receiving the answer", which was an explanation nobody had
-              measured and which a control run showed was wrong by about three
-              and a half seconds. See src/lib/timing.ts.
-            */}
-            <p className="timing">
-              Checked in {outcome!.seconds.toFixed(1)} seconds.{' '}
-              <span className="timing__detail">
-                {timingSummary(outcome!.seconds, result.elapsed_ms)}
-              </span>
-            </p>
-            {result.timings ? <TimingBreakdown timings={result.timings} /> : null}
-            {/*
-              One short line, once, when the label being checked came out of the
-              application document rather than off a bottle (ADR 0010). It is
-              the honest limitation, stated where the agent is reading the
-              result rather than left to a document.
-            */}
-            {/*
               The summary line, and the reason it is not "5 of 5 fields match"
               (FR-14, ADR 0013). Where some of the five rows compared a value
               against the artwork it was read from, saying five would count
@@ -437,10 +417,7 @@ export function SingleLabelTab() {
                 />
               ))}
             </div>
-            <p className="footnote">
-              This tool recommends. You decide. Every value it read off the label is shown beside
-              the value on the application so you can check the call rather than take it.
-            </p>
+            <p className="footnote">This tool recommends. You decide.</p>
           </>
         ) : null}
 
@@ -454,44 +431,5 @@ export function SingleLabelTab() {
         ) : null}
       </section>
     </div>
-  )
-}
-
-/**
- * Where the server's time actually went, behind a disclosure (NFR-1).
- *
- * **Behind a disclosure because an agent checking a label does not need it, and
- * on the page at all because the person who does need it has nowhere else to
- * look.** NFR-4's benchmark is an agent who should not have to read past
- * anything, so a phase table above the results would be the tool talking about
- * itself in the middle of somebody's work. But a prototype that takes longer
- * than Sarah Chen's five seconds should be able to say where the time went
- * without anyone attaching a profiler, and until 2026-08-30 it could not: the
- * only figure it published was measuring the wrong span.
- *
- * Every row is a timer around the work it names. The last row, where there is
- * one, is what no timer covered, and it says so.
- */
-function TimingBreakdown({ timings }: { timings: PhaseTimings }) {
-  const rows = spans(timings)
-  if (!rows.length) return null
-
-  return (
-    <details className="timing-detail">
-      <summary>Where the time went</summary>
-      <p className="field__hint">{readingNote(timings)}</p>
-      <dl className="timing-detail__list">
-        {rows.map((span) => (
-          <div className="timing-detail__row" key={span.label}>
-            <dt>{span.label}</dt>
-            <dd>{span.ms.toFixed(0)} ms</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="field__hint">
-        These are measured, not estimated. They cover the server only; time in your browser and on
-        the network is not something the server can see.
-      </p>
-    </details>
   )
 }

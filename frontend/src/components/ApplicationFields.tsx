@@ -52,7 +52,7 @@ import {
   gapAnnouncement,
 } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
-import { fieldSourceMark, sourceCaveat, sourceChipLabel } from '../lib/applicationSources'
+import { fieldSourceMark, sourceChipLabel } from '../lib/applicationSources'
 import type { ApplicationData, ApplicationSource } from '../types'
 
 interface Props {
@@ -89,7 +89,9 @@ function SummaryLine({
   value: string
   source: ApplicationSource
 }) {
-  const caveat = sourceCaveat(source)
+  // No caveat line under the chip. The chip is the caveat: it names the source
+  // in four words, and a sentence repeating it was the third telling of
+  // something the upload card says once above (2026-08-31).
   return (
     <div className="value-line">
       <span className="value-line__label">{label}</span>
@@ -97,7 +99,6 @@ function SummaryLine({
       <span className={`chip chip--${source === 'typed' ? 'navy' : 'gold'}`}>
         {sourceChipLabel(source)}
       </span>
-      {caveat ? <span className="value-line__caveat">{caveat}</span> : null}
     </div>
   )
 }

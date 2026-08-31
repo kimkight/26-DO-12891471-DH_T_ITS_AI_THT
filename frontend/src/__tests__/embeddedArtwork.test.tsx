@@ -72,14 +72,16 @@ describe('the four sources a value can come from', () => {
       />,
     )
 
+    // The label on the value is the whole of it. A sentence under the row
+    // saying the same thing was cut on 2026-08-31; the upload card says it once
+    // where the values are first shown.
     expect(
       screen.getByText(/on the application \(label artwork in the application\)/i),
     ).toBeInTheDocument()
-    // The caveat is the point: this one went through OCR.
-    expect(screen.getByText(/not from its text\. Check it\./i)).toBeInTheDocument()
+    expect(screen.queryByText(/not from its text/i)).not.toBeInTheDocument()
   })
 
-  it('carries no such caveat for a value read out of the document’s text', () => {
+  it('labels a value read out of the document’s text as the form, not the artwork', () => {
     render(
       <ResultCard
         field={field('brand_name', 'match', {
@@ -89,7 +91,7 @@ describe('the four sources a value can come from', () => {
       />,
     )
 
-    expect(screen.queryByText(/not from its text/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/on the application \(application form\)/i)).toBeInTheDocument()
   })
 })
 
@@ -121,8 +123,9 @@ describe('the upload tells the agent what came out of the pictures', () => {
       ).toBeInTheDocument(),
     )
     expect(screen.getByText(/you do not have to add an image/i)).toBeInTheDocument()
-    // The honest half of the same sentence, in the same place.
-    expect(screen.getByText(/still needs a photo of the bottle/i)).toBeInTheDocument()
+    // The bottle caveat is not repeated here. The results panel states it once,
+    // where the check it qualifies is being read (2026-08-31).
+    expect(screen.queryByText(/photo of a bottle/i)).not.toBeInTheDocument()
   })
 })
 

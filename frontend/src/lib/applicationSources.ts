@@ -77,32 +77,27 @@ export function fieldSourceMark(source: ApplicationSource): string | null {
   return FIELD_MARKS[source]
 }
 
-/**
- * The one line that says a value was recognized off a picture rather than read
- * out of the file, and what to do about it.
- *
- * Only the artwork source gets one. The other three need no caveat: a typed
- * value is the agent's own, a text-layer value is what the file says, and an
- * absent value is already reported as absent.
+/*
+ * `sourceCaveat` was here, and it said in a sentence what the chip beside every
+ * affected value already says in four words: this one came off a picture. It
+ * appeared on each read value in the upload summary and again on each result
+ * row, which made it the third and fourth telling of a thing said once in the
+ * upload card. Removed 2026-08-31; the upload card's own line is the one that
+ * survives, because that is where the values are first shown.
  */
-export function sourceCaveat(source: ApplicationSource): string | null {
-  return source === 'parsed_from_artwork'
-    ? 'Read from the picture of the label inside the application, not from its text. Check it.'
-    : null
-}
 
 /**
  * The single line the result panel shows when the label being checked came out
  * of the application document rather than out of a photograph (ADR 0010).
  *
- * One short line, deliberately. The full statement is in the API's
- * `self_consistency_note` and in ADR 0010; what an agent needs on screen is
- * what was checked against what, and the fact that it is not the bottle.
+ * One short line, deliberately, and shorter again since 2026-08-31. The full
+ * statement is in the API's `self_consistency_note` and in ADR 0010; the two
+ * sentences that followed this one restated what the reader can work out from
+ * it, and the upload card had already said the same thing before the check ran.
+ * What an agent needs on screen is what was checked against what.
  */
 export const ARTWORK_LABEL_LINE =
-  'The label checked here is the artwork inside the application document, not a photo of a bottle. ' +
-  'This checks that the filed artwork carries the required elements and agrees with the form. ' +
-  'Checking the physical bottle needs a photo of that bottle.'
+  'The label checked here is the artwork inside the application, not a photo of a bottle.'
 
 /**
  * What the artwork-derived row says about itself, on the row (FR-14, ADR 0013).
@@ -120,14 +115,10 @@ export const ARTWORK_LABEL_LINE =
  */
 export const ARTWORK_DERIVED_SOURCE = 'Label artwork (same source as the label)'
 
-/**
- * The one line under it, saying what that means for the agent.
- *
- * It supersedes `sourceCaveat` on this row rather than joining it. The generic
- * artwork caveat warns that a value recognized off a picture can be misread,
- * which is true here too and is the smaller of the two problems; two notes on
- * one card is noise, and the larger problem is the one worth the line.
+/*
+ * `ARTWORK_DERIVED_CAVEAT` was here. It said, in two sentences under the row,
+ * what the chip above the row and the source line inside it already say: this
+ * came off the artwork that is also the label, so it could not have disagreed.
+ * The API's own reason for the row now says the one thing none of those three
+ * states, in one sentence. Removed 2026-08-31.
  */
-export const ARTWORK_DERIVED_CAVEAT =
-  'Both sides of this row are one reading of one picture, so they could not have disagreed. ' +
-  'It shows the artwork carries this value. It shows nothing about whether the applicant declared the same one.'

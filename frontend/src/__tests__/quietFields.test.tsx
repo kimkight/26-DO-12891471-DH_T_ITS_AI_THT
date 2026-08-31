@@ -243,8 +243,11 @@ describe('the source of a value that was read', () => {
     await waitFor(() => expect(screen.getByText('DEL MAGUEY')).toBeVisible())
     expect(screen.getByText('Application form')).toBeVisible()
     expect(screen.getAllByText('Label artwork in the application')).toHaveLength(3)
-    // The artwork case carries the one caveat worth a line: it went through OCR.
-    expect(screen.getAllByText(/not from its text\. Check it\./i).length).toBeGreaterThan(0)
+    // The chip is the whole of it. The sentence that used to sit under each
+    // value said the same thing at length, and the upload card says it once
+    // above (2026-08-31); see quietScreen.test.tsx for the budget that keeps it
+    // from coming back.
+    expect(screen.queryAllByText(/not from its text/i)).toHaveLength(1)
   })
 })
 

@@ -138,27 +138,62 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       buffer: Buffer.from([137, 80, 78, 71]),
     })
     await page.getByRole('button', { name: 'Check this label' }).click()
-    await expect(page.getByText(/Checked in/).first()).toBeVisible()
+    await expect(page.locator('p.summary-line')).toBeVisible()
 
-    // The panel names the difference between the two clocks as a location, and
-    // no longer as a mechanism nobody measured (NFR-1).
-    await expect(page.locator('.timing__detail')).toContainText(
-      'in your browser and on the network',
-    )
-    await expect(page.getByText(/sending the image/)).toHaveCount(0)
-
-    // The breakdown is on the page and closed, and axe checks it open too,
-    // because a disclosure nobody opens is not a disclosure that was checked.
-    await expect(page.getByText('Where the time went')).toBeVisible()
-    const before = await violations(page)
-    expect(report(before)).toBe('')
-
-    await page.getByText('Where the time went').click()
-    await expect(page.getByText('Reading the label')).toBeVisible()
-    await expect(page.getByText(/These are measured, not estimated/)).toBeVisible()
+    // **The timing came off the panel on 2026-08-31.** The author: "I don't need
+    // the time listed on the screen ... do not put all these extra words on the
+    // screen that should not be there." The phases are still measured and still
+    // in the API response, where the deployment runbook reads them; what has
+    // gone is the tool talking about itself in the middle of somebody's work
+    // (NFR-4). Asserted on the built page, because that is what an agent loads.
+    await expect(page.locator('p.timing')).toHaveCount(0)
+    await expect(page.getByText(/Checked in/)).toHaveCount(0)
+    await expect(page.getByText('Where the time went')).toHaveCount(0)
 
     const found = await violations(page)
     expect(report(found)).toBe('')
+  })
+
+  /*
+   * The author's target, in her words: the single-label result for a clean
+   * document fits one screen without scrolling at 1280x800.
+   *
+   * A word count is a proxy; this is the thing itself. It is here rather than in
+   * vitest because jsdom has no layout engine and cannot answer it, which is the
+   * same reason the contrast rule lives in this file.
+   */
+  test('a clean result fits one screen at 1280 by 800', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLEAN_RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'label.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([137, 80, 78, 71]),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+    await expect(page.locator('p.summary-line')).toBeVisible()
+
+    // The last thing in the panel, on screen without scrolling. Measured against
+    // the viewport rather than against the document, because a two-column layout
+    // means the page can be taller than the panel and still show all of it.
+    const footnote = page.locator('section[aria-labelledby="results-heading"] p.footnote')
+    const box = await footnote.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.y + box!.height).toBeLessThanOrEqual(800)
   })
 
   /*
@@ -807,6 +842,63 @@ const RESULT = {
   },
   external_call_made: false,
   application_document: null,
+}
+
+/**
+ * A clean single-label result: five rows, everything matching, one photograph.
+ *
+ * The panel an agent sees most often, and the one the author's target names:
+ * it has to fit one screen at 1280 by 800 without scrolling. Its reasons are
+ * the API's real ones for that submission rather than placeholders, because the
+ * thing being measured is how tall the real copy renders.
+ */
+const CLEAN_RESULT = {
+  ...RESULT,
+  fields: [
+    {
+      ...RESULT.fields[0],
+      reason:
+        "'Stone's Throw' was found on the label, in column 0, block 1, printed as \"STONE'S THROW\".",
+    },
+    {
+      ...RESULT.fields[1],
+      application_value: 'Kentucky Straight Bourbon Whiskey',
+      score: 100,
+      outcome: 'match',
+      reason: 'Found on the label, in column 0, block 2.',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[2],
+      application_value: '45',
+      score: 100,
+      outcome: 'match',
+      reason: 'Label 45 percent and application 45 percent are numerically equal.',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[3],
+      found_on_label: true,
+      label_value: '750 mL',
+      score: 100,
+      outcome: 'match',
+      reason: '750 mL on both sides. Standards of fill are not validated (A-13).',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[4],
+      label_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      outcome: 'match',
+      reason: `The statement matches 27 CFR 16.21 word for word. ${WARNING_NOTE}`,
+      source_photo: 1,
+    },
+  ],
+  warning_detail: {
+    ...RESULT.warning_detail,
+    prefix_as_printed: 'GOVERNMENT WARNING:',
+    prefix_is_capitalized: true,
+  },
+  photos: [RESULT.photos[0]],
 }
 
 /** What the application read looks like for a registry printout (FR-11). */

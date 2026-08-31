@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - unreleased until tagged
 
 The author's use of the released v1.1.0 build on 2026-08-30, with the same real
-mezcal COLA document uploaded alone. Everything upstream worked and two of the
-four compared fields still came back as defects.
+mezcal COLA document uploaded alone. Everything upstream worked, two of the four
+compared fields still came back as defects, item 5 was still blank, and the
+screen said far too much about all of it.
 
 ### The evidence
 
@@ -122,8 +123,57 @@ application to the picture of the label."
   directions, filling the value where a box stands out and clearing it where the
   boxes were sampled and none did. An AcroForm radio group still wins over both.
 
+### Removed
+
+- **The timing line and the "Where the time went" disclosure are off the screen**
+  (NFR-1 amended, NFR-4). The author: "I don't need the time listed on the screen
+  think about what a regular application looks like do not put all these extra
+  words on the screen that should not be there." An agent checking a label is not
+  measuring the tool. The number was also not measuring what she experienced: her
+  run showed 7.8 seconds of which 2334 ms was her own browser and network.
+  - **Nothing about the measurement changes.** Every phase is still timed by a
+    timer around the work it names and every figure is still in the API response,
+    where `docs/09_DEPLOYMENT.md` section 8.3a reads them. This is a presentation
+    change.
+  - The live region drops the seconds with it, so a screen reader is not read a
+    number nobody can see. It says no less about what changed.
+  - `frontend/src/lib/timing.ts` and `honestTiming.test.tsx` go with the panel
+    they existed for.
+
+### Changed, on the screen
+
+- **One sentence per row, at most.** The artwork-derived rows carried a paragraph
+  above the reason and a ninety-word reason under it, saying the same thing
+  twice. The outcome chip already reads "Read from the artwork" and the row
+  already carries "Label artwork (same source as the label)"; what is left is the
+  one sentence neither of those states.
+- **One notice per screen, not four.** The self-consistency explanation appeared
+  in the upload card, in the results header and on every affected row, and the
+  "this came off a picture" caveat appeared under every read value and again
+  under every result row. Each is now said once, where it is first relevant.
+- **A word budget, asserted.** Measured on the same fixtures before and after:
+
+  | measurement | before | after |
+  | --- | --- | --- |
+  | clean five-row panel | 246 | 157 |
+  | one row that matched | 26 | 26 |
+  | the author's own submission, whole panel | 584 | 253 |
+  | one artwork-derived row on it | 159 | 51 |
+
+  159 words on one row is the "about 150 words explaining a single row" the
+  author was looking at. `quietScreen.test.tsx` holds the ceilings, and
+  `a11y.spec.ts` holds her own target: a clean single-label result fits one
+  screen at 1280 by 800, its last element ending at 412 px against 535 px before.
+
 ### Unchanged, deliberately
 
+- **The prototype banner, the author attribution, the FR-9 error messages, and
+  the sentence that says who decides.** Cutting words is not licence to drop a
+  message that names a real problem, and each of those is asserted separately.
+- **Accessibility.** axe green on the built page, the contrast test green, the
+  keyboard walk unchanged, outcomes still carrying text and shape before colour,
+  and every live-region announcement still saying what changed. Shorter copy did
+  not become vaguer copy.
 - **FR-5, the government warning.** It already searches the label for a known
   statutory string, it is exact rather than fuzzy by requirement, and it returns
   an exact match on the author's own document. Nothing here touches it and it

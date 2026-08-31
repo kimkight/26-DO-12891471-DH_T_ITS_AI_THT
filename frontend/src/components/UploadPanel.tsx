@@ -216,19 +216,26 @@ export function UploadPanel({
             {PATHS[document.extraction_path]}
             {document.pages_read > 1 ? ` over ${document.pages_read} pages` : ''}.
           </p>
+          {/*
+            One line per thing, said once (2026-08-31). This is where a value
+            that came off a picture is first shown, so this is where it is said
+            that it did; the chip on each value carries the same fact in four
+            words and nothing repeats it under the results.
+          */}
           {fromArtwork.length ? (
             <p className="field__hint">
               {fromArtwork.map((entry) => entry.display_name).join(', ')}{' '}
               {fromArtwork.length === 1 ? 'was' : 'were'} read from the label artwork inside this
-              application, not from its text. Those went through the same reading we use on a label
-              image, so check them.
+              application, not from its text. Check {fromArtwork.length === 1 ? 'it' : 'them'}.
             </p>
           ) : null}
+          {/*
+            The bottle caveat is not repeated here. The results panel states it
+            once, where the check it qualifies is being read.
+          */}
           {document.label_artwork_available && !result?.label_images ? (
             <p className="field__hint">
-              This application carries its own label artwork, so you do not have to add an image. We
-              will check that artwork. Checking the physical bottle still needs a photo of the
-              bottle.
+              This application carries its own label artwork, so you do not have to add an image.
             </p>
           ) : null}
           {document.class_type_code ? (
