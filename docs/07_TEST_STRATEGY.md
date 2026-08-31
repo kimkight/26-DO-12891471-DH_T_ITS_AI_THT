@@ -253,6 +253,37 @@ highest a losing preprocessed read reached was 68.4.
   `beverage_type_supplied`, so a field added to it later has to be added there
   deliberately.
 
+### A sheet of several panels, and a line that belongs to one of them
+
+`backend/tests/test_panel_segmentation.py`, against a three-panel sheet with a
+strip of type set at 90 degrees in each gutter, rendered at test time. Each
+panel carries a vocabulary that appears nowhere else on the sheet, so "this line
+came from two panels" is a fact about the line rather than an impression of it.
+
+- No assembled line carries words from two panels, and no panel is returned to
+  after leaving it in reading order. The two are asserted separately because
+  they are two mechanisms: Tesseract returning a line that spans the sheet, and
+  a reading order that alternates between panels. Four of the six lines this
+  fixture reads as fail the first against the build this release starts from.
+- The government warning, printed in one panel with two panels of decoys beside
+  it, matches 27 CFR 16.21 exactly rather than nearly. The same fixture scores
+  213 edits against the previous build.
+- The strips are marked as type set at 90 degrees, which is what keeps them out
+  of the type-size ranking that locates the brand name.
+- **A single-panel label is byte-identical.** Asserted against the previous
+  grouping rule reproduced in four lines inside the test rather than against a
+  stored expectation, because a stored expectation only proves the output has
+  not changed since somebody wrote it down.
+- **The segmentation adds no Tesseract read** (NFR-1). Asserted twice: that
+  assembling lines from a word table reads nothing at all, and that a
+  multi-panel sheet costs exactly the reads its own reported read path names.
+- One class in that module is built from a word table rather than from pixels,
+  and says so. Tesseract does not return a line spanning two panels on clean
+  synthetic artwork at any geometry tried, and it did so repeatedly on the
+  author's filing where the blocks spanned x 44 to 1526 of a 1600 pixel sheet. A
+  fixture that cannot reproduce the mistake cannot prove it is handled, so the
+  mistake is stated directly.
+
 ## 3. Accuracy tests
 
 **Scope:** how often extraction and comparison are right, measured per field
@@ -573,7 +604,17 @@ says is manual by nature, is the screen reader pass and the greyscale check.
   issues. No real filed application is committed, and none has been parsed;
   that limit is OQ-22.
 - Sample label artwork is generated or sourced by the contributor and is
-  git-ignored; see `samples/README.md` for why.
+  git-ignored; see `samples/README.md` for why. That includes the multi-panel
+  sheets `samples/labelmaker.py` renders for the segmentation tier: the panel
+  text is nonsense vocabulary chosen so that a crossed line is detectable, and
+  it is generated at test time like everything else.
+- **A real filing is evidence, not a fixture.** The defect the panel
+  segmentation fixes was found on the author's own mezcal COLA, which carries a
+  real company, a real tax identifier and a real address. Every measurement in
+  `app/ocr.py`, in the CHANGELOG and in this document was taken on it, and none
+  of it is committed: not to `tests/`, not to `docs/`, not as an encoded blob,
+  and not in a pull request description. What is committed is the synthetic
+  fixture that reproduces the same defect.
 - **No extracted image is written, logged, or kept, and a signature is not read
   at all.** A filed application carries the applicant's handwritten signature,
   which is the most personal artefact on the form. Nothing lifts an embedded

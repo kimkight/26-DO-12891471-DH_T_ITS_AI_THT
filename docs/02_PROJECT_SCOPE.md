@@ -257,10 +257,20 @@ real COLA for that product gives the brand name as `DEL MAGUEY` and the fanciful
 name as `VIDA`. The largest text on the label is `Vida Clasico`. `parse.py`
 locates the brand name by type size, because no source states a layout rule and
 type size is a property of the artwork rather than an assumption about it; on
-this real product that heuristic returns the wrong answer, and it would return
-the wrong answer from a perfect transcription. Reading the pixels correctly and
+this real product that heuristic cannot get the right answer, and it could not
+get it from a perfect transcription either. Reading the pixels correctly and
 attributing them correctly are two different problems, and only the first is an
 OCR problem.
+
+**What changed in v1.1.0 is not that, and the distinction matters.** The
+ranking now declines rather than guessing: where the largest text is not clear
+of the next largest by `_STANDOUT_RATIO`, the field reports not found, which is
+what FR-1 asks for. On this artwork it declines. That converts a confident wrong
+answer into an honest absence, which is a real improvement and is not a solution
+to the attribution problem stated above. Nothing here reads a brand name off
+this label, and nothing in this prototype will until a source states a layout
+rule or the application's own text supplies it, which on the document path it
+does.
 
 ### 6.3 The scope decision
 

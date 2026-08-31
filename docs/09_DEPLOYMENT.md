@@ -378,9 +378,11 @@ python -c "import json;t=json.load(open('/tmp/verify.json'))['timings'];print(js
 
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
-reporting 3.2 s, and 3.5 s against deploy #11 later the same day once the
-instrumentation was honest and the duplicated read was gone; section 9 carries
-both sets of numbers and what was wrong with the first. The
+reporting 3.2 s, 3.5 s against deploy #11 later the same day once the
+instrumentation was honest and the duplicated read was gone, and 5.0 s against
+deploy #12 once the release that reads this artwork correctly had landed;
+section 9 carries all three sets of numbers, what was wrong with the first and
+what the last one bought. The
 `timings` block printed by the second command is the phase breakdown, and
 `ocr_passes` is the figure to look at first: a document-only submission should
 read one picture once.
@@ -495,10 +497,34 @@ This section is the record of the runs; the README is the summary of them.
       | 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
       | 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
 
-      **About 3.5 s end to end is inside NFR-1's roughly five seconds, with
-      about 1.5 s of margin.** It is recorded separately from the image path's
-      1.5 s rather than averaged into it, because they are two different paths
-      and one number covering both would be a claim about neither.
+      **After, deploy #12, same day, same document, same URL**, once the
+      release that corrected the reading of this artwork had landed. Two
+      consecutive runs:
+
+      | run | wall clock | server `elapsed_ms` | `ocr_passes` | `tesseract_reads` |
+      | --- | --- | --- | --- | --- |
+      | 1 | 4999 ms | 4928 ms | 1 | 4 |
+      | 2 | 4992 ms | 4918 ms | 1 | 4 |
+
+      **5.0 s end to end is NFR-1's roughly five seconds at the line rather
+      than under it**, and it is written as 5.0 rather than rounded down. It is
+      recorded separately from the image path's 1.5 s rather than averaged into
+      it, because they are two different paths and one number covering both
+      would be a claim about neither.
+
+      **What consumed the margin is the fix that made the readings correct, and
+      that is a trade worth seeing stated.** About 1.4 seconds of the rise from
+      3.5 to 5.0 is the 180-degree orientation check: it reads the image at
+      both candidate rotations and keeps the better-scoring one, and it runs
+      only where Tesseract's own orientation confidence falls under the floor,
+      which on this document it did at 0.03. It is why this artwork's OCR
+      confidence went from 37.9 to 89.6, why the alcohol content and net
+      contents are found at all, and why the label is no longer read upside
+      down. On the twelve sample labels it does not run and costs nothing.
+      A second and a half of a five-second budget to stop reading a label the
+      wrong way up is worth paying. It is not free, and this path now sits at
+      the bar rather than comfortably inside it. A costed but unbuilt
+      optimisation is in [OQ-27](OPEN_QUESTIONS.md#oq-27).
 
       The `elapsed_ms` column is the change worth reading twice. Before, it sat
       2 ms from `ocr_ms` and was measuring one span. After, it sits within
@@ -506,14 +532,26 @@ This section is the record of the runs; the README is the summary of them.
       what says the phase breakdown beside it covers the request rather than a
       part of it. `ocr_passes` went from 2 to 1.
 
-      **One caveat, and it is not a rounding error.** The 3.5 s runs were taken
-      while the artwork OCR on this document was still failing: the label was
-      being turned 180 degrees on a Tesseract orientation verdict of 0.03
-      confidence and then flattened to grayscale, so what took 3.5 seconds was
-      reading a wrongly turned, wrongly rendered image. v1.1.0 changes what is
-      read, so it changes what the read costs. **Re-run this step against the
-      next deploy and replace these figures if they move.** Do not assume they
-      will not.
+      **The 3.5 s runs are kept above because they are why the figure moved,
+      not because they are the current figure.** They were taken while the
+      artwork OCR on this document was still failing: the label was being
+      turned 180 degrees on a Tesseract orientation verdict of 0.03 confidence
+      and then flattened to grayscale, so what took 3.5 seconds was reading a
+      wrongly turned, wrongly rendered image and getting three of five fields
+      wrong. The deploy #12 figures are the ones to quote.
+
+      **The panel segmentation released after deploy #12 adds no Tesseract
+      read**, so it should not move this figure: the column split and the block
+      grouping are both arithmetic on the word table the single existing pass
+      already returns. Confirmed on a session container, which is not
+      production hardware and is quoted only as a before-and-after on one
+      machine: the same document measured a median of 3300 ms over five runs
+      before that change and 3280 ms after it, with `ocr_passes` 1 and
+      `tesseract_reads` 4 on every run either side.
+      `backend/tests/test_panel_segmentation.py` asserts the read count so the
+      claim does not rest on the measurement. **Re-run this step against the
+      next deploy anyway and replace these figures if they move.** Report what
+      is measured rather than what was expected.
 
       **The instrumentation was also wrong, and wrong in the flattering
       direction.** `elapsed_ms` and `ocr_ms` are within 2 ms of each other on

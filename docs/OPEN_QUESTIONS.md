@@ -35,7 +35,8 @@ updates every artifact the answer affects.
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010) |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
-| [OQ-26](#oq-26) | Answered 2026-08-30: met at about 3.5 s | Nothing; re-measured against deploy #11, and to be re-taken once v1.1.0 changes what is read |
+| [OQ-26](#oq-26) | Answered 2026-08-30: met at 5.0 s, at the line | Nothing; re-measured against deploy #12, and the 1.4 s the orientation check costs is what took the margin |
+| [OQ-27](#oq-27) | Open | Nothing; it would buy back part of the NFR-1 margin the orientation check consumed (OQ-26) |
 
 ---
 
@@ -1318,34 +1319,56 @@ in `backend/app/compare.py` plus the three document edits above.
 **Does the application-document path meet NFR-1 once the duplicated OCR pass is
 gone, on the deployed target rather than on a session container?**
 
-**Status: Answered and closed, 2026-08-30. It does, at about 3.5 s against a
-target of roughly five.**
+**Status: Answered and closed, 2026-08-30. It does, at 5.0 s against a target of
+roughly five: at the line rather than under it.**
 
-**The answer.** The same document was submitted to the same URL against deploy
-#11, three consecutive runs from the author's browser:
+**The answer, re-taken against deploy #12.** The same document was submitted to
+the same URL once the release that reads this artwork correctly had landed, two
+consecutive runs from the author's browser:
 
-| run | wall clock | server `elapsed_ms` | `unaccounted_ms` | `ocr_passes` |
+| run | wall clock | server `elapsed_ms` | `ocr_passes` | `tesseract_reads` |
 | --- | --- | --- | --- | --- |
-| 1 | 3468 ms | 3387 ms | 1.3 ms | 1 |
-| 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
-| 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
+| 1 | 4999 ms | 4928 ms | 1 | 4 |
+| 2 | 4992 ms | 4918 ms | 1 | 4 |
 
-`ocr_passes` reads 1, which is what this question asked for. `elapsed_ms` is now
-within 80 ms of the browser's wall clock rather than 3.5 seconds away from it,
-and `unaccounted_ms` of 1.3 ms is what says the phase breakdown covers the
-request rather than a part of it. The matrix row, the README and
-[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 all carry these figures.
+`ocr_passes` reads 1, which is what this question asked for. It is written as
+5.0 s and not rounded down, because 4999 ms against a bar of about five seconds
+is a fact worth stating precisely rather than a number to be tidied.
 
-**What the answer does not cover, stated because it is a real limitation.**
-Those runs were taken while the artwork OCR on this document was still failing:
-the label was being turned 180 degrees on an orientation verdict of 0.03
-confidence and then flattened to grayscale, so 3.5 seconds was the cost of
-reading a wrongly turned, wrongly rendered image. v1.1.0 changes what is read.
-The figure is re-measured against the next deploy, by re-running
-[09_DEPLOYMENT.md](09_DEPLOYMENT.md) step 8.3a, and updated everywhere it
-appears if it moves. That is a follow-up on a closed question rather than the
-question staying open: what was asked was whether removing the duplicate pass
-put this path inside the bar on the deployed target, and it did.
+**What consumed the margin, stated plainly: the fix that made the readings
+correct.** Against deploy #11 earlier the same day the same document measured
+3468, 3505 and 3543 ms, with `unaccounted_ms` at 1.3 ms. Those runs were taken
+while the artwork OCR on this document was still failing: the label was being
+turned 180 degrees on an orientation verdict of 0.03 confidence and then
+flattened to grayscale, so 3.5 seconds was the cost of reading a wrongly turned,
+wrongly rendered image and getting three of five fields wrong. About 1.4 s of
+the rise from 3.5 to 5.0 is the 180-degree check that replaced that: it reads
+the image at both candidate rotations and keeps the better-scoring one, and it
+runs only where Tesseract's own orientation confidence falls under the floor.
+It took this artwork's OCR confidence from 37.9 to 89.6 and found the alcohol
+content and net contents. On the twelve sample labels it does not run at all.
+
+That is a real engineering trade and it is worth making: a second and a half of
+a five-second budget to stop reading a label upside down. It is also worth
+seeing rather than averaging away, which is why it is here and in the three
+other places the figure appears. A costed but unbuilt way to get some of it
+back is [OQ-27](#oq-27).
+
+`elapsed_ms` is within 80 ms of the browser's wall clock on both runs, which is
+what says the phase breakdown covers the request rather than a part of it. The
+matrix row, the README and [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 all
+carry these figures.
+
+**The panel segmentation released after deploy #12 is not expected to move
+this,** because it adds no Tesseract read: the column split and the block
+grouping are both arithmetic on the word table the single existing pass already
+returns, and `backend/tests/test_panel_segmentation.py` asserts the read count
+rather than leaving it to a measurement. Confirmed on a session container, which
+is not production hardware and is quoted only as a before-and-after on one
+machine: a median of 3300 ms over five runs before that change and 3280 ms after
+it, `ocr_passes` 1 and `tesseract_reads` 4 either side. Re-run
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) step 8.3a against the next deploy anyway,
+and record what is measured rather than what was expected.
 
 **The history, kept because the shape of the mistake is the useful part.**
 
@@ -1383,3 +1406,56 @@ clock and the `timings` block. `ocr_passes` should read 1.
 **Who can answer:** the author, with the deployed URL and that PDF.
 **Blocks:** nothing in the prototype. It blocks any claim that NFR-1 is met on
 this path, which is why no such claim is made.
+
+## OQ-27
+
+**Would reading the two rotation candidates at a lower resolution separate them
+just as reliably, and how much of NFR-1's margin would that buy back?**
+
+**Status: Open, raised 2026-08-30. Costed here and deliberately not built.**
+
+**Why it is worth asking.** The 180-degree check in `backend/app/ocr.py` is what
+made the author's mezcal artwork readable, and it is what took this path from
+3.5 s to 5.0 s against NFR-1's roughly five (OQ-26). It costs two full Tesseract
+reads at the working resolution, and it does so only to decide between two
+numbers that are far apart: on that artwork, 91.8 upright against 32.1 upside
+down. Separating 91.8 from 32.1 does not obviously need every pixel.
+
+**What was measured, on one image.** The same artwork, both candidates scored at
+each scale, on a session container. The time is for both candidates together;
+the confidences are upright against upside down.
+
+| scale | long edge | both candidates | upright | upside down | chose |
+| --- | --- | --- | --- | --- | --- |
+| 1.00 | 1600 px | 1013 ms | 91.8 | 32.1 | correctly |
+| 0.60 | 960 px | 838 ms | 82.2 | 28.9 | correctly |
+| 0.50 | 800 px | 671 ms | 62.2 | 25.0 | correctly |
+| 0.40 | 640 px | 648 ms | 39.0 | 21.9 | correctly |
+| 0.30 | 480 px | 285 ms | 35.3 | 21.7 | correctly |
+| 0.25 | 400 px | 183 ms | 0.0 | 1.0 | **backwards** |
+
+**The estimate.** At half resolution the check costs about a third less, which
+on the deployed figures is roughly 0.5 s off a 5.0 s request, and the two
+candidates are still 37 points apart. At 0.30 it costs about 70 percent less,
+roughly 1.0 s, and the gap has narrowed to 14 points. At 0.25 the text has
+dissolved far enough that the check answers backwards, which is the failure
+mode that matters: a cheap check that turns a readable label upside down is
+worse than no check.
+
+**Why it is not built.** One image is not a measurement of a decision rule. The
+figure that would justify changing this is the one ADR 0003 was decided on: the
+twelve-label sample set at all four cardinal rotations, forty-eight cases, with
+the check forced to run on every one of them, scored at each candidate scale.
+Until that exists, picking a scale from a single sheet would be exactly the kind
+of arithmetic this repository declines to publish as measurement
+([README](../README.md), "Measured performance and accuracy"). The margin it
+would buy is real but the path is inside the bar without it.
+
+**What would answer it:** run that sweep, and report the accuracy at each scale
+beside the time saved. A scale is only a candidate if it is right in as many of
+the 48 cases as full resolution is.
+
+**Who can answer:** anyone with a checkout, Tesseract and the sample set; it
+needs no deployed environment and no real applicant artwork.
+**Blocks:** nothing. NFR-1 is met at 5.0 s without it. It would restore margin
+on the path that has least of it.

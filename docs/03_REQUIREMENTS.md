@@ -171,14 +171,14 @@ warning is governed by FR-5 and FR-6, which are deliberately stricter.
 **Priority:** Must
 **Source:** Jenny Park interview; Decision D-5; 27 CFR 16.21
 
-The government warning is compared for exact text after whitespace
-normalization, against the text quoted in section 1.
+The government warning is compared for exact text after whitespace and letter
+case normalization, against the text quoted in section 1.
 
 **Acceptance criteria**
-- Given a warning matching 27 CFR 16.21 exactly except for line breaks and
-  runs of spaces, then the outcome is match.
+- Given a warning matching 27 CFR 16.21 exactly except for line breaks, runs of
+  spaces and letter case, then the outcome is match.
 - Given a warning with altered, added, or omitted words, then the outcome is
-  mismatch, not needs human review.
+  mismatch, not needs human review, in whatever case the label sets it.
 - Given no warning found on the label, then the outcome is mismatch and the
   result says the statement was not found.
 - Fuzzy tolerance under FR-4 is not applied to the warning body.
@@ -198,7 +198,7 @@ on a similarity score. Nothing here lets anything through: a near miss is one of
 the two **failing** outcomes, and what separates it from a mismatch is which
 sentence the agent reads and whether they are handed the difference to look at.
 The comparison that decides a match is unchanged and still requires identical
-text after whitespace normalization.
+text after whitespace and case normalization.
 
 **Why the distinction matters enough to be in the requirement.** The author's
 own COLA artwork, read on 2026-08-29, OCRs the statement with exactly one
@@ -211,6 +211,25 @@ in the direction OOS-8 and FR-6 exist to prevent. Loosening the comparison
 instead would be the same error in the other direction. The threshold, the
 reasoning behind the number, and the alternatives rejected are in
 [ADR 0012](adr/0012-warning-near-miss.md).
+
+**Why letter case is normalized alongside whitespace, added 2026-08-31.**
+27 CFR 16.21 fixes the *wording* of the statement. How it is set is 27 CFR
+16.22(a)(2), and the only part of that this prototype checks is the prefix,
+which FR-6 checks separately and still case-sensitively. Filed labels routinely
+print the whole statement in capitals, and the author's own mezcal artwork is
+one of them: once the panel segmentation of v1.1.0 stopped splicing a
+neighbouring panel through it, the statement read as 283 characters in exactly
+the order the regulation sets them, and the exact comparison still failed on 209
+differences of which every single one was a capital letter. Reporting that as
+altered wording tells an agent their label is defective about the one thing it
+is demonstrably correct about, which is the same overstatement the near-miss
+routing above exists to prevent.
+
+Case is therefore presentational, exactly as line breaks and runs of spaces are,
+and nothing else moves with it. An altered, added or omitted word fails in
+either case; `backend/tests/test_warning.py` asserts that in both. The
+difference an agent is shown is still the label's own text, because the fold is
+length-preserving and the diff segments are sliced from what was printed.
 
 Jenny's constraint: "It has to be exact. Like, word-for-word." She also notes
 the failure modes she sees in practice: "people try to get creative with the

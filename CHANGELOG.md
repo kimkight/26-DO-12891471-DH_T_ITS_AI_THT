@@ -394,8 +394,9 @@ them.
 the artwork OCR on this document was still failing: the label was being turned
 180 degrees on an orientation verdict of 0.03 confidence and then flattened to
 grayscale, so the 3.5 seconds was the cost of reading a wrongly turned, wrongly
-rendered image. The fixes below change what is read. The figure is re-measured
-against the next deploy and updated everywhere it appears if it moves.
+rendered image. The fixes below change what is read. **It was re-measured, and
+it moved: 5.0 s against deploy #12 the same day.** See "Changed" at the end of
+this release for the figures and for what consumed the margin.
 
 ### Fixed: the label artwork is turned the right way and read in colour
 
@@ -470,6 +471,120 @@ mistake the timing finding above was.
   and Tobacco Tax and Trade Bureau", which some labels do, would be taken for a
   form. It is reported per file and the agent can remove it; there is no silent
   path.
+
+### Fixed: a sheet of several panels is read as several panels
+
+The same document again, on deploy #12, with the orientation and colour work
+above in place. The artwork read at 89.6 against 37.9, the alcohol content and
+net contents were found, and three fields were still wrong. One cause, one layer
+downstream: the filed artwork is one flat sheet carrying a left panel, a front
+panel, a right panel and a narrow strip of type set at 90 degrees in each
+gutter, and the reader was assembling its words into lines across the full width
+of it.
+
+| field | read as | should read |
+| --- | --- | --- |
+| brand name | the producer's tax identifier, off the vertical strip | `DEL MAGUEY` |
+| class or type | the producer's street address, off the same strip | something containing `MEZCAL` |
+| government warning | the statute with `ORIGEN PROTEGIDA` and `NOM-041X` spliced through it from the left panel | the statute, exactly |
+
+- **The sheet is cut at its gutters before its words are grouped into lines.**
+  A blank column of pixels that no word box covers is a gutter when it clears
+  two conditions: 2.5 percent of the image width, and 1.25 times the largest
+  type touching it. The three gutters on this artwork measure 63, 86 and 70
+  pixels at the reader's 1600 pixel working width, which is 3.94, 5.38 and 4.38
+  percent; the widest blank on it that is not a gutter is 28 pixels, 1.75
+  percent.
+  - The width share alone is not sufficient, and sample label 05 is the case
+    that shows it: it sets `LANTERN HILL` in 75 pixel display type with a 53
+    pixel word space in it, 4.97 percent of that label's width, wider as a
+    share than two of the three real gutters. The type either side of a blank
+    is what separates the two, measured on the shorter side of each word box so
+    that a strip set sideways is measured by the same rule as the panels beside
+    it. As a multiple of that type the three gutters are 2.17, 1.59 and 3.33
+    and every non-gutter is 0.93 or less.
+  - Words are then grouped inside a column by Tesseract's own block and
+    paragraph, as they always were. Blocks alone were never sufficient here:
+    on this artwork Tesseract returns blocks spanning x 44 to 1526 of a 1600
+    pixel image, so `HECHO EN MEXICO` from the left panel and
+    `long, smooth finish.` from the right one arrive in one block, one
+    paragraph and one line.
+  - Reading order is column by column and each column top to bottom, which is
+    what lets the government warning be collected as a run of consecutive lines
+    without another panel's words falling into the middle of it.
+  - **This adds no Tesseract read.** Both segmentations are arithmetic on the
+    word table the single existing pass already returns; nothing is cropped, no
+    page segmentation mode changes, and nothing is read twice.
+    `test_panel_segmentation.py` asserts the read count rather than arguing it.
+  - A label with no gutter wide enough is one column and reads exactly as it did
+    before this existed. All twelve sample labels are byte-identical, asserted
+    against the previous grouping rule reproduced in the test rather than
+    against a stored expectation.
+- **The brand name and the class or type designation are ranked among upright
+  regions only, and the ranking may now decline.** A word set at 90 degrees
+  reports a box about one cap-height wide and one word long, so its height
+  measures its length: on this artwork that made the producer's tax identifier
+  the tallest text on the sheet at 81.5 pixels against a 43 pixel display line.
+  Type set sideways is excluded from the size ranking and from nothing else.
+  - And where the largest upright text is not clear of the next largest by 0.70,
+    type size has identified nothing and the field reports not found rather than
+    the winner of a photo finish (FR-1). On the twelve sample labels that ratio
+    runs 0.46 to 0.64 and every brand name is still found. On this artwork it is
+    0.83, and not found is the honest answer: the filing declares a brand name
+    of `DEL MAGUEY` and a fanciful name of `VIDA` while the largest text on the
+    artwork is `Vida Clasico`, so a largest-text rule is not merely
+    inconclusive here, it is wrong here. The row says which of the two happened
+    rather than reporting a bare not found.
+- **Letter case joins whitespace as presentational in the FR-5 body
+  comparison.** After the split, the statement on this artwork is 283
+  characters in exactly the order 27 CFR 16.21 sets them, and the exact
+  comparison still failed on 209 differences of which every one was a capital
+  letter. 27 CFR 16.21 fixes the wording; 27 CFR 16.22(a)(2) governs the
+  setting, and FR-6 checks the prefix separately and still case-sensitively. An
+  altered, added or omitted word fails in either case, asserted in both, and the
+  difference an agent is shown is still the label's own text because the fold is
+  length-preserving and the diff segments are sliced from what was printed.
+- **The browser stops posting values it read out of the document back as values
+  the agent typed.** The five application boxes are filled from the uploaded
+  COLA and the whole set was sent with the check. A value arriving in a typed
+  part is a typed value, so `resolve_application` recorded all five as typed,
+  which is the top of ADR 0010's precedence, and FR-14's circularity overlay
+  could not see the two rows that were one reading of one picture compared with
+  itself. Measured on 2026-08-30 with this filing: the alcohol content and the
+  net contents came back as matches and the panel read "2 of 5 fields match.
+  3 does not match." The API returns those rows correctly as `artwork_derived`
+  when the browser sends nothing; the round trip was what broke it, which is
+  why the accessibility fixture, which stubs the endpoint, could not catch it.
+  The browser now sends what the agent typed, including anything they edited,
+  and lets the server re-derive the rest from the document it is being sent
+  anyway.
+
+### Added
+
+- `photos[].segmentation` on every photograph: how many columns the sheet was
+  cut into, how many Tesseract blocks the words fell into, and the cuts
+  themselves as pixel bounds. One column spanning the image is a sheet that was
+  not cut at all.
+- `fields[].label_region` on every field: which column and which block the value
+  was read from, or null where it was not found on the label. An agent who sees
+  a brand name should be able to see it came from the front panel, and an agent
+  looking at a surprising value should be able to see it came from somewhere the
+  value has no business coming from.
+
+### Changed
+
+- NFR-1 on the application-document path is re-measured and the figure moved.
+  Against deploy #12 on 2026-08-30, the author's own mezcal COLA submitted
+  alone: 4999 and 4992 ms wall clock, `elapsed_ms` 4928 and 4918 ms,
+  `ocr_passes` 1, `tesseract_reads` 4. **5.0 s against a target of roughly five
+  is at the line rather than under it, and it is published as 5.0 rather than
+  rounded down.** About 1.4 s of the rise from the 3.5 s measured against deploy
+  #11 is the 180-degree orientation check, which is the fix that made this
+  document's readings correct at all. That is what consumed the margin, it was
+  worth paying, and it is stated rather than smoothed over. A costed but unbuilt
+  optimisation is [OQ-27](docs/OPEN_QUESTIONS.md#oq-27). The README,
+  [09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9, the traceability matrix
+  NFR-1 row and [OQ-26](docs/OPEN_QUESTIONS.md#oq-26) all carry the new figures.
 
 ## [1.0.1] - 2026-08-29
 
