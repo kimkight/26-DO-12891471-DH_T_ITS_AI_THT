@@ -20,18 +20,27 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SingleLabelTab } from '../components/SingleLabelTab'
-import { applicationDocument, parsedField, verification } from './fixtures'
+import {
+  applicationDocument,
+  classification,
+  fileClassification,
+  parsedField,
+  verification,
+} from './fixtures'
+import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
 const TOGGLE = /Or type the application values/i
+/** What the same disclosure is called once something has been read (US-26). */
+const REVIEW = /Review the values/i
 
 function pdfFile(name = 'application.pdf') {
   return new File([new Uint8Array([37, 80, 68, 70])], name, { type: 'application/pdf' })
 }
 
-/** Route each request by URL, so one stub serves both endpoints. */
+/** Route each request by URL, so one stub serves both endpoints (FR-12). */
 function stubApi(document: unknown, ok = true, status = 200) {
   const fetchMock = vi.fn(async (url: string) => {
-    if (url === '/api/read-application') {
+    if (url === '/api/classify') {
       return { ok, status, json: async () => document } as Response
     }
     return { ok: true, status: 200, json: async () => verification() } as Response
@@ -40,13 +49,24 @@ function stubApi(document: unknown, ok = true, status = 200) {
   return fetchMock
 }
 
+/** One uploaded application, as the classify endpoint reports it. */
+function documentOnly(document: ApplicationDocumentResult): ClassificationResult {
+  return classification({
+    files: [fileClassification('application.pdf', 'application_document')],
+    application_document: document,
+    label_images: 0,
+  })
+}
+
 async function attachApplication(user: ReturnType<typeof userEvent.setup>) {
-  await user.upload(screen.getByLabelText('Label application'), pdfFile())
+  await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
 }
 
 /** The panel the disclosure controls, found the way assistive technology does. */
 function panel() {
-  const id = screen.getByRole('button', { name: TOGGLE }).getAttribute('aria-controls')
+  const toggle =
+    screen.queryByRole('button', { name: TOGGLE }) ?? screen.getByRole('button', { name: REVIEW })
+  const id = toggle.getAttribute('aria-controls')
   const found = id ? window.document.getElementById(id) : null
   if (!found) throw new Error('The disclosure names no panel through aria-controls.')
   return found
@@ -76,9 +96,9 @@ describe('what greets the agent on the single-label view', () => {
     expect(panel()).not.toBeVisible()
   })
 
-  it('puts the application upload before the disclosure, not after it', () => {
+  it('puts the upload before the disclosure, not after it', () => {
     render(<SingleLabelTab />)
-    const upload = screen.getByLabelText('Label application')
+    const upload = screen.getByLabelText('Files for this label')
     const toggle = screen.getByRole('button', { name: TOGGLE })
     // Node.DOCUMENT_POSITION_FOLLOWING: the toggle comes after the upload.
     expect(upload.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -86,14 +106,18 @@ describe('what greets the agent on the single-label view', () => {
 
   it('no longer frames the upload as the alternative to typing', () => {
     render(<SingleLabelTab />)
-    const heading = screen.getByRole('heading', { name: /Upload the label application/i })
+    const heading = screen.getByRole('heading', {
+      name: /Upload the label application, an image of the label, or both/i,
+    })
     expect(heading).not.toHaveTextContent(/instead/i)
-    expect(screen.getByText(/This is what the label is checked against/i)).toBeInTheDocument()
+    expect(screen.getByText(/One place for everything/i)).toBeInTheDocument()
   })
 
-  it('tells the flow in the empty state: photos, then the application, then check', () => {
+  it('tells the flow in the empty state: upload, then check', () => {
     render(<SingleLabelTab />)
-    const placeholder = screen.getByText(/Take your photos, attach the label application/i)
+    const placeholder = screen.getByText(
+      /Upload the label application, an image of the label, or both, then select/i,
+    )
     expect(placeholder).toBeInTheDocument()
     expect(placeholder).toHaveTextContent(/Check this label/i)
   })
@@ -140,73 +164,87 @@ describe('expansion case 1: the agent opens the disclosure', () => {
   })
 })
 
-describe('expansion case 2: a parsed document leaves gaps', () => {
-  it('opens the fields when the form did not carry every value', async () => {
+describe('case 2: a parsed document leaves gaps (US-26)', () => {
+  /*
+   * Session 10 opened the disclosure here. US-26 goes further: the missing
+   * field is shown directly, because that is the same outcome with one fewer
+   * moving part, and everything that was read becomes a summary line rather
+   * than a box. The behaviour these tests pinned is now pinned in
+   * quietFields.test.tsx; what is kept here is that a gap is still loud.
+   */
+  it('shows the missing values as fields, not behind anything', async () => {
     const user = userEvent.setup()
-    stubApi(applicationDocument())
+    stubApi(documentOnly(applicationDocument()))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'true'),
-    )
-    expect(panel()).toBeVisible()
-  })
-
-  it('shows the parsed values filled and the gaps empty', async () => {
-    const user = userEvent.setup()
-    stubApi(applicationDocument())
-    render(<SingleLabelTab />)
-    await attachApplication(user)
-
-    await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
-    expect(screen.getByLabelText('Brand name')).toBeVisible()
     // The three the form proper has no boxes for at all (A-17).
-    expect(screen.getByLabelText('Class or type designation')).toHaveValue('')
+    await waitFor(() => expect(screen.getByLabelText('Class or type designation')).toBeVisible())
+    expect(screen.getByLabelText('Alcohol content')).toBeVisible()
+    expect(screen.getByLabelText('Net contents')).toBeVisible()
     expect(screen.getByLabelText('Alcohol content')).toHaveValue('')
-    expect(screen.getByLabelText('Net contents')).toHaveValue('')
   })
 
-  it('announces the expansion and names the gaps that caused it', async () => {
+  it('summarises what was read rather than putting it back in a box', async () => {
     const user = userEvent.setup()
-    stubApi(applicationDocument())
+    stubApi(documentOnly(applicationDocument()))
+    render(<SingleLabelTab />)
+    await attachApplication(user)
+
+    await waitFor(() => expect(screen.getByText('Read from your upload')).toBeVisible())
+    expect(screen.getByText("STONE'S THROW")).toBeVisible()
+    // And the box for it is behind the disclosure, still there to correct.
+    expect(screen.getByLabelText('Brand name')).not.toBeVisible()
+  })
+
+  it('announces which value is missing and what to do about it', async () => {
+    const user = userEvent.setup()
+    stubApi(documentOnly(applicationDocument()))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
     const region = screen.getByLabelText('Application values')
-    await waitFor(() => expect(region).toHaveTextContent(/The application values are open below/i))
-    expect(region).toHaveTextContent(/class type/i)
+    await waitFor(() => expect(region).toHaveTextContent(/not found in your upload/i))
+    expect(region).toHaveTextContent(/alcohol content/i)
     expect(region).toHaveTextContent(/net contents/i)
-    expect(region).toHaveTextContent(/What it did carry is already filled in/i)
+    expect(region).toHaveTextContent(/Enter them, or upload a clearer image/i)
   })
 
-  it('leaves the fields collapsed when the document carried every value', async () => {
+  it('shows no editable field at all when the document carried every value', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubApi(documentOnly(FULL_DOCUMENT))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
     // The parse has landed: the values are in the fields.
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
     // And nothing opened, because there is nothing left for the agent to enter.
-    expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: REVIEW })).toHaveAttribute('aria-expanded', 'false')
     expect(panel()).not.toBeVisible()
     expect(screen.getByLabelText('Application values')).toHaveTextContent('')
   })
 })
 
 describe('expansion case 3: the document could not be read (FR-9)', () => {
-  const ERROR_BODY = {
-    error: {
+  /*
+   * The classification stands and the file is still listed as the label
+   * application; what failed is reading it. So the classify call succeeds and
+   * carries the failure in `application_error` (FR-12, ADR 0011).
+   */
+  const UNREADABLE = classification({
+    files: [fileClassification('application.pdf', 'application_document')],
+    application_document: null,
+    label_images: 0,
+    application_error: {
       code: 'unreadable_application_document',
       message: 'The uploaded file could not be opened as a PDF.',
       limit: null,
     },
-  }
+  })
 
   it('opens the fields as the fallback the error message promises', async () => {
     const user = userEvent.setup()
-    stubApi(ERROR_BODY, false, 422)
+    stubApi(UNREADABLE)
     render(<SingleLabelTab />)
     await attachApplication(user)
 
@@ -218,7 +256,7 @@ describe('expansion case 3: the document could not be read (FR-9)', () => {
 
   it('announces that the fields are open, without repeating the error', async () => {
     const user = userEvent.setup()
-    stubApi(ERROR_BODY, false, 422)
+    stubApi(UNREADABLE)
     render(<SingleLabelTab />)
     await attachApplication(user)
 
@@ -228,7 +266,7 @@ describe('expansion case 3: the document could not be read (FR-9)', () => {
     )
     // The error itself belongs to the upload's own region, said once.
     expect(region).not.toHaveTextContent(/couldn't read that label application/i)
-    expect(screen.getByLabelText('Application form')).toHaveTextContent(
+    expect(screen.getByLabelText('Your uploads')).toHaveTextContent(
       /couldn't read that label application/i,
     )
   })
@@ -237,12 +275,12 @@ describe('expansion case 3: the document could not be read (FR-9)', () => {
 describe('what does not open the fields', () => {
   it('taking a readable document back off the form opens nothing', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubApi(documentOnly(FULL_DOCUMENT))
     render(<SingleLabelTab />)
     await attachApplication(user)
     await waitFor(() => expect(screen.getByLabelText('Brand name')).toHaveValue("STONE'S THROW"))
 
-    await user.click(screen.getByRole('button', { name: 'Remove this application form' }))
+    await user.click(screen.getByRole('button', { name: 'Remove application.pdf' }))
 
     await waitFor(() =>
       expect(screen.queryByText(/Read from the application form/i)).not.toBeInTheDocument(),
@@ -250,12 +288,24 @@ describe('what does not open the fields', () => {
     expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'false')
   })
 
-  it('choosing a label photograph opens nothing', async () => {
+  it('uploading a label photograph opens nothing', async () => {
     const user = userEvent.setup()
+    stubApi(
+      classification({
+        files: [fileClassification('label.png')],
+        application_document: null,
+        label_images: 1,
+      }),
+    )
     render(<SingleLabelTab />)
+
     await user.upload(
-      screen.getByLabelText('Label image'),
+      screen.getByLabelText('Files for this label'),
       new File([new Uint8Array([137, 80, 78, 71])], 'label.png', { type: 'image/png' }),
+    )
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled(),
     )
     expect(screen.getByRole('button', { name: TOGGLE })).toHaveAttribute('aria-expanded', 'false')
   })
@@ -287,16 +337,17 @@ describe('beverage type is demoted (A-12, A-13)', () => {
 
   it('still fills from the document when the document states it', async () => {
     const user = userEvent.setup()
-    stubApi(FULL_DOCUMENT)
+    stubApi(documentOnly(FULL_DOCUMENT))
     render(<SingleLabelTab />)
     await attachApplication(user)
 
     await waitFor(() =>
       expect(screen.getByLabelText('Beverage type')).toHaveValue('distilled spirits'),
     )
-    await user.click(screen.getByRole('button', { name: TOGGLE }))
-    expect(screen.getByLabelText('Beverage type')).toHaveAccessibleDescription(
-      /Read from the application form/i,
-    )
+    // It was read, so it is a summary line saying where it came from, and its
+    // control is behind the disclosure for an agent who wants to change it.
+    expect(screen.getAllByText('Application form').length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: REVIEW }))
+    expect(screen.getByLabelText('Beverage type')).toBeVisible()
   })
 })

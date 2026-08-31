@@ -20,6 +20,12 @@
  * right, which is the shape a reader compares two things in.
  */
 import { OutcomeBadge } from './OutcomeBadge'
+import {
+  ARTWORK_DERIVED_CAVEAT,
+  ARTWORK_DERIVED_SOURCE,
+  sourceCaveat,
+  sourceChipLabel,
+} from '../lib/applicationSources'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
@@ -71,6 +77,10 @@ export function ResultCard({
 }) {
   const { tone } = presentation(field.outcome)
   const isWarning = field.name === 'government_warning'
+  // A row whose two sides are one reading of one picture (FR-14, ADR 0013).
+  // It says so on the row, in its own key-value pair, because that is where an
+  // agent is already looking when they wonder why this chip is not a match.
+  const isArtworkDerived = field.outcome === 'artwork_derived'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
   const source = sourceLabel(field.source_photo, photoCount)
@@ -97,11 +107,31 @@ export function ResultCard({
           }
         />
         <Value
-          label={isWarning ? 'Required by 27 CFR 16.21' : 'On the application'}
+          label={
+            isWarning
+              ? 'Required by 27 CFR 16.21'
+              : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
+          }
           value={field.application_value}
           missing="Not supplied"
         />
+        {isArtworkDerived ? (
+          <Value label="Source" value={ARTWORK_DERIVED_SOURCE} missing="" />
+        ) : null}
       </dl>
+
+      {/*
+        The one caveat that is worth a line of its own: this application value
+        was recognized off a picture of the label inside the document rather
+        than read out of the document's text, so it can be misread in a way the
+        others cannot (ADR 0010). Text, not colour, so it survives greyscale
+        (NFR-5).
+      */}
+      {isArtworkDerived ? (
+        <p className="card__detail--note">{ARTWORK_DERIVED_CAVEAT}</p>
+      ) : !isWarning && sourceCaveat(field.application_value_source) ? (
+        <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
+      ) : null}
 
       <p className="card__reason">{reasonWithout(field.reason, warning?.bold_type_note)}</p>
 
@@ -133,6 +163,7 @@ function WarningDetail({ warning }: { warning: WarningResult }) {
 
   return (
     <div className="card__detail">
+      {warning.diff.length ? <WarningDiff warning={warning} /> : null}
       <h4 className="card__subtitle">Capitalization of the prefix</h4>
       <p
         className={
@@ -144,5 +175,71 @@ function WarningDetail({ warning }: { warning: WarningResult }) {
       <h4 className="card__subtitle">Bold type</h4>
       <p className="card__detail--note">{warning.bold_type_note}</p>
     </div>
+  )
+}
+
+/**
+ * The character-level difference against 27 CFR 16.21 (FR-5, ADR 0012).
+ *
+ * **Shown so the agent can tell an OCR artifact from a real defect.** The
+ * author's own COLA artwork reads the statement with one character wrong, and
+ * "does not match word for word" is true of that and of a missing clause alike.
+ * The difference between those two is the whole of the agent's decision, and
+ * they cannot make it from a verdict.
+ *
+ * Each run is marked by text as well as by styling: a run the regulation
+ * requires and the label does not show is prefixed "missing:", and a run on the
+ * label the regulation does not have is prefixed "extra:". NFR-5's greyscale
+ * rule applies here as much as to the outcome chips, and a difference conveyed
+ * by a background colour would be invisible in print and to anyone who cannot
+ * distinguish the two tints.
+ *
+ * `<del>` and `<ins>` rather than styled spans, because the two elements mean
+ * exactly this and assistive technology already knows what they are.
+ */
+function WarningDiff({ warning }: { warning: WarningResult }) {
+  const distance = warning.edit_distance ?? 0
+  const characters = distance === 1 ? 'character' : 'characters'
+
+  return (
+    <>
+      <h4 className="card__subtitle">
+        {warning.near_miss
+          ? `Difference from 27 CFR 16.21: ${distance} ${characters}`
+          : 'Difference from 27 CFR 16.21'}
+      </h4>
+      {warning.near_miss ? (
+        <p className="card__detail--note">
+          A difference this small is as likely to be a reading error as a defect on the label. It is
+          not a match, and it is not automatically a problem: check the label itself against the
+          difference below.
+        </p>
+      ) : null}
+      <p className="warning-diff">
+        {warning.diff.map((segment, index) => {
+          if (segment.kind === 'same') {
+            return <span key={index}>{segment.text}</span>
+          }
+          if (segment.kind === 'missing') {
+            return (
+              <del className="warning-diff__missing" key={index}>
+                <span className="visually-hidden"> missing: </span>
+                {segment.text}
+              </del>
+            )
+          }
+          return (
+            <ins className="warning-diff__added" key={index}>
+              <span className="visually-hidden"> extra: </span>
+              {segment.text}
+            </ins>
+          )
+        })}
+      </p>
+      <p className="card__detail--note">
+        Struck-through text is required by 27 CFR 16.21 and was not read from the label. Underlined
+        text was read from the label and is not in the regulation.
+      </p>
+    </>
   )
 }

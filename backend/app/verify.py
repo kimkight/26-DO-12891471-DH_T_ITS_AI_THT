@@ -23,28 +23,54 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Literal
 
-from app.application_form import APPLICATION_FIELDS, ParsedApplication
-from app.compare import Outcome, compare_abv, compare_net_contents, compare_text
+from app import timing
+from app.application_form import (
+    APPLICATION_FIELDS,
+    SELF_CONSISTENCY_NOTE,
+    ParsedApplication,
+)
+from app.compare import Comparison, Outcome, compare_abv, compare_net_contents, compare_text
 from app.config import settings
-from app.ocr import Orientation, ReadPath, UndecodableImageError, extract_text
-from app.parse import ParsedFields, parse_fields
+from app.ocr import (
+    OcrResult,
+    Orientation,
+    OrientationCheck,
+    ReadPath,
+    Segmentation,
+    UndecodableImageError,
+    extract_text,
+)
+from app.parse import ParsedFields, TextRegion, parse_fields
 from app.schemas import (
     FIELD_LABELS,
     ApplicationDocumentResult,
     ApplicationSource,
     ErrorDetail,
     FieldResult,
+    OrientationCheckDetail,
     OrientationDetail,
     ParsedApplicationField,
+    PhaseTimings,
     PhotoResult,
     ReadPathDetail,
+    RejectedImageDetail,
+    RotationScoreDetail,
+    SegmentationDetail,
+    TextRegionDetail,
     VerificationResult,
+    WarningDiffSegment,
     WarningResult,
 )
 from app.warning import WARNING_STATEMENT, WarningCheck
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
+
+# What the label side of a check was read from (ADR 0010). A label lifted out of
+# the application document is a self-consistency check, and the response says so
+# rather than letting the two look alike.
+LabelSource = Literal["uploaded_photographs", "application_artwork"]
 
 
 def _size_limit_text() -> str:
@@ -118,10 +144,29 @@ def check_document_media_type(content_type: str | None) -> None:
         )
 
 
+# How a document-side source maps onto the source reported per field. The
+# document distinguishes an AcroForm field from a text layer; the comparison
+# does not, because both are text the file itself states and neither went
+# through a recognition step. What the comparison does distinguish is text from
+# artwork (ADR 0010).
+_DOCUMENT_SOURCES: dict[str, ApplicationSource] = {
+    "form_fields": "parsed_from_form",
+    "embedded_text": "parsed_from_form",
+    "embedded_artwork": "parsed_from_artwork",
+}
+
+
 def resolve_application(
     typed: dict[str, str], parsed: ParsedApplication | None
 ) -> tuple[dict[str, str], dict[str, ApplicationSource]]:
     """Decide each application value, and record where it came from (FR-11).
+
+    **The precedence is typed, then the document's text, then the artwork
+    embedded in the document, then absent** (ADR 0010). The first two thirds of
+    that were always here. The third is new: a value the text layer did not
+    carry may have been read off a picture of the label inside the same
+    document, and it arrives already resolved by ``app.application_form``, which
+    never lets artwork override text.
 
     **A typed value always wins.** An agent who corrects a field has read the
     document and disagreed with what was read off it, and the tool defers to the
@@ -129,8 +174,10 @@ def resolve_application(
     not a correction: it is the absence of one, so the parsed value stands.
 
     The returned source map is reported per field, because a submission can mix
-    the two and a result that did not say which was which would leave an agent
-    unable to tell what they were checking.
+    all three and a result that did not say which was which would leave an agent
+    unable to tell what they were checking. It matters most for the artwork: a
+    value recognized off a picture can be misread in a way a value read out of a
+    text layer cannot.
     """
     values: dict[str, str] = {}
     sources: dict[str, ApplicationSource] = {}
@@ -142,7 +189,9 @@ def resolve_application(
             sources[name] = "typed"
         elif from_document:
             values[name] = from_document
-            sources[name] = "parsed_from_form"
+            sources[name] = _DOCUMENT_SOURCES.get(
+                (parsed.value_sources.get(name) if parsed else None) or "", "parsed_from_form"
+            )
         else:
             values[name] = ""
             sources[name] = "absent"
@@ -160,12 +209,26 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
                 display_name=FIELD_LABELS[name],
                 value=parsed.values.get(name),
                 found_on_document=parsed.values.get(name) is not None,
+                source=parsed.value_sources.get(name, "absent"),
             )
             for name in APPLICATION_FIELDS
         ],
         fanciful_name=parsed.fanciful_name,
         class_type_code=parsed.class_type_code,
         notes=parsed.notes,
+        artwork_images_found=parsed.artwork_images_found,
+        artwork_images_read=parsed.artwork_images_read,
+        artwork_images_rejected=[
+            RejectedImageDetail(
+                page=image.page,
+                width=image.width,
+                height=image.height,
+                reason=image.reason,
+            )
+            for image in parsed.artwork_images_rejected
+        ],
+        label_artwork_page=None if parsed.label_artwork is None else parsed.label_artwork.page,
+        label_artwork_available=parsed.label_artwork is not None,
     )
 
 
@@ -221,6 +284,19 @@ def verify_image(
     )
 
 
+NO_LABEL_MESSAGE = (
+    "There is nothing to check the application against. The application "
+    "document was read, but it carries no label artwork this tool could read, "
+    "so there is no label side to compare. Add an image of the label and run the "
+    "check again."
+)
+
+NO_FILES_MESSAGE = (
+    "No files were sent. Upload the label application, an image of the label, or "
+    "both, and run the check again."
+)
+
+
 @dataclass(frozen=True)
 class _Read:
     """One photograph, read or failed. Internal to the merge below."""
@@ -231,6 +307,7 @@ class _Read:
     confidence: float
     ocr_ms: float
     read_path: ReadPath = ReadPath()
+    segmentation: Segmentation = Segmentation()
     error: VerificationError | None = None
 
 
@@ -240,6 +317,8 @@ def verify_photos(
     *,
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
+    label_source: LabelSource = "uploaded_photographs",
+    pre_read: list[OcrResult | None] | None = None,
 ) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
 
@@ -262,7 +341,11 @@ def verify_photos(
     hand on the single-label path, so the caller runs them.
     """
     started = time.perf_counter()
-    reads = [_read_one(index, content) for index, content in enumerate(contents, start=1)]
+    already = pre_read or []
+    reads = [
+        _read_one(index, content, already[index - 1] if index <= len(already) else None)
+        for index, content in enumerate(contents, start=1)
+    ]
     usable = [read for read in reads if read.parsed is not None]
 
     if not usable:
@@ -276,17 +359,32 @@ def verify_photos(
         round(sum(read.confidence for read in usable) / len(usable), 1),
         ocr_ms=round(sum(read.ocr_ms for read in reads), 1),
         elapsed_ms=elapsed_ms,
-        photos=[_photo_result(read) for read in reads],
+        photos=[_photo_result(read, label_source) for read in reads],
         sources=sources,
         application_sources=application_sources,
         application_document=application_document,
+        label_source=label_source,
     )
 
 
-def _read_one(index: int, content: bytes) -> _Read:
-    """Decode, turn upright, read and parse one photograph. Never raises."""
+def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _Read:
+    """Decode, turn upright, read and parse one photograph. Never raises.
+
+    ``already`` is a read this image has had, which is what ``app.classify``
+    produces while deciding the file is a label at all (ADR 0011). Reusing it is
+    what keeps a submission classified on the server to exactly one OCR pass per
+    image rather than two.
+    """
     try:
-        ocr = extract_text(content)
+        # The phase opens only around a read that actually happens. A handed-on
+        # result is not a Tesseract pass, and counting it as one would put the
+        # reuse this release added back out of sight in the figure that shows
+        # it worked (NFR-1).
+        if already is not None:
+            ocr = already
+        else:
+            with timing.phase("label_ocr"):
+                ocr = extract_text(content)
     except UndecodableImageError as exc:
         # Distinct from "no text found" below, because the agent's next action
         # differs: a corrupt file needs resending, a blank one needs a better
@@ -308,6 +406,7 @@ def _read_one(index: int, content: bytes) -> _Read:
             confidence=ocr.mean_confidence,
             ocr_ms=ocr.elapsed_ms,
             read_path=ocr.read_path,
+            segmentation=ocr.segmentation,
             error=VerificationError(code="no_text_found", message=NO_TEXT_MESSAGE),
         )
 
@@ -318,6 +417,7 @@ def _read_one(index: int, content: bytes) -> _Read:
         confidence=ocr.mean_confidence,
         ocr_ms=ocr.elapsed_ms,
         read_path=ocr.read_path,
+        segmentation=ocr.segmentation,
     )
 
 
@@ -383,19 +483,36 @@ def _merge(reads: list[_Read]) -> tuple[ParsedFields, dict[str, int]]:
     """
     values: dict[str, str | None] = {}
     sources: dict[str, int] = {}
+    # Where each winning value was read from on its own photograph's sheet
+    # (FR-1, FR-10). Taken from the photograph the value came from rather than
+    # merged, because a region number means nothing outside the sheet it
+    # describes: column 3 of one photograph and column 3 of another are two
+    # different pieces of label.
+    regions: dict[str, TextRegion] = {}
 
+    declined: set[str] = set()
     for name in _MERGED_FIELDS:
         candidates = [read for read in reads if getattr(read.parsed, name) is not None]
         if not candidates:
             values[name] = None
+            # Declined on every photograph that had anything to rank, and found
+            # on none. One photograph declining while another read the field is
+            # not a decline: the value is reported and the reason belongs to the
+            # photograph it came from.
+            if any(name in read.parsed.declined for read in reads):
+                declined.add(name)
             continue
         best = max(candidates, key=_ranker(name))
         values[name] = getattr(best.parsed, name)
         sources[name] = best.index
+        if (region := best.parsed.region.get(name)) is not None:
+            regions[name] = region
 
     warning_read = _pick_warning(reads)
     if warning_read is not None:
         sources["government_warning"] = warning_read.index
+        if (region := warning_read.parsed.region.get("government_warning")) is not None:
+            regions["government_warning"] = region
 
     return (
         ParsedFields(
@@ -405,6 +522,8 @@ def _merge(reads: list[_Read]) -> tuple[ParsedFields, dict[str, int]]:
             net_contents=values["net_contents"],
             warning=warning_read.parsed.warning if warning_read else reads[0].parsed.warning,
             warning_text=warning_read.parsed.warning_text if warning_read else None,
+            region=regions,
+            declined=frozenset(declined),
         ),
         sources,
     )
@@ -451,26 +570,150 @@ def _pick_warning(reads: list[_Read]) -> _Read | None:
     )
 
 
-def _photo_result(read: _Read) -> PhotoResult:
+def _orientation_check(check: OrientationCheck | None) -> OrientationCheckDetail | None:
+    """The second opinion on a low-confidence orientation verdict, or nothing."""
+    if check is None:
+        return None
+    return OrientationCheckDetail(
+        osd_rotation_degrees=check.osd_rotation_degrees,
+        osd_confidence=check.osd_confidence,
+        floor=check.floor,
+        candidates=[
+            RotationScoreDetail(
+                rotation_degrees=candidate.rotation_degrees,
+                confidence=candidate.confidence,
+                words=candidate.words,
+            )
+            for candidate in check.candidates
+        ],
+        chosen_rotation_degrees=check.chosen_rotation_degrees,
+        overrode_osd=check.overrode_osd,
+    )
+
+
+def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs") -> PhotoResult:
     return PhotoResult(
         index=read.index,
+        origin="application_artwork" if label_source == "application_artwork" else "uploaded",
         orientation=OrientationDetail(
             exif_orientation=read.orientation.exif_orientation,
             exif_transposed=read.orientation.exif_transposed,
             rotation_degrees=read.orientation.rotation_degrees,
             method=read.orientation.method,
             confidence=read.orientation.confidence,
+            check=_orientation_check(read.orientation.check),
         ),
         ocr_confidence=read.confidence,
         read_path=ReadPathDetail(
             variant=read.read_path.variant,
             preprocessed_confidence=read.read_path.preprocessed_confidence,
             plain_confidence=read.read_path.plain_confidence,
+            colour_confidence=read.read_path.colour_confidence,
+            decided_by=read.read_path.decided_by,
+        ),
+        segmentation=SegmentationDetail(
+            columns=read.segmentation.columns,
+            blocks=read.segmentation.blocks,
+            column_bounds=[tuple(bound) for bound in read.segmentation.column_bounds],
         ),
         text_found=read.parsed is not None,
         error=None
         if read.error is None
         else ErrorDetail(code=read.error.code, message=read.error.message, limit=read.error.limit),
+    )
+
+
+# What the row says instead of a match when both of its sides are one reading of
+# one picture (FR-14, ADR 0013). Stated on the row rather than in a footnote,
+# because an agent has to be able to see why this row is different without
+# reading anything else.
+ARTWORK_DERIVED_SOURCE = "Label artwork (same source as the label)"
+
+
+def _is_circular(
+    name: str,
+    value_sources: dict[str, ApplicationSource],
+    label_source: LabelSource,
+) -> bool:
+    """Whether this row's two sides are the same reading of the same artwork.
+
+    **The rule keys on provenance, not on a field name.** It fires exactly when
+    the application value was read off label artwork embedded in the uploaded
+    document *and* that same artwork is standing in as the label side, which is
+    the submission where an agent uploads the COLA document and nothing else.
+
+    Two consequences are deliberate. It covers whatever fields actually fell that
+    way on a given document, which on the author's own filing is the alcohol
+    content and the net contents that A-17 says the form never carries, and the
+    class or type designation alongside them. And it does **not** fire when the
+    agent supplied a photograph of their own: comparing a reading of that
+    photograph against a reading of the filed artwork is two pictures, which is
+    a real comparison and is reported as one.
+    """
+    return (
+        label_source == "application_artwork" and value_sources.get(name) == "parsed_from_artwork"
+    )
+
+
+def _declined(comparison: Comparison) -> Comparison:
+    """Say that the label carried candidates and none of them stood out.
+
+    The brand name and the class or type designation are located by type size,
+    which is a ranking and can decline: where the largest text on the label is
+    not clear of the next largest, type size has not identified anything and
+    FR-1 requires not found rather than the winner of a photo finish. That is a
+    different finding from a label with nothing on it, and an agent looking at
+    artwork whose brand name is plainly visible needs to be told which one they
+    have.
+
+    The outcome is left exactly as the comparison found it. A mandatory element
+    the tool could not identify is still a mandatory element it could not
+    confirm, and softening that would be the tool grading its own homework.
+    """
+    return Comparison(
+        outcome=comparison.outcome,
+        score=comparison.score,
+        reason=(
+            "This field was not found on the label. It is located by type size, "
+            "and on this label the largest text was not clear enough of the "
+            "next largest for type size to identify it, so it is reported as "
+            "not found rather than as a guess (FR-1). Read the value off the "
+            "artwork yourself and type it in if the label carries one."
+        ),
+    )
+
+
+def _artwork_derived(name: str, comparison: Comparison) -> Comparison:
+    """Relabel a circular agreement as what it is (FR-14, ADR 0013).
+
+    **Only a match is relabelled, and that is the whole of the safety
+    argument.** Reading one picture twice can manufacture agreement; it cannot
+    manufacture a mismatch, a review or a not-found. So every other outcome on a
+    circular row is a real result and is left exactly as the comparison found it:
+    the A-12 proof contradiction reaches an agent as the review A-12 says it is,
+    and a mandatory element missing from the artwork reaches them as the finding
+    27 CFR makes it.
+
+    The score goes with the outcome. A similarity of 100 between a string and
+    itself is arithmetically true and tells an agent nothing, and printed beside
+    this row it would read as strong evidence of exactly the thing that was not
+    established.
+    """
+    return Comparison(
+        outcome=Outcome.ARTWORK_DERIVED,
+        score=None,
+        reason=(
+            f"{FIELD_LABELS[name]} was read from the label artwork inside the "
+            "application document, and that same artwork is the label being "
+            "checked here, because no photograph was uploaded. Both sides of "
+            "this row are one reading of one picture, so they can only agree "
+            "and the agreement establishes nothing. It is reported as read from "
+            "the artwork rather than as a match. What has been established is "
+            "that the artwork carries the value; what has not is that it agrees "
+            "with anything the applicant declared. Upload a photograph of the "
+            "bottle, or type the value from the filing, to make this a real "
+            "comparison."
+        ),
     )
 
 
@@ -485,6 +728,7 @@ def build_result(
     sources: dict[str, int] | None = None,
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
+    label_source: LabelSource = "uploaded_photographs",
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
@@ -501,41 +745,81 @@ def build_result(
     function always returned: every supplied application value reads as typed,
     which is what it was, and no parsed block is reported.
     """
-    attribution = sources or {}
-    value_sources = application_sources or {}
-    comparisons = {
-        "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
-        "class_type": compare_text(parsed.class_type, application.get("class_type")),
-        "alcohol_content": compare_abv(parsed.alcohol_content, application.get("alcohol_content")),
-        "net_contents": compare_net_contents(parsed.net_contents, application.get("net_contents")),
-    }
-    label_values = {
-        "brand_name": parsed.brand_name,
-        "class_type": parsed.class_type,
-        "alcohol_content": parsed.alcohol_content,
-        "net_contents": parsed.net_contents,
-    }
-
-    fields = [
-        FieldResult(
-            name=name,
-            display_name=FIELD_LABELS[name],
-            found_on_label=label_values[name] is not None,
-            label_value=label_values[name],
-            application_value=application.get(name) or None,
-            score=comparison.score,
-            outcome=comparison.outcome,
-            reason=comparison.reason,
-            source_photo=attribution.get(name),
-            application_value_source=value_sources.get(
-                name, "typed" if application.get(name) else "absent"
+    recorded = timing.current()
+    # The comparison itself, timed like everything else rather than left as
+    # the remainder. It is milliseconds next to a Tesseract pass, and
+    # measuring it is how that stays a fact rather than an assumption.
+    with timing.phase("compare"):
+        attribution = sources or {}
+        value_sources = application_sources or {}
+        comparisons = {
+            "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
+            "class_type": compare_text(parsed.class_type, application.get("class_type")),
+            "alcohol_content": compare_abv(
+                parsed.alcohol_content, application.get("alcohol_content")
             ),
+            "net_contents": compare_net_contents(
+                parsed.net_contents, application.get("net_contents")
+            ),
+        }
+        label_values = {
+            "brand_name": parsed.brand_name,
+            "class_type": parsed.class_type,
+            "alcohol_content": parsed.alcohol_content,
+            "net_contents": parsed.net_contents,
+        }
+
+        # The circularity overlay (FR-14, ADR 0013), applied after the
+        # comparisons and before the rows are built, so that exactly one place
+        # decides what a row says and the comparison layer stays a function of
+        # two strings.
+        comparisons = {
+            name: (
+                _artwork_derived(name, comparison)
+                if comparison.outcome is Outcome.MATCH
+                and _is_circular(name, value_sources, label_source)
+                else comparison
+            )
+            for name, comparison in comparisons.items()
+        }
+
+        # And the same shape again for the other thing a row can be wrong about
+        # without the comparison layer knowing: a field the type-size ranking
+        # declined rather than failed to see. The outcome is untouched, because
+        # a mandatory element the tool could not identify on the label is still
+        # a finding; what changes is that the reason says which of the two
+        # happened. See ParsedFields.declined.
+        comparisons = {
+            name: (_declined(comparison) if name in parsed.declined else comparison)
+            for name, comparison in comparisons.items()
+        }
+
+        fields = [
+            FieldResult(
+                name=name,
+                display_name=FIELD_LABELS[name],
+                found_on_label=label_values[name] is not None,
+                label_value=label_values[name],
+                application_value=application.get(name) or None,
+                score=comparison.score,
+                outcome=comparison.outcome,
+                reason=comparison.reason,
+                label_region=_region_detail(parsed.region.get(name)),
+                source_photo=attribution.get(name),
+                application_value_source=value_sources.get(
+                    name, "typed" if application.get(name) else "absent"
+                ),
+            )
+            for name, comparison in comparisons.items()
+        ]
+        fields.append(
+            _warning_field(
+                parsed.warning,
+                parsed.warning_text,
+                attribution.get("government_warning"),
+                parsed.region.get("government_warning"),
+            )
         )
-        for name, comparison in comparisons.items()
-    ]
-    fields.append(
-        _warning_field(parsed.warning, parsed.warning_text, attribution.get("government_warning"))
-    )
 
     return VerificationResult(
         fields=fields,
@@ -564,25 +848,108 @@ def build_result(
             prefix_as_printed=parsed.warning.prefix_found,
             prefix_is_capitalized=parsed.warning.prefix_is_upper_case,
             body_matches_regulation=parsed.warning.body_matches,
+            edit_distance=parsed.warning.body_edit_distance,
+            near_miss=parsed.warning.near_miss,
+            diff=[
+                WarningDiffSegment(kind=segment.kind, text=segment.text)
+                for segment in parsed.warning.body_diff
+            ],
         ),
         ocr_confidence=ocr_confidence,
-        elapsed_ms=round(ocr_ms if elapsed_ms is None else elapsed_ms, 1),
-        ocr_ms=round(ocr_ms, 1),
+        # **The recording wins where there is one, and the reason is the defect
+        # this replaced.** ``ocr_ms`` as passed in here is the label side's OCR
+        # only, and ``elapsed_ms`` as passed in is the span around reading the
+        # label images. Neither has ever included parsing the uploaded document,
+        # lifting the pictures out of it, or reading those pictures, which on
+        # the application-document path is most of the request. Where a request
+        # is recording, both figures come from the recording and cover the whole
+        # of it; where nothing is recording, which is scripts/measure.py and the
+        # comparison tests, the old figures stand and are the truth about what
+        # those callers did.
+        elapsed_ms=(
+            recorded.total_ms
+            if recorded is not None
+            else round(ocr_ms if elapsed_ms is None else elapsed_ms, 1)
+        ),
+        ocr_ms=recorded.ocr_ms if recorded is not None else round(ocr_ms, 1),
+        timings=_timings(recorded),
         external_call_made=False,
         application_document=application_document,
+        label_source=label_source,
+        self_consistency_note=(
+            SELF_CONSISTENCY_NOTE if label_source == "application_artwork" else None
+        ),
     )
 
 
+def _timings(recorded: timing.Recording | None) -> PhaseTimings | None:
+    """The phase block, or None where nothing was recording (NFR-1).
+
+    ``unaccounted_ms`` is a subtraction and it is the only one, which is the
+    point of reporting it separately: every other figure was measured by a timer
+    around the work it names, and what is left over is named as leftover rather
+    than attributed to whichever phase would make the numbers look tidiest.
+    """
+    if recorded is None:
+        return None
+    total = recorded.total_ms
+    accounted = recorded.accounted_ms
+    return PhaseTimings(
+        total_ms=total,
+        classify_ocr_ms=recorded.get("classify_ocr"),
+        document_pdfium_ms=recorded.get("document_pdfium"),
+        document_ocr_ms=recorded.get("document_ocr"),
+        page_ocr_ms=recorded.get("page_ocr"),
+        artwork_ocr_ms=recorded.get("artwork_ocr"),
+        label_ocr_ms=recorded.get("label_ocr"),
+        compare_ms=recorded.get("compare"),
+        ocr_ms=recorded.ocr_ms,
+        ocr_passes=recorded.ocr_passes,
+        tesseract_reads=recorded.tesseract_reads,
+        accounted_ms=accounted,
+        unaccounted_ms=round(max(total - accounted, 0.0), 1),
+    )
+
+
+def _region_detail(region: TextRegion | None) -> TextRegionDetail | None:
+    """One field's region as the response reports it, or null if not found."""
+    if region is None:
+        return None
+    return TextRegionDetail(column=region.column, block=region.block)
+
+
 def _warning_field(
-    warning: WarningCheck, warning_text: str | None, source_photo: int | None = None
+    warning: WarningCheck,
+    warning_text: str | None,
+    source_photo: int | None = None,
+    region: TextRegion | None = None,
 ) -> FieldResult:
-    """The warning as one field row, with no review band (FR-5).
+    """The warning as one field row (FR-5, FR-6, ADR 0012).
 
     The comparison side is the regulation rather than the application form: the
     required text is fixed by 27 CFR 16.21, so there is nothing for an applicant
     to declare and nothing to type in.
+
+    **There is still no review band, and this is not one.** FR-5 excludes fuzzy
+    tolerance and the comparison is unchanged: a statement passes only when it is
+    identical to the regulation after whitespace and case normalization. What the third
+    outcome carries is a difference too small for the tool to attribute. The
+    author's own COLA artwork reads the statement with one character wrong, and
+    reporting that as a mismatch tells an agent the label is defective when the
+    truth is that the scan is imperfect. Neither failing outcome passes; they
+    differ in what the agent is asked to do.
+
+    A capitalization failure is never a near miss. It is a defect a person
+    already caught on a real submission (FR-6, Jenny Park), it is not something
+    OCR produces from a compliant label, and it is reported as the mismatch it
+    is.
     """
-    outcome = Outcome.MATCH if warning.passes else Outcome.MISMATCH
+    if warning.passes:
+        outcome = Outcome.MATCH
+    elif warning.near_miss and warning.prefix_is_upper_case:
+        outcome = Outcome.NEEDS_REVIEW
+    else:
+        outcome = Outcome.MISMATCH
     return FieldResult(
         name="government_warning",
         display_name=FIELD_LABELS["government_warning"],
@@ -592,5 +959,6 @@ def _warning_field(
         score=None,
         outcome=outcome,
         reason=f"{warning.reason} {warning.bold_type_note}",
+        label_region=_region_detail(region),
         source_photo=source_photo,
     )

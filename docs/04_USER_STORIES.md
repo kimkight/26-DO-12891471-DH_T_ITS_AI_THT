@@ -1079,3 +1079,224 @@ already has. The note under OOS-1 in
 [ADR 0008](adr/0008-cola-form-as-application-input.md) records the decision, the
 alternatives rejected, and what the form does not carry. The field map is
 assumption A-17; what has not been verified against a real document is OQ-22.
+
+---
+
+### US-25 One upload, and the tool works out what I gave it
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | FR-12, FR-11, FR-1, FR-9, NFR-4, NFR-5 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's own use of the deployed prototype, 2026-08-29 |
+
+**As a** compliance agent holding a COLA document, or a photo of a label, or
+both,
+**I want** one place to put them,
+**So that** I am not asked to sort my own files before the tool has looked at
+any of them.
+
+**Acceptance criteria**
+
+```
+Given one file picker on the single-label view
+When  I look at it
+Then  it says it takes the label application, a photo of the label, or both
+And   it accepts PDFs and images, one file or several
+```
+
+```
+Given I upload only the applicant's COLA document
+When  I run the check
+Then  the check runs, against the label artwork inside that document
+And   nothing asks me for a photo of a bottle I do not have
+```
+
+```
+Given I upload a COLA document and a photo of the label
+When  I look at the list of what I uploaded
+Then  each file says what it was taken to be
+And   a wrong call is something I can see and correct, not something silent
+```
+
+```
+Given I upload only a COLA document that carries no label artwork
+When  I run the check
+Then  the check does not run
+And   the message names what is missing and offers me the photo upload
+And   no field reports a match
+```
+
+```
+Given I am working from the keyboard, or with a screen reader
+When  I add a file
+Then  the control is one labelled file input I can reach and operate
+And   the file is announced with what it was taken to be
+```
+
+The author's words on 2026-08-29, having been blocked from submitting a COLA
+document because a label image was also required: "if COLA is uploaded, I don't
+also need an image", and "these should be combined; just one upload; simplify
+the interface. You should be able to upload (pdfs or images)."
+
+**Why the tool does the sorting rather than the agent.** Two pickers asked an
+agent to classify their own files before the tool had read any of them, and a
+file put in the wrong one was read as the wrong thing: a COLA PDF dropped into
+the photo picker was read as label artwork. The box is a guess about intent; the
+file is the fact. The rule, and the cases where it can still be wrong, are in
+[ADR 0011](adr/0011-one-upload.md); the label side that makes an
+application-only submission possible at all is
+[ADR 0010](adr/0010-embedded-label-artwork.md).
+
+---
+
+### US-26 Show me what is left, not what you already did
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | FR-13, FR-11, FR-3, FR-2, NFR-4, NFR-5 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's own use of the deployed prototype, 2026-08-29 |
+
+**As a** compliance agent who has just uploaded a COLA document,
+**I want** the fields to show me only what the tool could not read,
+**So that** the one thing left to do is the one thing in front of me.
+
+**Acceptance criteria**
+
+```
+Given an upload that answered every value
+When  it has been read
+Then  no editable box is shown at all
+And   each value is one line saying what it is and where it came from
+And   one collapsed control holds the boxes, in case I disagree with one
+```
+
+```
+Given an upload that answered all but one value
+When  it has been read
+Then  exactly one editable field is shown
+And   my cursor is in it
+And   I am told which value is missing and that I can enter it or upload a
+      clearer image
+```
+
+```
+Given a value the tool read and I disagree with
+When  I open the control that holds the values
+Then  I can change it
+And   what I typed is what gets checked
+```
+
+```
+Given the beverage type
+When  the document did not state it
+Then  I am told that the product-type boxes are check marks and cannot be read
+      from the text, rather than being left to wonder
+And   the selector is right there
+```
+
+```
+Given I have uploaded nothing yet
+When  I look at the page
+Then  it is exactly as it was: one collapsed control, and no summaries of
+      values that do not exist
+```
+
+The author's instruction on 2026-08-29: "Collapse the form fields and only
+expand if there is something that isn't read in from the application or
+picture." US-24 collapsed the fields on load. This is the step after: once
+something has been read, a value the tool found should not come back as a box,
+and a value it could not find should be the only thing that looks like work.
+
+**Where the missing field lives, and why not behind the disclosure.** Showing it
+directly is the same outcome with one fewer moving part: one box, in the place a
+box belongs, rather than a panel opening onto five of which one matters. What is
+kept from the disclosure idea is everything that made it good, and it is in the
+acceptance criteria above: focus lands on the missing field, the view scrolls to
+it, and a live region says which one and why.
+
+### US-27 Do not tell me to point something at a label
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, FR-12 |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author's observation, 2026-08-30 |
+
+**As a** compliance agent at a desk with a mouse and a folder of files,
+**I want** the interface to describe what it actually does,
+**So that** I can tell the difference between the things it is right about and
+the things it is not.
+
+**Acceptance criteria**
+
+```
+Given the single-label view
+When  it loads
+Then  its heading names three actions this application performs
+And   none of them is pointing a camera at anything
+```
+
+```
+Given any string the interface renders
+When  it refers to how a file gets here
+Then  it describes uploading a file I already have
+And   it never implies the tool takes a picture
+```
+
+```
+Given a word that names a file I am holding, such as "photo" or "scan"
+When  it appears in the copy
+Then  it stays, because it is correct there
+```
+
+```
+Given the panel that previews the file I chose
+When  it renders
+Then  it shows the file and its name
+And   it carries no viewfinder brackets
+```
+
+```
+Given every change above
+When  the accessibility gates run
+Then  axe reports no violation, the computed contrast check passes,
+And   the keyboard walk is unchanged
+And   the live-region announcements say the new strings
+```
+
+**Why this is a story rather than a copy tweak.** The application has no camera.
+Nothing is pointed at anything; a file is chosen and uploaded. The heading read
+"Point. Upload. Check.", transcribed in Session 9 from a ConductorIQ pattern
+built for a phone, and the first word described a capability this tool does not
+have.
+
+That matters more here than it would elsewhere, and the reason is in the
+interviews. Dave Morrison's account of tools like this is that they get trusted
+or they get worked around, and Jenny Park rejected a real filing over title
+case. These are people who read closely and who notice when a thing does not do
+what it says. Copy that promises a camera to an agent holding a mouse is small,
+and it is the same kind of small as a match chip on a comparison that could not
+have failed: it costs nothing to fix and it costs trust to leave.
+
+**What the rule is not.** It is not "remove the word photo". "Photo",
+"photograph" and "scan" are correct nouns for a file an agent already has, and
+replacing them would make the copy vaguer without making it truer. The word to
+remove is the one that implies the tool takes the picture.
+
+**The viewfinder brackets go with it.** The four gold corner brackets around the
+file preview fail the same test the heading failed: corner brackets mean align
+the subject here and the device will capture it. By the time that panel renders,
+the file has been chosen, uploaded and read. The preview itself stays, because
+the reason it exists is good and unrelated: before it, an agent who chose the
+wrong file could not tell until the results came back.

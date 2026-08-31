@@ -11,8 +11,9 @@ import type { PhotoResult } from '../types'
 
 /** What was done to one photograph, as a sentence, or null if nothing was. */
 export function photoNote(photo: PhotoResult): string | null {
+  const noun = photo.origin === 'application_artwork' ? 'label artwork' : 'photo'
   if (!photo.text_found) {
-    return `We could not read this photo. ${plainMessage(photo.error?.code)}`
+    return `We could not read this ${noun}. ${plainMessage(photo.error?.code)}`
   }
   const turned: string[] = []
   if (photo.orientation.exif_transposed) {
@@ -27,9 +28,42 @@ export function photoNote(photo: PhotoResult): string | null {
   return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)}.`
 }
 
-/** True when there is anything worth telling the agent about the photographs. */
+/**
+ * True when there is anything worth telling the agent about the images read.
+ *
+ * The artwork case always qualifies: an agent who uploaded one file and got
+ * five results has to be able to see what the label side actually was
+ * (ADR 0010).
+ */
 export function hasPhotoNotes(photos: PhotoResult[]): boolean {
-  return photos.length > 1 || photos.some((photo) => photoNote(photo) !== null)
+  return (
+    photos.length > 1 ||
+    photos.some((photo) => photo.origin === 'application_artwork') ||
+    photos.some((photo) => photoNote(photo) !== null)
+  )
+}
+
+/**
+ * What the list of images is called, which is not always "your photos".
+ *
+ * When the check ran on artwork lifted out of the application document there is
+ * no photograph at all, and calling it one would be the interface telling the
+ * agent something untrue about what was checked (ADR 0010).
+ */
+export function photoListHeading(photos: PhotoResult[]): string {
+  if (photos.every((photo) => photo.origin === 'application_artwork')) {
+    return photos.length === 1
+      ? 'The label artwork from the application'
+      : `The ${photos.length} pieces of label artwork from the application`
+  }
+  return photos.length === 1 ? 'Your photo' : `Your ${photos.length} photos`
+}
+
+/** How one entry in that list is named. */
+export function photoItemLabel(photo: PhotoResult): string {
+  return photo.origin === 'application_artwork'
+    ? 'Label artwork from the application'
+    : `Photo ${photo.index}`
 }
 
 /**

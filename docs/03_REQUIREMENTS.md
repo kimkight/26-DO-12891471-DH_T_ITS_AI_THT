@@ -171,23 +171,73 @@ warning is governed by FR-5 and FR-6, which are deliberately stricter.
 **Priority:** Must
 **Source:** Jenny Park interview; Decision D-5; 27 CFR 16.21
 
-The government warning is compared for exact text after whitespace
-normalization, against the text quoted in section 1.
+The government warning is compared for exact text after whitespace and letter
+case normalization, against the text quoted in section 1.
 
 **Acceptance criteria**
-- Given a warning matching 27 CFR 16.21 exactly except for line breaks and
-  runs of spaces, then the outcome is match.
+- Given a warning matching 27 CFR 16.21 exactly except for line breaks, runs of
+  spaces and letter case, then the outcome is match.
 - Given a warning with altered, added, or omitted words, then the outcome is
-  mismatch, not needs human review.
+  mismatch, not needs human review, in whatever case the label sets it.
 - Given no warning found on the label, then the outcome is mismatch and the
   result says the statement was not found.
 - Fuzzy tolerance under FR-4 is not applied to the warning body.
+- **Given a warning differing from 27 CFR 16.21 by at most
+  `TTB_WARNING_NEAR_MISS_EDITS` single characters, then the outcome is needs
+  human review, the exact character-level difference is shown, and the result
+  states that this is not a match.** It is never a pass.
+- Given a warning whose prefix fails the FR-6 capitalization check, then the
+  outcome is mismatch whatever the size of any difference in the body.
+- Given any difference at all, then the character-level difference is reported,
+  because it is what an agent needs in order to judge either outcome.
+
+**The comparison is exact, and a near miss is routed to a person rather than
+auto-passed. This is not a fuzzy match, and the distinction has to be read as
+load-bearing rather than as a hedge.** A fuzzy match would let a label through
+on a similarity score. Nothing here lets anything through: a near miss is one of
+the two **failing** outcomes, and what separates it from a mismatch is which
+sentence the agent reads and whether they are handed the difference to look at.
+The comparison that decides a match is unchanged and still requires identical
+text after whitespace and case normalization.
+
+**Why the distinction matters enough to be in the requirement.** The author's
+own COLA artwork, read on 2026-08-29, OCRs the statement with exactly one
+character wrong: `MPAIRS` for `IMPAIRS`. "The statement text does not match
+27 CFR 16.21 word for word" is equally true of that and of a missing clause, and
+the difference between those two is the whole of the agent's decision. Reporting
+the first as a flat mismatch tells an agent their label is defective when the
+truth is that the scan is imperfect, which is the tool overstating what it knows
+in the direction OOS-8 and FR-6 exist to prevent. Loosening the comparison
+instead would be the same error in the other direction. The threshold, the
+reasoning behind the number, and the alternatives rejected are in
+[ADR 0012](adr/0012-warning-near-miss.md).
+
+**Why letter case is normalized alongside whitespace, added 2026-08-31.**
+27 CFR 16.21 fixes the *wording* of the statement. How it is set is 27 CFR
+16.22(a)(2), and the only part of that this prototype checks is the prefix,
+which FR-6 checks separately and still case-sensitively. Filed labels routinely
+print the whole statement in capitals, and the author's own mezcal artwork is
+one of them: once the panel segmentation of v1.1.0 stopped splicing a
+neighbouring panel through it, the statement read as 283 characters in exactly
+the order the regulation sets them, and the exact comparison still failed on 209
+differences of which every single one was a capital letter. Reporting that as
+altered wording tells an agent their label is defective about the one thing it
+is demonstrably correct about, which is the same overstatement the near-miss
+routing above exists to prevent.
+
+Case is therefore presentational, exactly as line breaks and runs of spaces are,
+and nothing else moves with it. An altered, added or omitted word fails in
+either case; `backend/tests/test_warning.py` asserts that in both. The
+difference an agent is shown is still the label's own text, because the fold is
+length-preserving and the diff segments are sliced from what was printed.
 
 Jenny's constraint: "It has to be exact. Like, word-for-word." She also notes
 the failure modes she sees in practice: "people try to get creative with the
 warning all the time. Smaller font, different wording, burying it in tiny text."
 [Source: Jenny Park interview] Of those, this prototype detects different
-wording only; font size and prominence are OOS-5.
+wording only; font size and prominence are OOS-5. Nothing in the near-miss
+routing weakens the first of those: a creative rewording is a difference of many
+characters, and it is still a mismatch.
 
 ### FR-6 Government warning capitalization check
 
@@ -480,6 +530,36 @@ apply to a label image. The note under OOS-1 in
   anything is decoded, with the accepted types named (NFR-7).
 - No outbound network call is made to read the document (NFR-3), and nothing
   about it is persisted or logged beyond a byte count and the path used (NFR-6).
+- Given a document carrying embedded raster images at or above the size floor,
+  then each is read through the same local OCR pipeline label artwork is read
+  through, and what it says fills any application value the document's text
+  layer left empty (ADR 0010).
+- Given a value present in both the text layer and the embedded artwork, then
+  the text-layer value is used. The precedence, end to end, is: typed by the
+  agent, then the document's text layer or form fields, then the embedded
+  artwork, then absent, and the response says which of the four supplied each
+  value.
+- Given a document carrying no embedded images, or none above the size floor,
+  then it behaves exactly as it did before: the values the text layer does not
+  carry are reported as not found, with the reason.
+- Given an agent who uploaded the application and no photograph, and a document
+  whose embedded artwork could be read, then the largest such image is the label
+  side of the check, and the response says so.
+- Given the same submission with no readable artwork in the document, then the
+  verification does not run, the response names the missing piece and offers the
+  photograph upload, and no field reports an outcome. This is an FR-9 message
+  rather than a validation error on a form field.
+
+**The artwork path is a self-consistency check, and the requirement says so.**
+Where the label being checked came out of the application document, what has
+been established is that the artwork on file carries the mandatory elements and
+that it agrees with the typed form data. Nothing has been established about a
+physical bottle. Verifying the bottle against the filing still needs a
+photograph of that bottle, and the response and the interface both state this
+whenever it applies. The distinction is a requirement rather than a caveat,
+because a green result read as "this product is compliant" would be the tool
+overstating what it checked, which is the failure OOS-8 and FR-6 both exist to
+prevent.
 
 **On the batch path, this is how every value arrives.** Written when it was not:
 the batch kept the CSV contract in A-14, and per-row COLA documents were called
@@ -487,7 +567,127 @@ a possible future extension. [ADR 0009](adr/0009-batch-cola-documents.md) built
 them on 2026-08-28 and removed the CSV. A batch row is one label image paired
 with one COLA document by filename stem, nothing is typed, and each row's result
 carries the parsed block and the per-field source exactly as a single-label
-submission with an attached document does.
+submission with an attached document does. A row's document now fills values
+from its own embedded artwork too; the row still requires its label image,
+because batch rows are enumerated from the images so that the stream can report
+a total before any document is read (ADR 0010, "Effect on the batch path").
+
+### FR-12 One upload, sorted by the tool rather than by the agent
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-29: "if COLA
+is uploaded, I don't also need an image", and "these should be combined; just
+one upload; simplify the interface. You should be able to upload (pdfs or
+images)."
+
+Accept everything submitted for one label through one control, taking PDFs and
+images in any mix, and decide what each file is from the file itself rather than
+from which control it arrived in. Report that decision per file. See
+[ADR 0011](adr/0011-one-upload.md).
+
+**The classification rule, stated so it can be checked rather than trusted.**
+
+1. A file whose bytes begin with `%PDF`, or which declares `application/pdf`, is
+   the application side. The bytes decide; the declared type is the fallback,
+   because a browser labels a file from its extension and an agent can rename
+   it. Nothing is decoded to reach this answer.
+2. An image is read once through the local OCR pipeline. If its text carries a
+   COLA form or Public COLA Registry marker, or the application parser finds at
+   least one mapped caption value in it, it is the application side. Otherwise
+   it is a label side.
+3. An image that cannot be decoded is a label side, carrying its error, because
+   FR-9's message for an unreadable photograph is the one an agent can act on.
+
+**The label image requirement is removed as a hard gate.** Before
+[ADR 0010](adr/0010-embedded-label-artwork.md) there was nothing to check an
+application against without a photograph, so requiring one was honest. There now
+is: a filed application carries the label artwork inside it. Three submissions
+are valid, and each completes: the application document alone, a label
+photograph plus typed values, or both.
+
+**Acceptance criteria**
+- Given one control on the single-label view, then it accepts PDFs and images,
+  one file or several, in any mix, and its copy says so.
+- Given a file submitted through it, then the server classifies it by the rule
+  above and the response reports, per file, what it was taken to be and why.
+- Given a COLA document submitted through a control intended for photographs, or
+  a photograph submitted through one intended for the application, then each is
+  still classified by the file and used on the correct side.
+- Given anything uploaded, then the check is enabled. No submission is blocked
+  for want of a label photograph.
+- Given an application document alone whose embedded artwork could be read, then
+  the check runs against that artwork (ADR 0010).
+- Given an application document alone with no artwork that could be read, then
+  the verification does not run, the response names the missing piece and offers
+  the photograph upload, and no field reports an outcome. This is an FR-9
+  message, not a validation error on a form field.
+- Given more files of one side than the check accepts, then the request is
+  refused with a message naming the limit, before anything is compared.
+- Given the control, then it is one labelled element, keyboard reachable, with
+  drag and drop offered on top of a keyboard-operable alternative rather than
+  instead of one, and each accepted file is announced to a live region together
+  with what it was taken to be (NFR-5).
+
+**The API contract, and where it is recorded.** `POST /api/verify` takes one
+repeated `files` part. The older `image` and `application_document` parts remain
+accepted and are routed through the same classifier, so a caller written against
+v1.0 keeps working. `POST /api/classify` sorts an upload and reads the
+application side without comparing anything, which is what lets the interface
+show the classification and the parsed values before a check runs. The batch
+path keeps `images` and `application_documents` unchanged, because ADR 0009
+pairs by filename stem and a batch is already sorted; ADR 0011 records why the
+two paths differ.
+
+### FR-13 The values that were read go quiet; the ones that were not go loud
+
+**Priority:** Should
+**Source:** The author's own use of the deployed prototype, 2026-08-29:
+"Collapse the form fields and only expand if there is something that isn't read
+in from the application or picture."
+
+Once an upload has been read, show each value that was found as a compact
+read-only line and each value that was not as a field, and put nothing else in
+the agent's way. US-24 collapsed the five typed fields behind a disclosure,
+which fixed what greets an agent on load; this is about what happens after
+something has been processed.
+
+**Why it is a requirement rather than a layout preference.** Five text boxes
+shown after a document has already answered four of them is a form asking an
+agent to re-read work the tool has done, and NFR-4's benchmark is an agent who
+should not have to read past anything. It is also the shape that makes the gaps
+findable: three of the five values are not items on TTB F 5100.31 at all (A-17),
+so a gap is the ordinary outcome rather than an error, and an agent has to be
+able to see which one at a glance.
+
+**Acceptance criteria**
+- Given an upload that supplied a value, then that value is shown as one line
+  carrying the value and where it came from: typed by the agent, the application
+  form, or the label artwork inside the application. It is not shown as an
+  editable box.
+- Given an upload that did not supply a compared value, then that value is shown
+  as an editable field, visible, not behind a disclosure.
+- Given an upload that supplied every compared value, then no editable field is
+  shown at all; one collapsed disclosure holds them.
+- Given at least one gap, then focus moves to the first missing field, the view
+  scrolls to it, and a live region says which value is missing and what to do
+  about it: enter it, or upload a clearer image.
+- Given any value that was read, then it remains editable behind that same
+  disclosure, and a value the agent types is used instead of the one that was
+  read (FR-11's precedence, unchanged).
+- Given the beverage type, then it is stated on its own line: read where the
+  document stated it in text, and otherwise reported as not read from the form,
+  because the product-type boxes are check marks and a text layer cannot report
+  which one is ticked (ADR 0008). Its selector is inline. It is never compared,
+  so it never takes focus and it is never counted as a gap in the check.
+- Given nothing uploaded yet, then the view is exactly what US-24 specified:
+  one collapsed disclosure over the five fields, and no summary lines.
+- The result panel is unchanged. This requirement is about the input side.
+
+**Three sources, not four.** A value on the application side comes from the
+agent, from the document's text, or from label artwork embedded in that
+document (ADR 0010). It never comes from a photograph of the label: that is the
+other side of the comparison, and taking the application value off the label
+would mean comparing the label against itself.
 
 ## 4. Non-functional requirements
 
@@ -667,6 +867,60 @@ section 1.
 - `.env.example` documents every variable the application reads.
 - Deployed environments receive configuration through the task definition rather
   than a committed file.
+
+### FR-14 A value read off the artwork is filled in, and never called a match
+
+**Priority:** Must
+**Source:** The author's decision of 2026-08-30, taken against the discovery
+record; Sarah Chen interview ("spend half their day doing what's essentially
+data entry verification"); SC-3 and the batch path; Dave Morrison and Jenny Park
+interviews for why the result may not overstate itself. See
+[ADR 0013](adr/0013-artwork-derived-values.md).
+
+Fill the alcohol content and the net contents from the label artwork embedded in
+an uploaded COLA document when the application form does not state them, which is
+the ordinary case because neither is an item on TTB F 5100.31 (A-17). Report a
+value filled that way, and compared against the same artwork standing in as the
+label side, as **read from the artwork** rather than as verified.
+
+**Why both halves are required.** Asking an agent to hand-type a value the tool
+has already read puts back the data entry the tool exists to remove, and on the
+batch path there is no agent present to type it at all. But a comparison of a
+value against the picture it was read from always agrees, so a match reported
+there is structurally incapable of ever saying anything else. It is a signal with
+no information in it, presented in the shape of four signals that carry
+information.
+
+**Acceptance criteria**
+- Given a COLA document stating no alcohol content and no net contents, and
+  carrying label artwork that states both, then both values are filled from the
+  artwork and reported with their source.
+- Given such a value compared against that same artwork as the label side, then
+  the outcome is `artwork_derived`, it carries no score, and it is not a match.
+- Given a result containing such rows, then the summary line counts only the
+  rows that could have disagreed and names the rest, in the shape "3 of 3
+  verifiable fields match; 2 read from the artwork only". Where no row is
+  artwork-derived the line is unqualified.
+- Given the `artwork_derived` state, then it is carried by a word and a
+  silhouette that no other outcome uses, before any colour (NFR-5).
+- Given such a row, then it states its source on the row itself, as "Label
+  artwork (same source as the label)", rather than in a footnote elsewhere on
+  the page.
+- Given an agent who also uploaded a photograph of the label, then the same
+  value is compared against that photograph, which is independent evidence, and
+  is reported as an ordinary match, review or mismatch.
+- Given a typed value or a value the document's own text states, then it wins
+  over the artwork and is compared normally. FR-11's precedence is unchanged.
+- Given label artwork that does not carry the alcohol content or the net
+  contents, then the absence is reported as a finding rather than as not
+  compared, because 27 CFR requires both on the label whatever the form says,
+  and the reason names the section and its carve-outs.
+- Given label artwork for a spirit stating both a percentage and a proof that do
+  not agree, then the FR-7 cross-check reports it whether or not the application
+  stated anything, and it is never reported as `artwork_derived`.
+- Given a batch row, then every rule above applies to it unchanged. A batch row
+  pairs a document with a label image (ADR 0009), so its label side is always an
+  independent photograph and no batch row is artwork-derived.
 
 ## 5. Requirements deliberately not written
 

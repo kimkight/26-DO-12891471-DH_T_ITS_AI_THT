@@ -117,6 +117,13 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
   test('the results, including a needs-review card and an error notice', async ({ page }) => {
     // The results only exist after a response, so one is supplied here rather
     // than reaching the real API. The markup under test is the interface's.
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
     await page.route('**/api/verify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -125,13 +132,79 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       })
     })
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'label.png',
       mimeType: 'image/png',
       buffer: Buffer.from([137, 80, 78, 71]),
     })
     await page.getByRole('button', { name: 'Check this label' }).click()
     await expect(page.getByText(/Checked in/).first()).toBeVisible()
+
+    // The panel names the difference between the two clocks as a location, and
+    // no longer as a mechanism nobody measured (NFR-1).
+    await expect(page.locator('.timing__detail')).toContainText(
+      'in your browser and on the network',
+    )
+    await expect(page.getByText(/sending the image/)).toHaveCount(0)
+
+    // The breakdown is on the page and closed, and axe checks it open too,
+    // because a disclosure nobody opens is not a disclosure that was checked.
+    await expect(page.getByText('Where the time went')).toBeVisible()
+    const before = await violations(page)
+    expect(report(before)).toBe('')
+
+    await page.getByText('Where the time went').click()
+    await expect(page.getByText('Reading the label')).toBeVisible()
+    await expect(page.getByText(/These are measured, not estimated/)).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
+  /*
+   * The fifth outcome state (FR-14, ADR 0013). Its own test rather than a sixth
+   * row on the fixture above, because the whole point of the state is the
+   * submission it appears in: the agent uploaded the application document and
+   * nothing else, so the artwork inside it is standing in as the label side.
+   *
+   * axe is the half of the gate that matters here. `contrast.test.ts` proves
+   * the violet clears 4.5:1 against the tokens it is declared beside; only a
+   * real layout engine can prove it clears 4.5:1 as actually rendered, which
+   * is why the chip is put on the page rather than only in a unit test.
+   */
+  test('the artwork-derived state, on a document-only submission', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(ARTWORK_DERIVED_RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'cola.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+
+    // The count says what is true rather than five of five, on screen and in
+    // the live region alike. Both are asserted: the sentence an agent reads and
+    // the sentence an agent hears have to be one sentence, and a locator that
+    // matched either would not prove it.
+    const line = '2 of 2 verifiable fields match; 3 read from the artwork only'
+    await expect(page.locator('.summary-line')).toHaveText(line)
+    await expect(page.getByRole('status', { name: 'Check result' })).toContainText(line)
+    // And the row says why it is different, on the row.
+    await expect(page.getByText('Label artwork (same source as the label)').first()).toBeVisible()
+    await expect(page.getByText('Read from the artwork').first()).toBeVisible()
 
     const found = await violations(page)
     expect(report(found)).toBe('')
@@ -159,11 +232,13 @@ test.describe('what axe cannot check', () => {
     await page.keyboard.press('ArrowLeft')
     await expect(page.getByRole('tab', { name: 'Check one label' })).toBeFocused()
 
-    // Then the file input, the control that adds a second photo of the same
-    // label (ADR 0007), the COLA document upload, and the disclosure over the
-    // typed fields, in reading order. The five fields themselves are behind
-    // that disclosure and out of the tab order until it is opened (US-24),
-    // which is the point of it.
+    // Then the one file input, and the disclosure over the typed fields, in
+    // reading order. There is one picker now, not two: the label application,
+    // the photographs, or any mix go into it and the server sorts them
+    // (FR-12, ADR 0011). That is one fewer stop on this walk than before, which
+    // is the accessibility half of what "just one upload" bought. The five
+    // fields themselves are behind the disclosure and out of the tab order
+    // until it is opened (US-24), which is the point of it.
     //
     // Scoped to the single-label panel. The arrow-key steps above mounted the
     // batch panel too, and it stays mounted so a half-filled form survives a
@@ -172,17 +247,7 @@ test.describe('what axe cannot check', () => {
     // an unscoped lookup would still match its controls by name.
     const panel = page.locator('#panel-single')
     await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('Label image', { exact: true })).toBeFocused()
-
-    await page.keyboard.press('Tab')
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toBeFocused()
-
-    // Then the COLA document upload, which is the primary application-side
-    // input and sits directly after the photographs (FR-11, ADR 0008, US-24).
-    await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('Label application', { exact: true })).toBeFocused()
+    await expect(panel.getByLabel('Files for this label', { exact: true })).toBeFocused()
 
     // Then the disclosure. Collapsed, so the next Tab from here reaches the
     // submit button rather than a field: five empty boxes are no longer what
@@ -282,11 +347,9 @@ test.describe('what axe cannot check', () => {
     expect(family).toContain('Inter Variable')
   })
 
-  test('the chosen photograph is previewed in the scan frame, and it is decoration', async ({
-    page,
-  }) => {
+  test('the chosen file is previewed, and the viewfinder brackets are gone', async ({ page }) => {
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'stones-throw.png',
       // A one-pixel PNG, so the element has something real to load.
       mimeType: 'image/png',
@@ -296,45 +359,77 @@ test.describe('what axe cannot check', () => {
       ),
     })
 
-    // The preview carries the file's name as its alternative text, and the
-    // frame's corner brackets are decoration with no accessible name of their
-    // own.
+    // The preview carries the file's name as its alternative text.
     const preview = page.getByAltText('Preview of stones-throw.png')
     await expect(preview).toBeVisible()
     await expect(preview).toHaveJSProperty('naturalWidth', 1)
+
+    // **The four gold corner brackets are gone** (US-27). They were a
+    // viewfinder, and a viewfinder promises that something is about to be
+    // captured; by the time this renders the file has been chosen, uploaded
+    // and read. Asserted against the built page rather than the source,
+    // because the brackets were drawn in CSS and a stale stylesheet would put
+    // them back without touching a component.
+    await expect(page.locator('.scan__bracket')).toHaveCount(0)
+    await expect(page.locator('.preview__viewport')).toHaveCount(1)
 
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
 
+  test('the heading names what the interface does, and no longer a camera', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Upload. Read. Check.' })).toBeVisible()
+    await expect(page.getByText('Point. Upload. Check.')).toHaveCount(0)
+    await expect(page.getByText('Label scanning')).toHaveCount(0)
+    await expect(page.locator('.kicker').filter({ hasText: 'Label check' })).toBeVisible()
+  })
+
   test('the primary task is on the landing page with no navigation (NFR-4)', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByLabel('Label image')).toBeVisible()
+    await expect(page.getByLabel('Files for this label')).toBeVisible()
     await expect(page.getByRole('button', { name: 'Check this label' })).toBeVisible()
   })
 
-  test('a second and third photo of the same label are reachable by keyboard', async ({ page }) => {
+  test('several files go in through the one control, each named and removable', async ({
+    page,
+  }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PAIR),
+      })
+    })
     await page.goto('/')
     const panel = page.locator('#panel-single')
 
-    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
-    await expect(panel.getByLabel('Label image, photo 2')).toBeVisible()
-    await expect(panel.getByRole('button', { name: 'Remove photo 2' })).toBeVisible()
+    // One picker, both kinds of file, in one go (FR-12, ADR 0011). More than
+    // one picture of the same label is still ADR 0007 underneath; what has gone
+    // is the row of numbered slots.
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles([
+      {
+        name: 'application.pdf',
+        mimeType: 'application/pdf',
+        buffer: Buffer.from([37, 80, 68, 70]),
+      },
+      { name: 'label.png', mimeType: 'image/png', buffer: Buffer.from([137, 80, 78, 71]) },
+    ])
 
-    await panel.getByRole('button', { name: 'Add another photo of this label' }).click()
-    await expect(panel.getByLabel('Label image, photo 3')).toBeVisible()
-    // The cap is enforced by withdrawing the control, so an agent never reaches
-    // the API's refusal (NFR-4, ADR 0007).
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toHaveCount(0)
+    // Each file is listed with what it was taken to be, so a misclassification
+    // is visible rather than silent.
+    await expect(panel.getByText('Label application', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Label image', { exact: true })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove label.png' })).toBeVisible()
 
-    // Removing a slot has to leave focus somewhere usable, which is what a
-    // keyboard user loses if the removed button simply disappears.
-    await panel.getByRole('button', { name: 'Remove photo 3' }).click()
-    await expect(
-      panel.getByRole('button', { name: 'Add another photo of this label' }),
-    ).toBeFocused()
+    // And every accepted file is announced with its classification (NFR-5).
+    await expect(panel.getByLabel('Your uploads')).toContainText(
+      'application.pdf, read as a label application',
+    )
+    await expect(panel.getByLabel('Your uploads')).toContainText('label.png, read as a label image')
+
+    expect(report(await violations(page))).toBe('')
   })
 
   test('the collapsed disclosure is axe-clean, and opening it stays axe-clean', async ({
@@ -356,17 +451,17 @@ test.describe('what axe cannot check', () => {
     expect(report(await violations(page))).toBe('')
   })
 
-  test('a document with gaps opens the typed fields and announces why (US-24)', async ({
+  test('a document with gaps shows the missing field and announces why (US-26)', async ({
     page,
   }) => {
     // The honest shape of TTB F 5100.31 (04/2023): a brand name, and no class
     // or type, alcohol content or net contents boxes at all (A-17). Gaps are
     // the normal outcome on the form proper, not an error.
-    await page.route('**/api/read-application', async (route) => {
+    await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(FORM_WITH_GAPS),
+        body: JSON.stringify({ ...CLASSIFIED_APPLICATION, application_document: FORM_WITH_GAPS }),
       })
     })
     await page.goto('/')
@@ -376,62 +471,76 @@ test.describe('what axe cannot check', () => {
       panel.getByRole('button', { name: 'Or type the application values' }),
     ).toHaveAttribute('aria-expanded', 'false')
 
-    await panel.getByLabel('Label application', { exact: true }).setInputFiles({
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles({
       name: 'application.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from([37, 80, 68, 70]),
     })
 
-    await expect(
-      panel.getByRole('button', { name: 'Or type the application values' }),
-    ).toHaveAttribute('aria-expanded', 'true')
-    // The parsed value is filled; the gaps are empty and waiting.
+    // What was read is a line, not a box: the box for it is behind the
+    // disclosure, which stays collapsed (US-26).
+    await expect(panel.getByText('Read from your upload')).toBeVisible()
+    await expect(panel.getByLabel('Brand name', { exact: true })).toBeHidden()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
+
+    // What was not read is shown, focused, and announced. Three of the five are
+    // not items on TTB F 5100.31 at all (A-17), so this is the ordinary case.
+    await expect(panel.getByLabel('Alcohol content', { exact: true })).toBeVisible()
     await expect(panel.getByLabel('Alcohol content', { exact: true })).toHaveValue('')
-    // And the expansion is announced, rather than only being visible.
-    await expect(panel.getByLabel('Application values')).toContainText(
-      'The application values are open below',
-    )
+    await expect(panel.getByLabel('Class or type designation', { exact: true })).toBeFocused()
+    await expect(panel.getByLabel('Application values')).toContainText('not found in your upload')
 
     expect(report(await violations(page))).toBe('')
   })
 
   test('the COLA document upload is labelled, announced and axe-clean', async ({ page }) => {
-    await page.route('**/api/read-application', async (route) => {
+    await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify(PARSED_APPLICATION),
+        body: JSON.stringify(CLASSIFIED_APPLICATION),
       })
     })
     await page.goto('/')
     const panel = page.locator('#panel-single')
 
-    await panel.getByLabel('Label application', { exact: true }).setInputFiles({
+    await panel.getByLabel('Files for this label', { exact: true }).setInputFiles({
       name: 'application.pdf',
       mimeType: 'application/pdf',
       buffer: Buffer.from([37, 80, 68, 70]),
     })
 
-    // PARSED_APPLICATION leaves the beverage type unread, which is a gap, so
-    // the typed fields open on their own (US-24, expansion case 2).
-    await expect(
-      panel.getByRole('button', { name: 'Or type the application values' }),
-    ).toHaveAttribute('aria-expanded', 'true')
+    // PARSED_APPLICATION carries all four compared values and leaves only the
+    // beverage type unread, which is never compared and never a gap in the
+    // check (US-26, ADR 0008). So nothing opens and no box is shown.
+    await expect(panel.getByRole('button', { name: 'Review the values' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    )
+    await expect(panel.getByText('Read from your upload')).toBeVisible()
+    await expect(panel.getByLabel('Alcohol content', { exact: true })).toBeHidden()
 
-    // The parsed values reach the same fields an agent would have typed into,
-    // and every one of them says where it came from (FR-11, ADR 0008).
+    // The values are still the agent's to change, behind that one control
+    // (FR-3), and each says where it came from (FR-11, ADR 0008).
+    await panel.getByRole('button', { name: 'Review the values' }).click()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
     await expect(
       panel.getByText('Read from the application form. Change it if it is wrong.').first(),
     ).toBeVisible()
-    await expect(panel.getByRole('button', { name: 'Remove this application form' })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
 
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
 
   test('the axe scan covers a result built from two photos', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
     await page.route('**/api/verify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -440,7 +549,7 @@ test.describe('what axe cannot check', () => {
       })
     })
     await page.goto('/')
-    await page.getByLabel('Label image').setInputFiles({
+    await page.getByLabel('Files for this label').setInputFiles({
       name: 'front.png',
       mimeType: 'image/png',
       buffer: Buffer.from([137, 80, 78, 71]),
@@ -455,6 +564,120 @@ test.describe('what axe cannot check', () => {
 
 const WARNING_NOTE =
   'Bold type was not checked. 27 CFR 16.22(a)(2) also requires the prefix to be in bold, and this prototype does not check typeface.'
+
+/**
+ * The author's own submission, as the API returns it (FR-14, ADR 0013): a COLA
+ * document uploaded alone, its embedded artwork standing in as the label side,
+ * and three of the five rows therefore comparing a value with itself.
+ */
+const ARTWORK_DERIVED_RESULT = {
+  fields: [
+    {
+      name: 'brand_name',
+      display_name: 'Brand name',
+      found_on_label: true,
+      label_value: "STONE'S THROW",
+      application_value: "STONE'S THROW",
+      score: 100,
+      outcome: 'match',
+      reason: 'Scored 100, at or above the match threshold of 95.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_form',
+    },
+    {
+      name: 'class_type',
+      display_name: 'Class or type designation',
+      found_on_label: true,
+      label_value: 'Kentucky Straight Bourbon Whiskey',
+      application_value: 'Kentucky Straight Bourbon Whiskey',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Class or type designation was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'alcohol_content',
+      display_name: 'Alcohol content',
+      found_on_label: true,
+      label_value: '45% Alc./Vol. (90 Proof)',
+      application_value: '45% Alc./Vol. (90 Proof)',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Alcohol content was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'net_contents',
+      display_name: 'Net contents',
+      found_on_label: true,
+      label_value: '750 mL',
+      application_value: '750 mL',
+      score: null,
+      outcome: 'artwork_derived',
+      reason:
+        'Net contents was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+      source_photo: 1,
+      application_value_source: 'parsed_from_artwork',
+    },
+    {
+      name: 'government_warning',
+      display_name: 'Government warning statement',
+      found_on_label: true,
+      label_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      application_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      score: null,
+      outcome: 'match',
+      reason: `The statement matches 27 CFR 16.21. ${WARNING_NOTE}`,
+      source_photo: 1,
+      application_value_source: 'typed',
+    },
+  ],
+  warning_detail: {
+    statement_found: true,
+    prefix_as_printed: 'GOVERNMENT WARNING:',
+    prefix_is_capitalized: true,
+    body_matches_regulation: true,
+    bold_type_checked: false,
+    bold_type_note: WARNING_NOTE,
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
+  },
+  photos: [
+    {
+      index: 1,
+      origin: 'application_artwork',
+      orientation: {
+        exif_orientation: null,
+        exif_transposed: false,
+        rotation_degrees: 0,
+        method: 'osd',
+        confidence: 12.4,
+      },
+      ocr_confidence: 91.2,
+      read_path: {
+        variant: 'preprocessed',
+        preprocessed_confidence: 91.2,
+        plain_confidence: null,
+      },
+      text_found: true,
+      error: null,
+    },
+  ],
+  ocr_confidence: 91.2,
+  elapsed_ms: 3300,
+  ocr_ms: 3280,
+  external_call_made: false,
+  files: [],
+  label_source: 'application_artwork',
+  self_consistency_note:
+    'Some of this was read from the label artwork inside the application document.',
+  application_document: null,
+}
 
 const RESULT = {
   fields: [
@@ -526,6 +749,11 @@ const RESULT = {
     body_matches_regulation: true,
     bold_type_checked: false,
     bold_type_note: WARNING_NOTE,
+    // The body is word for word correct here; only the prefix fails. So there
+    // is no difference to show, and no near miss (FR-5, FR-6, ADR 0012).
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
   },
   photos: [
     {
@@ -560,11 +788,28 @@ const RESULT = {
   ocr_confidence: 94.1,
   elapsed_ms: 540,
   ocr_ms: 530,
+  // The phase breakdown (NFR-1). Present so that axe sees the disclosure and
+  // the definition list inside it, which are the markup this release added
+  // below the results.
+  timings: {
+    total_ms: 540,
+    classify_ocr_ms: 0,
+    document_pdfium_ms: 0,
+    document_ocr_ms: 0,
+    page_ocr_ms: 0,
+    artwork_ocr_ms: 0,
+    label_ocr_ms: 530,
+    compare_ms: 0.3,
+    ocr_ms: 530,
+    ocr_passes: 2,
+    accounted_ms: 530.3,
+    unaccounted_ms: 9.7,
+  },
   external_call_made: false,
   application_document: null,
 }
 
-/** What POST /api/read-application returns for a registry printout (FR-11). */
+/** What the application read looks like for a registry printout (FR-11). */
 /**
  * A read of TTB F 5100.31 (04/2023) itself, which carries the brand name and
  * has no box for the class or type, the alcohol content or the net contents
@@ -579,34 +824,42 @@ const FORM_WITH_GAPS = {
       display_name: 'Brand name',
       value: "STONE'S THROW",
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'class_type',
       display_name: 'Class or type designation',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'alcohol_content',
       display_name: 'Alcohol content',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
     {
       name: 'beverage_type',
       display_name: 'Beverage type',
       value: 'distilled spirits',
       found_on_document: true,
+      source: 'embedded_text',
     },
   ],
   fanciful_name: 'Small Batch Reserve',
   class_type_code: null,
+  artwork_images_found: 0,
+  artwork_images_read: 0,
+  label_artwork_available: false,
   notes: [
     'The class or type designation is not an item on TTB F 5100.31 (04/2023).',
     'The alcohol content is not an item on TTB F 5100.31 (04/2023).',
@@ -623,35 +876,101 @@ const PARSED_APPLICATION = {
       display_name: 'Brand name',
       value: "STONE'S THROW",
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'class_type',
       display_name: 'Class or type designation',
       value: 'KENTUCKY STRAIGHT BOURBON WHISKEY',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'alcohol_content',
       display_name: 'Alcohol content',
       value: '45% ALC/VOL',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       value: '750 ML',
       found_on_document: true,
+      source: 'embedded_text',
     },
     {
       name: 'beverage_type',
       display_name: 'Beverage type',
       value: null,
       found_on_document: false,
+      source: 'absent',
     },
   ],
   fanciful_name: 'Small Batch Reserve',
   class_type_code: '141',
+  artwork_images_found: 0,
+  artwork_images_read: 0,
+  label_artwork_available: false,
   notes: [
     "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text, and this document did not name one type on its own. Choose it yourself.",
   ],
+}
+
+/**
+ * What POST /api/classify returns for one uploaded application (FR-12).
+ *
+ * The single upload sorts files on the server, so the interface asks this route
+ * what each file is and gets the application read back in the same answer.
+ */
+const CLASSIFIED_APPLICATION = {
+  files: [
+    {
+      filename: 'application.pdf',
+      classified_as: 'application_document',
+      basis: 'pdf_header',
+      reason: 'This is a PDF, so we read it as the label application.',
+      used: true,
+    },
+  ],
+  application_document: PARSED_APPLICATION,
+  label_images: 0,
+  application_error: null,
+}
+
+const CLASSIFIED_PAIR = {
+  files: [
+    {
+      filename: 'application.pdf',
+      classified_as: 'application_document',
+      basis: 'pdf_header',
+      reason: 'This is a PDF, so we read it as the label application.',
+      used: true,
+    },
+    {
+      filename: 'label.png',
+      classified_as: 'label_image',
+      basis: 'no_form_markers',
+      reason: 'We read this picture as a label.',
+      used: true,
+    },
+  ],
+  application_document: PARSED_APPLICATION,
+  label_images: 1,
+  application_error: null,
+}
+
+const CLASSIFIED_PHOTO = {
+  files: [
+    {
+      filename: 'label.png',
+      classified_as: 'label_image',
+      basis: 'no_form_markers',
+      reason: 'We read this picture as a label.',
+      used: true,
+    },
+  ],
+  application_document: null,
+  label_images: 1,
+  application_error: null,
 }

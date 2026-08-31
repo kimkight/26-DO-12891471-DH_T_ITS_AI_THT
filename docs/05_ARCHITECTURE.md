@@ -206,12 +206,14 @@ find out why it exists.
 | `ocr.py` | Decode honouring the EXIF orientation tag, preprocess (long edge to 1600 px, grayscale, cardinal turn from Tesseract OSD asked on the grayscale, adaptive threshold, then bounded deskew), read both the thresholded image and the plain upright grayscale and keep the higher-scoring result, return text with word confidence, line geometry, the orientation applied, which read won and elapsed time | FR-1, NFR-1, NFR-3, NFR-6 | `tests/test_ocr.py` |
 | `warning.py` | The 27 CFR 16.21 statement as a constant, exact body comparison after whitespace normalization, and a separate capitalization check on the prefix | FR-5, FR-6, OOS-4 | `tests/test_warning.py` |
 | `parse.py` | Locate the five fields in the OCR output, with an explicit not found per field | FR-1, A-9 | `tests/test_parse.py` |
-| `application_form.py` | Read the application values off an uploaded COLA document: AcroForm field values, then the text layer, then OCR over rendered pages. An explicit not found per value, with the reason where the form has no item for it. Serializes every PDFium call, because the batch pool reads documents concurrently and PDFium is not thread-safe | FR-11, FR-9, FR-8, NFR-3, NFR-6, A-17 | `tests/test_application_form.py`, `tests/test_cola_document_api.py`, `tests/test_batch.py` |
+| `application_form.py` | Read the application values off an uploaded COLA document: AcroForm field values, then the text layer, then OCR over rendered pages, then the label artwork embedded in the file, which fills what the text left empty and can stand in as the label side. An explicit not found per value, with the reason where the form has no item for it. Serializes every PDFium call, because the batch pool reads documents concurrently and PDFium is not thread-safe | FR-11, FR-9, FR-8, NFR-3, NFR-6, A-17, ADR 0010 | `tests/test_application_form.py`, `tests/test_cola_document_api.py`, `tests/test_embedded_artwork.py`, `tests/test_batch.py` |
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
 | `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
 | `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
 | `batch.py` | The filename-stem pairing of images with COLA documents, the per-row pairing errors, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, FR-11, NFR-2, NFR-6 | `tests/test_batch.py` |
-| `api.py` | `POST /api/verify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
+| `classify.py` | Decide what each uploaded file is from the file itself: a PDF by its header, an image by whether its text reads as a COLA form. Returns the OCR result alongside the verdict, so the side it lands on reads it no second time | FR-12, FR-11, FR-1, FR-9, NFR-6, ADR 0011 | `tests/test_one_upload.py` |
+| `warning.py` | The 27 CFR 16.21 statement, the exact body comparison, the separate capitalization check, and the character-level difference plus the near-miss routing that sends a one or two character difference to human judgement rather than to a mismatch | FR-5, FR-6, OOS-4, ADR 0012 | `tests/test_warning.py`, `tests/test_warning_near_miss.py` |
+| `api.py` | `POST /api/verify`, `POST /api/classify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, FR-12, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_one_upload.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
 
 Two implementation notes that are not obvious from the table:
 
@@ -241,9 +243,9 @@ Two implementation notes that are not obvious from the table:
   is what FR-8 and NFR-2 require anyway: one unreadable image must not fail the
   batch.
 
-**An uploaded COLA document is read three ways, in order, and the order is the
+**An uploaded COLA document is read four ways, in order, and the order is the
 point.** FR-11 accepts the applicant's label application as an alternative to
-typing the same values, and the document reaches an agent in one of three
+typing the same values, and the document reaches an agent in one of these
 shapes:
 
 1. **Form fields.** An applicant's filled-in copy of the downloadable
@@ -261,12 +263,79 @@ shapes:
    label artwork goes through, so it inherits that pipeline's accuracy and its
    failure modes. Orientation correction is off for a rendered PDF page, which
    is already upright, and on for an uploaded image, which may not be.
+4. **Embedded label artwork.** The applicant affixes the label artwork to the
+   application, so a filed PDF carries pictures of the labels alongside the
+   typed items. Every embedded raster image at or above a size floor is lifted
+   out of the file at its own resolution and read through the same `ocr.py`
+   pipeline, with the same orientation and preprocessing decisions
+   ([ADR 0010](adr/0010-embedded-label-artwork.md)). Extracted rather than
+   rendered: a page render is capped at `TTB_OCR_LONG_EDGE_PX` across the whole
+   page, so it throws away resolution the picture already has, and it hands the
+   engine the form's own printed captions mixed in with the label text.
 
 The first two run on every PDF. OCR runs only when neither produced a single
 mapped value, because rendering and reading pages costs about what reading a
 label photograph costs. `TTB_MAX_DOCUMENT_PAGES` bounds it, defaulting to 3,
 which is one more page than either document needs and is a latency limit as much
-as a parsing one.
+as a parsing one. The artwork read runs on every PDF too, and is bounded
+separately by `TTB_MAX_ARTWORK_IMAGES`, because a picture can sit on a page this
+parser does not read for text: the author's own filing states its brand name on
+page 1 and carries the label artwork on page 3.
+
+**The file classification rule, and where it lives.** Everything submitted for
+one label arrives in one repeated `files` part, and `classify.py` decides what
+each file is from the file rather than from the part it came in
+([ADR 0011](adr/0011-one-upload.md)):
+
+| Order | Test | Side | Cost |
+| --- | --- | --- | --- |
+| 1 | The bytes begin with `%PDF` | Application | Four bytes |
+| 2 | The declared type is `application/pdf` | Application | Nothing |
+| 3 | The image's text carries a COLA form or Registry marker | Application | One OCR read |
+| 4 | The application parser finds a mapped caption value in it | Application | The same read |
+| 5 | Neither | Label | The same read |
+| 6 | The image cannot be decoded | Label, with its error | One failed decode |
+
+The markers are printed strings from the documents themselves: the form number
+`TTB F 5100.31`, its OMB control number `1513-0020`, the application's title,
+the bureau's name, and a Registry page naming itself. **Each image is read
+exactly once**: the `OcrResult` produced while classifying is handed to whichever
+side the file lands on, so `verify.verify_photos` and
+`application_form.parse_application_document` both take a `pre_read` and skip
+the read they would otherwise do. That is what keeps a sorted submission at the
+same latency it had when the agent did the sorting.
+
+`POST /api/classify` runs the same rule and reads the application side without
+comparing anything, for the interface to show before a check runs. The batch
+path keeps `images` and `application_documents` as separate parts; ADR 0011
+records why the two paths differ rather than leaving it as a drift.
+
+**The three-source precedence, and where each part of it lives.**
+
+| Rank | Source | Decided in | Reported as |
+| --- | --- | --- | --- |
+| 1 | Typed by the agent | `verify.resolve_application` | `typed` |
+| 2 | The document's text layer or AcroForm fields | `application_form._combine` | `parsed_from_form` |
+| 3 | Label artwork embedded in that document | `application_form._merge_artwork` | `parsed_from_artwork` |
+| 4 | Nothing supplied it | `verify.resolve_application` | `absent` |
+
+Two ranks are decided inside the document parser and two at the comparison
+layer, which is deliberate: artwork against text is a question about one file
+and is answered where the file is read, and typed against parsed is a question
+about the agent and is answered where the agent's input arrives. Artwork never
+overrides text, because a value the file states is read and a value off a
+picture is recognized by an OCR engine. The response carries the winner per
+field, so an agent can see which kind of evidence they are looking at.
+
+**Where the label side comes from.** Normally from the photographs the agent
+uploaded. When they uploaded none and their application document carried
+readable artwork, the largest such image is the label side, and the response
+says so in `label_source`, per image in `photos[].origin`, and in
+`self_consistency_note`. That last one carries the limitation into the response
+rather than leaving it in this document: checking artwork taken out of an
+application against that same application shows that the filed artwork carries
+the mandatory elements and agrees with the form, and shows nothing about a
+physical bottle.
 
 **Three of the five compared values are not on the form.** That is a property of
 TTB F 5100.31 (04/2023), not of the parser: the class or type designation and
@@ -360,6 +429,8 @@ this origin.
 | `App.tsx` | The one screen: the prototype banner, the masthead, the skip link, the two tabs, the ARIA tabs keyboard behaviour, and the footer attribution | NFR-4, NFR-5 | `tests/a11y.spec.ts`, `src/__tests__/branding.test.tsx` |
 | `components/SingleLabelTab.tsx` | The photo slots and their add and remove controls, the five labelled inputs, the check button, the result cards, the timing line, and the live regions | FR-10, NFR-1, NFR-4, NFR-5, ADR 0007 | `src/__tests__/liveRegion.test.tsx`, `src/__tests__/multiPhoto.test.tsx` |
 | `components/PhotoNotes.tsx` | What was done to each submitted photograph, rendered only when there is something to say | FR-10, ADR 0007, A-15 | `src/__tests__/multiPhoto.test.tsx` |
+| `components/ApplicationFields.tsx` | The application values after an upload has been read: a read-only line per value that was found, a visible field per value that was not, focus and the announcement on the first gap, and one collapsed disclosure holding the boxes for what was found | FR-13, FR-11, FR-3, NFR-4, NFR-5 | `src/__tests__/quietFields.test.tsx`, `applicationFirst.test.tsx`, `tests/a11y.spec.ts` |
+| `components/UploadPanel.tsx` | The one file picker, the list of chosen files with what each was taken to be, the application summary, and the live region that announces each accepted file with its classification | FR-12, FR-11, FR-9, NFR-4, NFR-5 | `src/__tests__/oneUpload.test.tsx`, `multiPhoto.test.tsx`, `tests/a11y.spec.ts` |
 | `components/BatchTab.tsx` | The two pickers, images and COLA documents, the pairing rule stated on screen with the pair count announced, the progress indicator driven by the stream, the summary counts, and the results CSV download | FR-8, FR-11, NFR-2, NFR-5 | `src/__tests__/batchTable.test.tsx`, `tests/a11y.spec.ts` |
 | `components/BatchTable.tsx` | The sortable results table with a status chip per row | FR-8, FR-10, NFR-5 | `src/__tests__/batchTable.test.tsx` |
 | `components/ResultCard.tsx` | One field's card, and the warning's separate capitalization and bold-type sections | FR-3, FR-6, FR-10, OOS-4 | `src/__tests__/outcomes.test.tsx` |
@@ -457,7 +528,11 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_MAX_BATCH_BYTES` | `0` | Largest batch request body accepted, checked from Content-Length before the body is read. `0` derives it as `TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, about 3 GiB at the defaults. See the note below. |
 | `TTB_ALLOWED_MIME_TYPES` | `image/jpeg`, `image/png`, `image/webp`, `image/tiff` | Accepted upload types, checked before decoding. Set as a JSON array. |
 | `TTB_MAX_LABEL_PHOTOS` | `3` | How many photographs of one label the single-label path accepts (ADR 0007). Also sets the single-label envelope limit, as one more than this times `TTB_MAX_UPLOAD_BYTES`, the extra file being the optional COLA document. |
-| `TTB_MAX_DOCUMENT_PAGES` | `3` | How many pages of an uploaded COLA document are read (FR-11, ADR 0008). The application side of TTB F 5100.31 is page 1 and a Registry printout runs to one or two, so this is a bound on cost rather than a limit anyone should meet. |
+| `TTB_MAX_DOCUMENT_PAGES` | `3` | How many pages of an uploaded COLA document are read (FR-11, ADR 0008). The application side of TTB F 5100.31 is page 1 and a Registry printout runs to one or two, so this is a bound on cost rather than a limit anyone should meet. It bounds text reading only; embedded artwork is searched for on every page. |
+| `TTB_MIN_ARTWORK_EDGE_PX` | `400` | The shortest edge an embedded image must have to be treated as label artwork (ADR 0010). It is what rejects a long thin barcode or signature strip. |
+| `TTB_MIN_ARTWORK_PIXELS` | `250000` | The total pixels an embedded image must have, a 500 by 500 square. It is what rejects a small seal or logo. Both halves of the floor must be met. |
+| `TTB_WARNING_NEAR_MISS_EDITS` | `2` | How many single-character edits between the government warning as printed and 27 CFR 16.21 are reported as needing human review rather than as a mismatch (FR-5, ADR 0012). A near miss is never a pass; the comparison that decides a match is unchanged and still exact. |
+| `TTB_MAX_ARTWORK_IMAGES` | `4` | How many surviving embedded images are read. Each costs a full OCR read, so this is a latency bound in the same sense `TTB_MAX_DOCUMENT_PAGES` is. |
 | `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
 | `TTB_REVIEW_THRESHOLD` | `80` | Between this and the match threshold, a field needs human review |

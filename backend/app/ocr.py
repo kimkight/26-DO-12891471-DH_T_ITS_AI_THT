@@ -83,6 +83,7 @@ import pytesseract  # noqa: E402
 from PIL import Image, ImageOps, UnidentifiedImageError  # noqa: E402
 from pytesseract import Output  # noqa: E402
 
+from app import timing  # noqa: E402
 from app.config import settings  # noqa: E402
 
 # The EXIF tag that records which way up the camera was held. Pillow exposes it
@@ -94,10 +95,46 @@ CARDINAL_ROTATIONS = (0, 90, 180, 270)
 
 # How Tesseract reports a hopeless orientation call. Both of the two misreads in
 # the measurement recorded in ADR 0003 and A-15 came back below this, and every
-# correct answer in that run came back above it, so it is carried on the result
-# as the caveat rather than used to override the answer: there is nothing better
-# to fall back to. See docs/07_TEST_STRATEGY.md section 2.
+# correct answer in that run came back above it. Above it OSD decides alone, and
+# 46 of 48 is the record that earns it. Below it the verdict is not taken on
+# trust: ``_second_opinion_on_180`` scores the chosen rotation against its
+# opposite and keeps the better one. See docs/07_TEST_STRATEGY.md section 2.
 LOW_ORIENTATION_CONFIDENCE = 1.0
+
+# The band inside which two reads are treated as equally confident, in mean
+# word confidence points.
+#
+# **Why a band is needed at all: mean word confidence is blind to omission.**
+# It is the right signal for the comparison v1.0.1 introduced, where
+# thresholding *garbles* text and the garbled words score low. It is the wrong
+# signal on its own for the comparison this release introduces, where
+# converting a colour label to grayscale *drops* an entire ink class. A word
+# that was never read contributes no confidence, so the variant that lost two
+# of the five required fields scores the same as the variant that kept them.
+#
+# Two measurements, and they agree. On the author's mezcal COLA artwork the
+# colour image read 257 words at a mean of 89.1 and the grayscale read 106 at
+# 89.9: the grayscale wins by 0.8 while losing "42% ALC BY VOL" outright. On
+# the three-class fixture in tests/test_colour_arm.py the colour image reads 93
+# words at 95.613 and the grayscale 87 at 95.609, a gap of 0.004 the same way
+# round. In both cases the two reads are, on this signal, the same read.
+#
+# So: mean word confidence ranks, and only a tie on it is broken by how much
+# text was recovered. One point is above both measured gaps and far below every
+# gap the v1.0.1 comparison actually has to settle. Re-measured over the
+# twelve-label sample set on 2026-08-30: on the clean renderings the comparison
+# never runs at all, because the preprocessed read clears
+# PREPROCESS_SHORT_CIRCUIT_CONFIDENCE on all twelve and nothing else is read;
+# on the same set degraded to a photograph-like fixture, where both arms are
+# read every time, the two are never closer than 29.0 points apart. So the band
+# fires on no case in that set, and nothing v1.0.1 decided is decided
+# differently here.
+EQUAL_CONFIDENCE_BAND = 1.0
+
+# What counts as colour a grayscale conversion would discard. Both figures are
+# measured; the table is in ``has_colour``.
+_COLOUR_CHROMA = 32
+_COLOUR_PIXEL_SHARE = 0.01
 
 # When the preprocessed read scores at least this, the plain read is not run.
 #
@@ -113,6 +150,69 @@ LOW_ORIENTATION_CONFIDENCE = 1.0
 PREPROCESS_SHORT_CIRCUIT_CONFIDENCE = 85.0
 
 
+# What separates the gutter between two printed panels from the space between
+# two words. Two conditions, and a blank has to clear both to be read as a
+# column boundary.
+#
+# **Why a column split is needed on top of Tesseract's own blocks.** Filed label
+# artwork is one flat sheet carrying several panels side by side, and the
+# author's mezcal COLA is three panels plus a strip of text set at 90 degrees
+# between them. Grouping words by ``block_num`` already keeps that strip out of
+# the panels either side of it, and it is not enough: on the same artwork
+# Tesseract returns blocks spanning x 44 to 1526 of a 1600 pixel image, with the
+# left panel's ``ORIGEN PROTEGIDA`` sitting inside the government warning
+# printed on the right one. Splicing one panel's words into another panel's
+# sentence is what made the statement read as altered when the label prints it
+# correctly.
+#
+# **The first condition is a share of the image width.** A gutter is a fraction
+# of the sheet, and the same artwork arrives at whatever resolution the filing
+# was scanned at, so the figure has to scale with the image rather than be a
+# pixel count. 2.5 percent is 40 pixels at the 1600 pixel working width
+# ``resize_long_edge`` gives a landscape sheet, which is the width the three
+# gutters on the author's artwork were measured at: 63, 86 and 70 pixels, or
+# 3.94, 5.38 and 4.38 percent. The widest blank on that sheet that is not a
+# gutter is 28 pixels, 1.75 percent, inside the vertical strip. So the condition
+# separates the two clusters on this artwork with margin on both sides.
+#
+# **The second condition is the size of the type beside the blank, and a width
+# share alone cannot do without it.** Sample label 05 sets ``LANTERN HILL``
+# across the head of the label in 75 pixel display type, and the word space in
+# it is 53 pixels, 4.97 percent of that label's width: wider, as a share, than
+# two of the three real gutters. Nothing else on that sparse label prints at
+# that x, so the blank survives the projection and a width rule alone cuts the
+# brand name in half. It is not a gutter, and what says so is the type either
+# side of it: 53 pixels is two thirds of one glyph.
+#
+# So a blank also has to be wider than the largest type touching it by
+# ``COLUMN_GAP_TYPE_SIZES``. Measured over every blank of 8 pixels or more on
+# the author's artwork and on the twelve sample labels, as a multiple of that
+# type:
+#
+# ==============================================  ========  ==========
+# blank                                            width     multiple
+# ==============================================  ========  ==========
+# mezcal, gutter left of the front panel                63        2.17
+# mezcal, gutter right of the front panel               86        1.59
+# mezcal, gutter left of the back panel                 70        3.33
+# mezcal, inside the vertical strip                     28        0.93
+# mezcal, four word spaces                               8   0.15-0.38
+# sample 05, the word space in ``LANTERN HILL``         53        0.71
+# ==============================================  ========  ==========
+#
+# 1.25 sits between 0.93 and 1.59, which is the whole of the gap between the two
+# clusters. A blank wider than the type beside it is tall is not a word space in
+# any typeface; a blank narrower than that is not a gutter on any sheet.
+#
+# **Type size here is the shorter side of the word's box, not its height.** A
+# word set at 90 degrees comes back about one cap-height wide and one word long,
+# so height measures its length there and width measures it on upright type. The
+# shorter side is the cap height either way, which is what lets the strip on
+# this artwork be measured by the same rule as the panels beside it.
+COLUMN_GAP_WIDTH_SHARE = 0.025
+COLUMN_GAP_TYPE_SIZES = 1.25
+
+
 class UndecodableImageError(Exception):
     """The bytes submitted could not be decoded as an image (FR-9)."""
 
@@ -125,12 +225,87 @@ class OcrLine:
     of the preprocessed image. It is the only signal available for telling a
     brand name from body text, because Tesseract reports geometry per word and
     reports nothing about typeface.
+
+    ``column`` and ``block`` say which region of the sheet the line was set in:
+    the column ``_columns`` cut the page into, and Tesseract's own block number
+    inside it. A line never spans two of either (see ``_assemble_lines``), so
+    the pair identifies one piece of the layout and is what the response uses to
+    say which panel a field was read from. ``width`` is the mean glyph box width
+    over the line's words, carried because it is the other half of the only
+    signal that tells upright type from type set at 90 degrees; see
+    ``sideways`` and ``app.parse``.
+
+    All four default so that ``lines_from_text``, the plain-text path that has
+    no image behind it, still builds a line record.
     """
 
     text: str
     confidence: float
     height: float
     top: int
+    column: int = 0
+    block: int = 0
+    width: float = 0.0
+
+    @property
+    def sideways(self) -> bool:
+        """Whether this line is type set at 90 degrees rather than upright.
+
+        **The reported height of a rotated word is its length, not its type
+        size.** Tesseract reads a vertical strip in place and reports the
+        bounding box in page coordinates, so a word set sideways comes back
+        about one cap-height wide and one word long. On the author's mezcal
+        artwork that made the producer's tax identifier, printed in the gutter
+        strip, the tallest text on the sheet at 81.5 pixels against a 43 pixel
+        display line, which is how it came to be reported as the brand name. The
+        box is not lying; it is answering a different question, and any ranking
+        by type size has to know that before it uses the number.
+
+        Wider than tall is the whole test, and it carries no threshold because
+        the two cases are nowhere near each other. Measured on that artwork, over
+        the mean word box of each line: the panels' own lines run from 0.05 to
+        0.85 in height over width, and the four lines of the two vertical strips
+        run 3.30, 3.59, 3.90 and 5.43.
+
+        One line on that sheet lands between them, at 1.17, and it is a
+        two-character misreading of a rule printed under the lot number. It is
+        excluded as sideways and nothing is lost by that: the exclusion decides
+        only which lines may compete on type size, and a garbled fragment is not
+        a candidate for the brand name in either case. That is the shape of this
+        rule's error, and it is the cheap direction to be wrong in.
+        """
+        return self.width > 0 and self.height > self.width
+
+
+@dataclass(frozen=True)
+class RotationScore:
+    """What one candidate rotation scored when the image was actually read."""
+
+    rotation_degrees: int
+    confidence: float
+    words: int
+
+
+@dataclass(frozen=True)
+class OrientationCheck:
+    """The second opinion taken when OSD answered below the floor (FR-1, A-15).
+
+    Reported in full rather than reduced to its outcome. A rotation that
+    overrode Tesseract's own verdict is exactly the kind of decision an agent
+    looking at a poor result has to be able to audit, and "we turned it 180
+    degrees" says nothing about who decided that or on what evidence.
+
+    ``candidates`` holds both scored rotations, always two: the one OSD chose
+    and its 180-degree opposite. It is deliberately not four. See
+    ``_second_opinion_on_180``.
+    """
+
+    osd_rotation_degrees: int
+    osd_confidence: float
+    floor: float
+    candidates: tuple[RotationScore, ...]
+    chosen_rotation_degrees: int
+    overrode_osd: bool
 
 
 @dataclass(frozen=True)
@@ -151,22 +326,30 @@ class Orientation:
     tag means the tag was wrong about its own pixels.
 
     ``method`` says where the quarter-turn came from: ``osd`` when Tesseract's
-    orientation and script detection answered, ``unavailable`` when it could not
-    (too little text to judge, or no ``osd`` training data installed), and
-    ``disabled`` when ``TTB_CORRECT_ORIENTATION`` is off.
+    orientation and script detection answered and was taken at its word,
+    ``osd_180_check`` when it answered below ``LOW_ORIENTATION_CONFIDENCE`` and
+    the answer was put to the second opinion described in ``check``,
+    ``unavailable`` when it could not answer (too little text to judge, or no
+    ``osd`` training data installed), and ``disabled`` when
+    ``TTB_CORRECT_ORIENTATION`` is off.
+
+    ``confidence`` is always Tesseract's own figure for its own verdict, not a
+    score from the second opinion. The second opinion's scores are in ``check``,
+    kept separate so the two are never confused for one another.
     """
 
     exif_orientation: int | None = None
     exif_transposed: bool = False
     rotation_degrees: int = 0
-    method: Literal["osd", "unavailable", "disabled"] = "disabled"
+    method: Literal["osd", "osd_180_check", "unavailable", "disabled"] = "disabled"
     confidence: float | None = None
+    check: OrientationCheck | None = None
 
     @property
     def low_confidence(self) -> bool:
         """True when Tesseract answered but had almost nothing to go on."""
         return (
-            self.method == "osd"
+            self.method in ("osd", "osd_180_check")
             and self.confidence is not None
             and self.confidence < LOW_ORIENTATION_CONFIDENCE
         )
@@ -188,34 +371,75 @@ class DecodedImage:
 
 @dataclass(frozen=True)
 class Prepared:
-    """The two images OCR may read, and how both were turned to get there.
+    """The images OCR may read, and how all of them were turned to get there.
 
     ``binary`` is the preprocessed image: grayscale, scaled, adaptively
     thresholded and deskewed. ``gray`` is the same pixels with none of that
-    done to them, scaled and turned upright and nothing more. Both exist
-    because preprocessing is not reliably an improvement; see the module
-    docstring and ``extract_text``.
+    done to them, scaled and turned upright and nothing more. ``colour`` is the
+    scaled, turned RGB image, which is to say the pixels the file actually
+    holds. All three exist because neither transform is reliably an
+    improvement; see the module docstring and ``extract_text``.
+
+    ``colour`` is None when the source carries no colour to lose, which is
+    every grayscale scan, fax and monochrome render. Reading it would be
+    reading ``gray`` a second time under another name, for the price of a full
+    Tesseract pass.
     """
 
     binary: np.ndarray
     gray: np.ndarray
     orientation: Orientation
+    colour: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
 class ReadPath:
-    """Which of the two images was read, and what each of them scored.
+    """Which of the three images was read, and what each of them scored.
 
     ``variant`` is the one whose words were kept. ``preprocessed_confidence`` is
-    always present because the preprocessed read always runs.
-    ``plain_confidence`` is null when the preprocessed read scored well enough
-    that the plain one was never run, which is the common case and the reason
-    the second read costs nothing on artwork that reads cleanly.
+    always present because the preprocessed read always runs. The other two are
+    null when their read never ran: ``plain_confidence`` when the comparison was
+    already settled, and ``colour_confidence`` on a source that carries no
+    colour at all.
+
+    ``decided_by`` says how the winner was picked, because on this evidence the
+    three cases are not the same claim. ``short_circuit`` means the preprocessed
+    read cleared ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE`` on a monochrome source
+    and nothing else was read. ``confidence`` means the winner scored higher
+    than every other arm by more than ``EQUAL_CONFIDENCE_BAND``. ``coverage``
+    means the leaders were inside that band, which is to say equally confident,
+    and the winner is the one that recovered more text. See the band's own
+    comment for why that last case has to exist.
     """
 
-    variant: Literal["preprocessed", "plain"] = "preprocessed"
+    variant: Literal["preprocessed", "plain", "colour"] = "preprocessed"
     preprocessed_confidence: float = 0.0
     plain_confidence: float | None = None
+    colour_confidence: float | None = None
+    decided_by: Literal["short_circuit", "confidence", "coverage"] = "short_circuit"
+
+
+@dataclass(frozen=True)
+class Segmentation:
+    """How the sheet was cut up before its words were assembled into lines.
+
+    Reported out to the response (FR-1, FR-10) for the same reason the
+    orientation is: a field read off the wrong panel is indistinguishable, to an
+    agent looking only at the value, from a field read badly. An agent who sees
+    ``DEL MAGUEY`` should be able to see which part of the sheet it came from,
+    and an agent who sees something odd should be able to see that the sheet was
+    read as four panels rather than one.
+
+    ``columns`` is how many the x-gap rule cut, ``blocks`` how many distinct
+    Tesseract blocks survived inside them, and ``column_bounds`` the cuts
+    themselves in pixels of the image as read, left edge inclusive and right
+    edge exclusive. One column and bounds spanning the whole width is a sheet
+    that was not cut at all, which is every single-panel label.
+    """
+
+    columns: int = 1
+    blocks: int = 0
+    column_bounds: tuple[tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -228,6 +452,7 @@ class OcrResult:
     lines: list[OcrLine] = field(default_factory=list)
     orientation: Orientation = Orientation()
     read_path: ReadPath = ReadPath()
+    segmentation: Segmentation = Segmentation()
 
     @property
     def has_text(self) -> bool:
@@ -405,6 +630,7 @@ def detect_orientation(binary: np.ndarray) -> tuple[int, float | None, str]:
     the wrong way, and the read came back empty.
     """
     try:
+        timing.tesseract_read()
         osd = pytesseract.image_to_osd(binary, output_type=Output.DICT)
     except (pytesseract.TesseractError, ValueError, KeyError):
         # "Too few characters" for a nearly blank image, or no osd.traineddata
@@ -457,10 +683,17 @@ def preprocess(
 
     resized = resize_long_edge(decoded.pixels)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY) if resized.ndim == 3 else resized
+    colour = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) if has_colour(resized) else None
 
+    check: OrientationCheck | None = None
     if correct:
         degrees, confidence, method = detect_orientation(gray)
+        if method == "osd" and confidence is not None and confidence < LOW_ORIENTATION_CONFIDENCE:
+            degrees, check = _second_opinion_on_180(gray, degrees, confidence)
+            method = "osd_180_check"
         gray = rotate_cardinal(gray, degrees)
+        if colour is not None:
+            colour = rotate_cardinal(colour, degrees)
     else:
         degrees, confidence, method = 0, None, "disabled"
 
@@ -475,13 +708,115 @@ def preprocess(
     return Prepared(
         binary=binary,
         gray=gray,
+        colour=colour,
         orientation=Orientation(
             exif_orientation=decoded.exif_orientation,
             exif_transposed=decoded.exif_transposed,
             rotation_degrees=degrees,
             method=method,
             confidence=None if confidence is None else round(confidence, 2),
+            check=check,
         ),
+    )
+
+
+def has_colour(image: np.ndarray) -> bool:
+    """Whether this array holds colour a grayscale conversion would discard.
+
+    A three-channel array is not the same thing as a colour image, and an exact
+    channel comparison is the wrong test: a photograph of a grayscale document
+    carries independent sensor noise in each channel, so every one of them is a
+    colour image by that reading, and each would buy a full Tesseract pass to
+    learn nothing. What matters is whether enough of the image carries enough
+    chroma that flattening it to luminance could take a whole ink class with it.
+
+    Both numbers are measured rather than chosen. Chroma here is
+    ``max(R,G,B) - min(R,G,B)`` per pixel:
+
+    ============================================  ======  ==============
+    image                                          max     % >= 32
+    ============================================  ======  ==============
+    the twelve rendered sample labels                  0           0.000
+    a sample label degraded to a photograph           30           0.000
+    the three-class colour fixture                   140          84.381
+    ============================================  ======  ==============
+
+    So ``_COLOUR_CHROMA`` is 32: above every pixel the photograph-like fixture
+    produces from sensor noise, and far below the chroma between any ink and
+    ground a label prints. And ``_COLOUR_PIXEL_SHARE`` is one percent, which a
+    coloured ground or a line of coloured type clears many times over and a
+    stray coloured seal in the corner of an otherwise black-and-white label does
+    not. The gap between the two clusters is 0.000 percent against 84 percent,
+    which is not a threshold sitting on a knife edge.
+
+    The consequence is the one that matters for NFR-1: every image in the sample
+    set, and every grayscale scan and fax, takes exactly the v1.0.1 path at
+    exactly the v1.0.1 cost. Nothing pays for this feature that cannot use it.
+    """
+    if image.ndim != 3 or image.shape[2] != 3:
+        return False
+    chroma = image.max(axis=2).astype(np.int16) - image.min(axis=2).astype(np.int16)
+    return float((chroma >= _COLOUR_CHROMA).mean()) >= _COLOUR_PIXEL_SHARE
+
+
+def _second_opinion_on_180(
+    gray: np.ndarray, osd_degrees: int, osd_confidence: float
+) -> tuple[int, OrientationCheck]:
+    """Score the OSD rotation against its opposite, and keep the better one.
+
+    **This is the narrow half of ADR 0003, and it is narrow on purpose.** That
+    decision measured both approaches over the twelve-label sample set at all
+    four cardinal rotations and found OSD right in 46 of 48 cases against 7 for
+    picking the rotation with the highest mean word confidence. Nothing here
+    disputes that number, and above ``LOW_ORIENTATION_CONFIDENCE`` OSD still
+    decides alone.
+
+    What the 7 of 48 hides is *which* cases the sweep loses. It loses the
+    quarter-turns, and for a reason that is a property of Tesseract rather than
+    of the threshold: layout analysis already detects and corrects text rotated
+    a quarter-turn, so an upright image and the same image turned 90 degrees
+    produce byte-identical output. A score that is equal on two cases cannot
+    separate them, and no tuning changes that.
+
+    It says nothing whatever about 0 against 180, where the same score separates
+    the two cleanly. Measured on the author's mezcal COLA artwork: the colour
+    image read 257 words at a mean of 89.1 upright and 254 at 35.3 upside down,
+    and the grayscale 106 at 89.9 against 107 at 30.4. Fifty points and more,
+    on the one axis where OSD had just admitted it was guessing.
+
+    So the fallback is not the sweep ADR 0003 rejected. It is two rotations, not
+    four, chosen so that every case it can decide is a case the score can
+    actually decide. The opposite is the only other candidate offered, and a tie
+    leaves the OSD verdict standing.
+
+    Costs two Tesseract reads, and only on an image where OSD's own confidence
+    fell under the floor. On the twelve-label sample set that is no image at all.
+    """
+    opposite = (osd_degrees + 180) % 360
+    scored: list[RotationScore] = []
+    for degrees in (osd_degrees, opposite):
+        lines, confidence, _ = _read(rotate_cardinal(gray, degrees))
+        scored.append(
+            RotationScore(
+                rotation_degrees=degrees,
+                confidence=round(confidence, 1),
+                words=sum(len(line.text.split()) for line in lines),
+            )
+        )
+
+    chosen, challenger = scored
+    # Strictly greater, so a tie leaves Tesseract's own answer in place. The
+    # OSD verdict is a weak signal here, but it is still a signal, and a
+    # coin-flip is not an improvement on it.
+    overrode = challenger.confidence > chosen.confidence
+    kept = challenger if overrode else chosen
+    return kept.rotation_degrees, OrientationCheck(
+        osd_rotation_degrees=osd_degrees,
+        osd_confidence=round(osd_confidence, 2),
+        floor=LOW_ORIENTATION_CONFIDENCE,
+        candidates=tuple(scored),
+        chosen_rotation_degrees=kept.rotation_degrees,
+        overrode_osd=overrode,
     )
 
 
@@ -494,25 +829,44 @@ def extract_text(
     """Run the full local extraction path and time it.
 
     **Preprocessing has to earn the read it is given.** The preprocessed image is
-    read first. If it comes back at or above
+    read first. On a monochrome source, if it comes back at or above
     ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE`` the answer is kept and nothing else
     runs, which is what happens on eleven of the twelve sample labels. Otherwise
-    the plain upright grayscale is read too and the higher-scoring of the two is
-    kept. Which one won, and what both scored, go out on the result.
+    the plain upright grayscale is read too and the higher-scoring is kept.
 
-    This is the same shape as the rotation decision one level up: do the thing
-    that usually helps, then check that it did. The cost is one extra Tesseract
-    invocation on the images where preprocessing did not score well, roughly
-    doubling the per-label OCR time in that case and leaving it unchanged
-    otherwise. It is paid on the batch path too, per image. Measured figures are
-    in docs/07_TEST_STRATEGY.md section 4.
+    **On a colour source the colour image is read first (v1.1.0).** Everything
+    above describes a source with no colour to lose, and on one it still holds
+    exactly. A coloured label is a different problem. Filed label artwork
+    routinely carries dark-on-light and light-on-dark text on one ground, and a
+    threshold separates two luminance classes, not three, so one ink class
+    dissolves into the background while everything left standing still reads at
+    95. On the three-class fixture in tests/test_colour_arm.py the preprocessed
+    read scores 82.2 and the plain grayscale 95.6, and *both* have already
+    dropped "42% ALC BY VOL" and "750 ML" by the time they score it.
 
-    Ranking by mean word confidence works here where it does not work for
-    rotation (A-15), and for a reason that does not generalize between the two:
-    Tesseract's layout analysis silently corrects a quarter-turn, so it returns
-    identical scores for the two rotations that have to be told apart, but it
-    does nothing of the kind for thresholding, so the two images genuinely score
-    differently.
+    So on a coloured image the untransformed pixels are read first, because they
+    are the only rendering that cannot have lost an ink class before Tesseract
+    sees them, and the transformed ones have to earn their place against it
+    rather than the other way around:
+
+    * colour first, and if it clears ``PREPROCESS_SHORT_CIRCUIT_CONFIDENCE``
+      that is the whole read. One Tesseract pass, which is one fewer than the
+      author's mezcal artwork pays today.
+    * otherwise preprocessed and plain are both read and all three are ranked.
+      Three passes, on an image whose own pixels have already read poorly, which
+      is the case where a transform has something to contribute.
+
+    Neither transform gets to end the comparison on a coloured source, and that
+    is deliberate: the failure being guarded against is a confident read of what
+    survived a transform, so a confident read from a transform is not evidence
+    that nothing was lost.
+
+    Ranking is by mean word confidence, with ties inside
+    ``EQUAL_CONFIDENCE_BAND`` broken by how much text the arm recovered. The
+    band exists because this comparison has to detect omission and mean
+    confidence cannot: a word that was never read contributes no confidence to
+    lower. It never overrides a real difference in confidence; see the band's
+    own comment for the two measurements that set it.
 
     The elapsed time is returned rather than logged, because NFR-1 requires the
     latency to be measured and reported rather than asserted, and NFR-6 forbids
@@ -524,54 +878,253 @@ def extract_text(
         decoded, deskew_image=deskew_image, correct_orientation=correct_orientation
     )
 
-    preprocessed_lines, preprocessed_confidence = _read(prepared.binary)
-    if preprocessed_confidence >= PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
-        lines, mean_confidence = preprocessed_lines, preprocessed_confidence
-        read_path = ReadPath(
-            variant="preprocessed",
-            preprocessed_confidence=round(preprocessed_confidence, 1),
-            plain_confidence=None,
-        )
-    else:
-        plain_lines, plain_confidence = _read(prepared.gray)
-        plain_wins = plain_confidence > preprocessed_confidence
-        lines = plain_lines if plain_wins else preprocessed_lines
-        mean_confidence = plain_confidence if plain_wins else preprocessed_confidence
-        read_path = ReadPath(
-            variant="plain" if plain_wins else "preprocessed",
-            preprocessed_confidence=round(preprocessed_confidence, 1),
-            plain_confidence=round(plain_confidence, 1),
-        )
+    arms: list[_Arm] = []
+    if prepared.colour is not None:
+        lines, confidence, segmentation = _read(prepared.colour)
+        arms.append(_Arm("colour", lines, confidence, segmentation))
+
+    if not arms or arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
+        lines, confidence, segmentation = _read(prepared.binary)
+        arms.append(_Arm("preprocessed", lines, confidence, segmentation))
+
+    if _needs_the_plain_read(arms, colour_read=prepared.colour is not None):
+        lines, confidence, segmentation = _read(prepared.gray)
+        arms.append(_Arm("plain", lines, confidence, segmentation))
+
+    winner, decided_by = _rank(arms)
+    scored = {arm.variant: round(arm.confidence, 1) for arm in arms}
 
     elapsed_ms = (time.perf_counter() - started) * 1000
     return OcrResult(
-        text="\n".join(line.text for line in lines),
-        mean_confidence=round(mean_confidence, 1),
+        text="\n".join(line.text for line in winner.lines),
+        mean_confidence=round(winner.confidence, 1),
         elapsed_ms=round(elapsed_ms, 1),
-        lines=lines,
+        lines=winner.lines,
         orientation=prepared.orientation,
-        read_path=read_path,
+        segmentation=winner.segmentation,
+        read_path=ReadPath(
+            variant=winner.variant,
+            preprocessed_confidence=scored.get("preprocessed", 0.0),
+            plain_confidence=scored.get("plain"),
+            colour_confidence=scored.get("colour"),
+            decided_by=decided_by,
+        ),
     )
 
 
-def _read(image: np.ndarray) -> tuple[list[OcrLine], float]:
-    """Read one prepared image and return its lines and mean word confidence."""
+def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
+    """Whether the plain upright grayscale still has anything to contribute.
+
+    Two rules, one per kind of source, and they are the two paragraphs of
+    ``extract_text`` in code. On a source with no colour to lose the plain read
+    runs when the preprocessed read fell short of the short-circuit confidence,
+    which is v1.0.1 unchanged. On a coloured source it runs whenever the colour
+    read fell short, whatever the preprocessed read then scored, because a
+    confident read of a thresholded colour image is exactly the evidence this
+    release stopped trusting.
+    """
+    if not colour_read:
+        return arms[-1].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+    return arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+
+
+@dataclass(frozen=True)
+class _Arm:
+    """One rendering of the image, read, with what it scored and how it was cut.
+
+    The segmentation travels with the arm rather than being taken from the last
+    read, because each rendering is segmented on its own word boxes and only the
+    winning arm's lines are kept. Reporting another arm's layout beside them
+    would describe a reading that was discarded.
+    """
+
+    variant: Literal["preprocessed", "plain", "colour"]
+    lines: list[OcrLine]
+    confidence: float
+    segmentation: Segmentation = Segmentation()
+
+    @property
+    def words(self) -> int:
+        return sum(len(line.text.split()) for line in self.lines)
+
+
+def _rank(arms: list[_Arm]) -> tuple[_Arm, Literal["short_circuit", "confidence", "coverage"]]:
+    """Pick the arm to keep, and say what picked it.
+
+    Mean word confidence ranks. Where the leader is clear of every other arm by
+    more than ``EQUAL_CONFIDENCE_BAND`` it wins outright, and that is the rule
+    v1.0.1 set and this release does not change: an arm that recovered more
+    text than the leader but scored materially below it still loses.
+
+    The band is what mean confidence on its own cannot express. Two arms inside
+    it are, on this evidence, equally confident about what each of them read,
+    and the question of which read *more* is then the only question left. That
+    is the case the colour arm exists for, and it is the case where the losing
+    arm dropped an entire ink class without any word it did keep scoring a
+    point lower for it.
+
+    Order is stable: with everything equal the earliest arm wins, and the arms
+    arrive in the order ``extract_text`` read them. On a source with no colour
+    to lose that is the preprocessed read first, which is v1.0.1 unchanged; on a
+    coloured one it is the colour read first, which is the arm that cannot have
+    lost an ink class before Tesseract saw it.
+    """
+    if len(arms) == 1:
+        return arms[0], "short_circuit"
+
+    best = max(arm.confidence for arm in arms)
+    contenders = [arm for arm in arms if best - arm.confidence <= EQUAL_CONFIDENCE_BAND]
+    if len(contenders) == 1:
+        return contenders[0], "confidence"
+
+    leader = max(contenders, key=lambda arm: arm.words)
+    if leader.words == max(arm.words for arm in contenders if arm is not leader):
+        # Equally confident and equally full: confidence is still the reason,
+        # and calling it coverage would claim a distinction nothing measured.
+        return max(contenders, key=lambda arm: arm.confidence), "confidence"
+    return leader, "coverage"
+
+
+def _read(image: np.ndarray) -> tuple[list[OcrLine], float, Segmentation]:
+    """Read one prepared image and return its lines, confidence and layout.
+
+    One Tesseract pass, which is the same one this function has always made.
+    The segmentation below is arithmetic on the word boxes that pass already
+    returns, so a sheet of four panels costs exactly what a sheet of one costs.
+    """
+    timing.tesseract_read()
     data = pytesseract.image_to_data(image, lang="eng", output_type=Output.DICT)
-    lines, confidences = _assemble_lines(data)
+    lines, confidences, segmentation = _assemble_lines(data, width=int(image.shape[1]))
     mean_confidence = float(sum(confidences) / len(confidences)) if confidences else 0.0
-    return lines, mean_confidence
+    return lines, mean_confidence, segmentation
 
 
-def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
-    """Group Tesseract's word rows into lines, keeping confidence and size."""
-    grouped: dict[tuple[int, int, int, int], list[int]] = {}
-    for index, word in enumerate(data.get("text", [])):
-        if not str(word).strip():
+def _columns(data: dict, indices: list[int], width: int) -> list[tuple[int, int]]:
+    """Cut the sheet into columns at every blank wide enough to be a gutter.
+
+    Every word box the read returned is projected onto the x axis, and a run of
+    pixel columns no box covers is a candidate boundary. A candidate becomes a
+    boundary when it clears both of ``COLUMN_GAP_WIDTH_SHARE`` and
+    ``COLUMN_GAP_TYPE_SIZES``; see those constants for what each one is for and
+    what each was measured against. The cut is placed in the middle of the blank
+    rather than at either end, so a word box overhanging its panel by a pixel
+    cannot move the boundary onto its neighbour.
+
+    Returns one ``(left, right)`` pair per column, left to right, covering the
+    whole width with no gaps between them: the first starts at 0 and the last
+    ends at ``width``, so every word falls in exactly one column and none can be
+    lost between two.
+
+    A sheet with no blank clearing both conditions comes back as a single column
+    spanning the image, which is the answer for every single-panel label and is
+    what keeps their reading identical to what it was before this existed.
+    """
+    if not indices:
+        return [(0, width)]
+
+    boxes = [
+        (
+            max(0, int(data["left"][index])),
+            min(width, max(0, int(data["left"][index])) + max(0, int(data["width"][index]))),
+            min(int(data["width"][index]), int(data["height"][index])),
+        )
+        for index in indices
+    ]
+
+    covered = np.zeros(width + 1, dtype=bool)
+    for left, right, _ in boxes:
+        covered[left : right + 1] = True
+
+    minimum_width = max(1, round(width * COLUMN_GAP_WIDTH_SHARE))
+    bounds: list[int] = [0]
+    run = 0
+    for x in range(width + 1):
+        if not covered[x]:
+            run += 1
             continue
-        if float(data["conf"][index]) < 0:
+        blank = (x - run, x)
+        run = 0
+        # A blank running to either edge is a margin, not a gutter, and cutting
+        # at it would put a column number on no words at all.
+        if blank[0] <= 0 or blank[1] >= width:
             continue
+        if blank[1] - blank[0] < minimum_width:
+            continue
+        if not _is_gutter(boxes, blank):
+            continue
+        cut = blank[0] + (blank[1] - blank[0]) // 2
+        if cut > bounds[-1]:
+            bounds.append(cut)
+
+    bounds.append(width)
+    return [(bounds[index], bounds[index + 1]) for index in range(len(bounds) - 1)]
+
+
+def _is_gutter(boxes: list[tuple[int, int, int]], blank: tuple[int, int]) -> bool:
+    """Whether a blank is wider than the type beside it, so not a word space.
+
+    The type beside it is the largest of the word boxes ending just before the
+    blank and those starting just after it, measured on the shorter side of each
+    box. "Just" is the blank's own width: a word further from it than the blank
+    is wide is not what the blank is separating.
+
+    A blank with no word within that reach is left to the width condition alone.
+    That is the sparse case where there is nothing to measure against, and
+    refusing every such cut would put the whole sheet back in one column.
+    """
+    left, right = blank
+    reach = right - left
+    adjacent = [
+        size
+        for box_left, box_right, size in boxes
+        if (left - reach <= box_right <= left) or (right <= box_left <= right + reach)
+    ]
+    if not adjacent:
+        return True
+    return reach >= COLUMN_GAP_TYPE_SIZES * max(adjacent)
+
+
+def _assemble_lines(data: dict, *, width: int) -> tuple[list[OcrLine], list[float], Segmentation]:
+    """Group Tesseract's word rows into lines within one region of the sheet.
+
+    **A line never spans two panels, and it takes both rules to hold that.**
+
+    The first is Tesseract's own: words are grouped by ``block_num`` and
+    ``par_num`` as well as ``line_num``, so a block the layout analysis
+    separated stays separate. That is what keeps the vertical strip on the
+    author's mezcal artwork, which Tesseract does put in blocks of its own, from
+    being read into the panels either side of it.
+
+    The second is ``_columns``, and it is needed because the first is not
+    sufficient. On the same artwork Tesseract returns blocks spanning almost the
+    full width of the sheet, so ``HECHO EN MEXICO`` from the left panel and
+    ``long, smooth finish.`` from the right one arrive in one block, one
+    paragraph and one line. Cutting at the gutters first and grouping inside a
+    column second separates them, and it is what makes the government warning
+    come out as the statement 27 CFR 16.21 sets rather than as that statement
+    with two lines of a neighbouring panel spliced through it.
+
+    Reading order is column by column, and each column top to bottom. A sheet
+    printed as columns is read as columns; a page whose text runs across it is
+    one column and is read exactly as it was before this existed.
+    """
+    usable = [
+        index
+        for index, word in enumerate(data.get("text", []))
+        if str(word).strip() and float(data["conf"][index]) >= 0
+    ]
+
+    columns = _columns(data, usable, width)
+    grouped: dict[tuple[int, int, int, int, int], list[int]] = {}
+    for index in usable:
+        centre = int(data["left"][index]) + int(data["width"][index]) / 2
+        column = next(
+            (number for number, (left, right) in enumerate(columns) if left <= centre < right),
+            len(columns) - 1,
+        )
         key = (
             data["page_num"][index],
+            column,
             data["block_num"][index],
             data["par_num"][index],
             data["line_num"][index],
@@ -580,11 +1133,16 @@ def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
 
     lines: list[OcrLine] = []
     confidences: list[float] = []
-    for key in sorted(grouped, key=lambda k: (k[0], min(data["top"][i] for i in grouped[k]))):
+    ordered = sorted(
+        grouped,
+        key=lambda k: (k[0], k[1], min(data["top"][i] for i in grouped[k])),
+    )
+    for key in ordered:
         indices = grouped[key]
         words = [str(data["text"][i]).strip() for i in indices]
         word_confidences = [float(data["conf"][i]) for i in indices]
         heights = [float(data["height"][i]) for i in indices]
+        widths = [float(data["width"][i]) for i in indices]
         confidences.extend(word_confidences)
         lines.append(
             OcrLine(
@@ -592,6 +1150,14 @@ def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
                 confidence=round(sum(word_confidences) / len(word_confidences), 1),
                 height=round(sum(heights) / len(heights), 1),
                 top=min(int(data["top"][i]) for i in indices),
+                column=key[1],
+                block=key[2],
+                width=round(sum(widths) / len(widths), 1),
             )
         )
-    return lines, confidences
+    segmentation = Segmentation(
+        columns=len(columns),
+        blocks=len({(key[1], key[2]) for key in grouped}),
+        column_bounds=tuple(columns),
+    )
+    return lines, confidences, segmentation

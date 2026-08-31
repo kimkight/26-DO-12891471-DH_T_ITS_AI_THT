@@ -224,3 +224,39 @@ than a wrong comparison.
 CSV's per-row reconciliation errors. A-14 is marked superseded in
 [ASSUMPTIONS.md](../ASSUMPTIONS.md) rather than removed, because the history of
 why the CSV existed is the reason this ADR is short.
+
+## Amendment, 2026-08-29: does a batch document that carries its own artwork still need a paired image?
+
+**Yes. A batch row still requires its label image, and this ADR is otherwise
+unchanged.**
+
+[ADR 0010](0010-embedded-label-artwork.md) reads the label artwork embedded in a
+COLA document and, on the single-label path, uses it as the label side when the
+agent uploaded no photograph. The obvious question is whether that makes the
+paired image optional here too. It does not, this session, and the reason is
+this ADR's own design rather than an oversight:
+
+**Rows are enumerated from the submitted images.** That is what lets the first
+line of the stream report a total before any document has been read, which is
+what NFR-2's progress display depends on: "batch progress is observable to the
+user rather than presenting as a frozen page". Enumerating the union of image
+stems and document stems instead would still let the total be known first, but
+it would also mean a batch of 300 documents and no images pays a full artwork
+OCR read per row before anything can be said about any of them. That is a
+different contract for what a batch is, and it is this ADR's subject rather than
+ADR 0010's.
+
+**What a batch does get from ADR 0010.** Where a row has both an image and a
+document, the document's embedded artwork now fills application-side values its
+text layer left empty, exactly as on the single-label path, and the source is
+reported per field. So a batch of filings whose class or type, alcohol content
+and net contents appear only on the affixed labels now reconciles those values
+where it previously reported them as not found. The image the agent submitted is
+still the label side, which is right: a photograph of the product is evidence
+about the product, and the artwork on file is not.
+
+**This is a real simplification left on the table, and it is named as such**, so
+the author knows about it. An importer whose filings carry their own artwork
+could submit documents alone and skip half the files. It is the obvious next
+step for this path, it changes what a batch is, and it should be decided here
+rather than inherited from a change made for the single-label view.

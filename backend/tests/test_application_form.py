@@ -350,3 +350,81 @@ class TestNoOutboundCall:
             as_pdf_bytes(registry_printout_lines(REGISTRY_SPEC)), "application/pdf"
         )
         assert parsed.values["brand_name"] == "STONE'S THROW"
+
+
+class TestEveryPageIsClosedBeforeTheDocumentIs:
+    """The PDFium handle discipline, asserted rather than left to the collector.
+
+    **The failure this prevents.** Every pypdfium2 handle registers a weakref of
+    itself in its parent's ``_kids`` set, and ``PdfDocument.close()`` walks that
+    set. A page left to the garbage collector takes its weakref out of the set
+    whenever the collector happens to run, and the collector is free to run in
+    the middle of that walk. It did, on CI on 2026-08-30:
+
+        File "pypdfium2/internal/bases.py", line 168, in close
+          for k_wref in self._kids:
+        RuntimeError: Set changed size during iteration
+
+    That is a race, so a test that parses documents in a loop and hopes to catch
+    it would be a test that flakes green. What is asserted instead is the
+    property that makes the race impossible: by the time the document is closed
+    there is nothing left in the set for a collection to mutate. Measured before
+    the fix, this same probe reported two live page weakrefs on every parse.
+    """
+
+    def _kids_at_close(self, pdf: bytes) -> list[int]:
+        """How many child weakrefs each document close had to walk."""
+        import gc
+
+        import pypdfium2 as pdfium
+
+        walked: list[int] = []
+        original = pdfium.PdfDocument.close
+
+        def counting_close(document, _by_parent=False):
+            walked.append(len(getattr(document, "_kids", ())))
+            return original(document, _by_parent)
+
+        pdfium.PdfDocument.close = counting_close
+        # Collection off, so a weakref that has not been removed deliberately is
+        # still in the set to be counted. With it on, the probe would be racing
+        # the very collector whose timing is the problem.
+        gc.disable()
+        try:
+            parse_application_document(pdf, "application/pdf")
+        finally:
+            gc.enable()
+            pdfium.PdfDocument.close = original
+        return walked
+
+    def test_a_text_layer_document_leaves_nothing_for_the_collector(self):
+        walked = self._kids_at_close(as_pdf_bytes(registry_printout_lines(REGISTRY_SPEC)))
+
+        assert walked, "the document was never closed"
+        assert walked == [0] * len(walked)
+
+    def test_a_form_field_document_leaves_nothing_for_the_collector(self):
+        """The AcroForm path opens a page per page as well, and closes them."""
+        walked = self._kids_at_close(as_fillable_pdf_bytes(REGISTRY_SPEC))
+
+        assert walked == [0] * len(walked)
+
+    @requires_tesseract
+    @requires_fonts
+    def test_the_embedded_artwork_path_leaves_nothing_either(self):
+        """The path that opens a page for its pictures rather than its text.
+
+        Every page is searched for embedded images, not only the ones read for
+        text (ADR 0010), so this path opens the most pages of any of them. It is
+        also the one this release rewrote, which is why it gets its own case.
+        """
+        from samples.labelmaker import render_png_bytes
+        from samples.specs import SAMPLE_LABEL
+
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()), images=[render_png_bytes(SAMPLE_LABEL)]
+        )
+
+        walked = self._kids_at_close(pdf)
+
+        assert walked == [0] * len(walked)

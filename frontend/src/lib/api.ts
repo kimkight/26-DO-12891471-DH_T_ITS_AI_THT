@@ -11,6 +11,7 @@ import type {
   ApplicationData,
   ApplicationDocumentResult,
   BatchLine,
+  ClassificationResult,
   ErrorDetail,
   VerificationResult,
 } from '../types'
@@ -33,6 +34,11 @@ export interface ApplicationOutcome {
   error: UiError | null
 }
 
+export interface ClassifyOutcome {
+  result: ClassificationResult | null
+  error: UiError | null
+}
+
 function toUiError(body: unknown): UiError {
   const error = (body as { error?: ErrorDetail } | null)?.error
   const detail = [error?.message, error?.limit].filter(Boolean).join(' ')
@@ -49,14 +55,21 @@ function toUiError(body: unknown): UiError {
  * The server figure is still shown, as the detail underneath.
  */
 export async function verifyLabel(
-  images: File[],
+  files: File[],
   application: ApplicationData,
 ): Promise<SingleOutcome> {
   const body = new FormData()
-  // One `image` part per photograph of the same label (ADR 0007). One part is
-  // exactly the request this function always sent, so a single-photograph
-  // submission is unchanged on the wire.
-  for (const image of images) body.append('image', image)
+  /*
+   * One repeated `files` part carrying everything (FR-12, ADR 0011): the
+   * application, the photographs of the label, or any mix. The server sorts
+   * them, so this function no longer has to decide which is which, and neither
+   * does the agent.
+   *
+   * The application document is sent with the check as well as to
+   * `/api/classify`, because the label side may be the artwork inside it and
+   * the server needs the file to get at that (ADR 0010).
+   */
+  for (const file of files) body.append('files', file)
   for (const [key, value] of Object.entries(application)) {
     body.append(key, value)
   }
@@ -78,6 +91,33 @@ export async function verifyLabel(
     return { result: null, error: toUiError(await safeJson(response)), seconds }
   }
   return { result: (await response.json()) as VerificationResult, error: null, seconds }
+}
+
+/**
+ * Sort the uploaded files and read the application side, verifying nothing
+ * (FR-12, ADR 0011).
+ *
+ * Called whenever the file list changes, before any check runs. Two things come
+ * back and the interface needs both: what each file was taken to be, so a
+ * misclassification is visible rather than silent, and the application values,
+ * so they reach the agent as editable fields before the comparison rather than
+ * after it (FR-3, ADR 0008).
+ *
+ * The request goes to this application's own origin. Nothing here reaches TTB
+ * (OOS-1, NFR-3).
+ */
+export async function classifyUploads(files: File[]): Promise<ClassifyOutcome> {
+  const body = new FormData()
+  for (const file of files) body.append('files', file)
+
+  let response: Response
+  try {
+    response = await fetch('/api/classify', { method: 'POST', body })
+  } catch {
+    return { result: null, error: { message: NETWORK_MESSAGE, detail: null } }
+  }
+  if (!response.ok) return { result: null, error: toUiError(await safeJson(response)) }
+  return { result: (await response.json()) as ClassificationResult, error: null }
 }
 
 /**

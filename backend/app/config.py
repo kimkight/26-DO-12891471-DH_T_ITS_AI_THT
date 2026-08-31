@@ -55,9 +55,78 @@ class Settings(BaseSettings):
     # photograph, so the page count is a latency limit as much as a parsing one.
     max_document_pages: int = 3
 
+    # The embedded label artwork inside a COLA document (ADR 0010, FR-11).
+    #
+    # An applicant affixes the label artwork to the application, so a filed PDF
+    # carries pictures of the labels alongside the typed items. Three of the
+    # five values this tool compares are not items on the form at all (A-17),
+    # and on the author's own document they were sitting in those pictures. Each
+    # embedded raster image at or above the floor below is read through the same
+    # OCR pipeline label artwork goes through.
+    #
+    # **The floor separates label artwork from furniture.** An agency seal, a
+    # barcode, a signature strip and a logo are small; a scan of a label is not.
+    # All three parts of the floor have to be met: an edge of at least
+    # ``min_artwork_edge_px`` in each direction, at least ``min_artwork_pixels``
+    # in total, and a long-to-short edge ratio no greater than
+    # ``max_artwork_aspect_ratio``. The numbers are stated rather than derived:
+    # 400 pixels is below any scan of a label at a readable resolution and above
+    # every seal and barcode, and 250,000 pixels is a 500 by 500 square, which is
+    # smaller than any label scan and larger than any mark. The author's own
+    # document carries its label artwork at 1750 by 1150, which is 2.0
+    # megapixels and a ratio of 1.52: eight times the area floor and half the
+    # ratio ceiling.
+    #
+    # **The ratio is the half that keeps a signature out (v1.1.0).** The other
+    # two are absolute sizes, and absolute sizes are a property of the scanner
+    # rather than of the thing scanned. The author's document carries the
+    # applicant's handwritten signature on page 2 at 687 by 195, which is
+    # rejected twice over by the two numbers above; the same signature strip
+    # scanned at 300 dpi instead of 100 is about 2000 by 580, which clears both
+    # of them comfortably and is still a signature. What does not change with
+    # resolution is the shape: a signature strip is wide and short, and label
+    # artwork is large in both directions. 3.0 sits above the widest wrap-around
+    # label any source describes and below every signature strip, and it is the
+    # one part of this floor that a higher-resolution scan cannot defeat.
+    #
+    # A consequence worth stating: a neck or strip label filed on its own, which
+    # is genuinely long and thin, is rejected by this. That is the intended
+    # trade. Such a label carries at most one of the five values, the largest
+    # qualifying image is preferred over it in any case (ADR 0010), and a
+    # rejection is reported with its reason rather than being silent, so an
+    # agent can see that it happened.
+    #
+    # All three are settings, because the floor is a judgement about what a
+    # filing looks like rather than a measurement (NFR-11, OQ-24).
+    min_artwork_edge_px: int = 400
+    min_artwork_pixels: int = 250_000
+    max_artwork_aspect_ratio: float = 3.0
+
+    # How many surviving embedded images are read. Each one costs about what
+    # reading a label photograph costs, so this is a latency bound in the same
+    # sense max_document_pages is. Four, because the author's three-page document
+    # carries two and a filing with front, back, neck and a strip label is the
+    # most any source describes.
+    max_artwork_images: int = 4
+
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
     review_threshold: int = 80
+
+    # How many single-character edits between the government warning as printed
+    # and 27 CFR 16.21 are treated as a near miss rather than as a mismatch
+    # (FR-5, ADR 0012). A near miss is routed to human review with the exact
+    # character-level difference shown; it is never passed.
+    #
+    # Two, and the reasoning is in ADR 0012. The short version: the author's own
+    # COLA artwork OCRs the statement with exactly one character wrong, so one
+    # is the observed case and two is one character of headroom for the double
+    # substitutions OCR also produces. Neither outcome passes, so the cost of
+    # this number being slightly wrong is which sentence an agent reads, not
+    # whether a defective label ships. Raising it much further would start to
+    # admit substituted short words, which is where the wording of the sentence
+    # begins to change rather than its rendering.
+    warning_near_miss_edits: int = 2
 
     # Allowed difference between the label ABV and the application ABV, in
     # percentage points. 0.0 is a compliance position rather than a tuning

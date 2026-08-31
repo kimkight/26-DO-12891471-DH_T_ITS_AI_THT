@@ -14,8 +14,8 @@
  * normal case is that the agent is holding the COLA document, and then the five
  * boxes are a confirmation surface rather than a data-entry task. The layout
  * used to say the opposite, greeting the agent with five empty text boxes and
- * styling the upload as the alternative, so it is inverted: photos, then the
- * application, then check.
+ * styling the upload as the alternative, so it is inverted: upload, then check,
+ * with the boxes behind a disclosure.
  *
  * The typed fields open in exactly three cases, and never close themselves:
  *
@@ -23,7 +23,8 @@
  *    off another screen.
  * 2. A parsed document leaves gaps. The form proper carries no class or type,
  *    alcohol content or net contents boxes (A-17), so gaps are the normal
- *    outcome rather than an error; the fields appear with the parsed values
+ *    outcome rather than an error, though the artwork embedded in the document
+ *    may now close them (ADR 0010); the fields appear with the parsed values
  *    filled and the gaps empty.
  * 3. A document fails to parse. FR-9's message names the problem and the fields
  *    open as the fallback.
@@ -44,12 +45,28 @@
  * is a legitimate submission and blocking it in the browser would contradict
  * the requirement the API implements.
  *
- * **More than one photograph of the same label (ADR 0007).** A label wraps a
- * round bottle, so no single photograph shows all of it flat. The form starts
- * with one photo slot, which is the case almost every check will be, and an
- * agent who needs a second or a third adds them one at a time. It is one label
- * throughout: one set of application values, one result, one set of five field
- * cards. The batch tab is still the place for many different labels.
+ * **One upload, for everything (FR-12, ADR 0011).** There is one file picker.
+ * It takes the label application, photographs of the label, or any mix, as PDFs
+ * or images, and the server decides what each file is from the file rather than
+ * from which control it arrived in. Two pickers asked the agent to sort their
+ * own files before the tool had looked at them, and an agent who guessed wrong
+ * got a COLA form read as label artwork. The classification comes back per file
+ * and is shown, so a wrong one is visible rather than silent.
+ *
+ * The check turns on as soon as anything is uploaded. Three submissions are
+ * valid and all three complete: the application alone, where its own embedded
+ * artwork is the label side (ADR 0010); a photograph plus typed values; or
+ * both. An application with no readable artwork and no photograph is refused
+ * with a message naming the missing piece, which is an FR-9 message rather than
+ * a validation error on a field.
+ *
+ * **More than one photograph of the same label (ADR 0007) still applies.** A
+ * label wraps a round bottle, so no single photograph shows all of it flat, and
+ * up to TTB_MAX_LABEL_PHOTOS pictures of one label are still read independently
+ * and merged. What has gone is the row of numbered slots: an agent adds files
+ * and the server counts them. It is one label throughout: one set of
+ * application values, one result, one set of five field cards. The batch tab is
+ * still the place for many different labels.
  *
  * **The application, uploaded rather than typed (FR-11, ADR 0008).** The five
  * values are the values the applicant already submitted on TTB F 5100.31, so
@@ -69,135 +86,128 @@
  * the disclosure otherwise, and the rule that ran is named in the result's own
  * reason line rather than inferred from this control.
  */
-import { useEffect, useRef, useState } from 'react'
-import { ApplicationUpload } from './ApplicationUpload'
-import { DropZone } from './DropZone'
+import { useState } from 'react'
+import { ApplicationFields } from './ApplicationFields'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
 import { ResultCard } from './ResultCard'
-import { Chip, Kicker } from './Ui'
+import { Kicker } from './Ui'
+import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
-import { announcement } from '../lib/outcomes'
+import { typedValues } from '../lib/applicationFields'
+import type { SourceMap } from '../lib/applicationFields'
+import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
+import { announcement, summary } from '../lib/outcomes'
+import { readingNote, spans, timingSummary } from '../lib/timing'
 import { EMPTY_APPLICATION } from '../types'
-import type { ApplicationData, ApplicationDocumentResult } from '../types'
+import type {
+  ApplicationData,
+  ApplicationDocumentResult,
+  ClassificationResult,
+  PhaseTimings,
+} from '../types'
 
 /**
- * The mark on a field whose value was read off the uploaded application.
+ * Keep only the values the agent typed themselves.
  *
- * Text rather than colour alone, and bound to the input through
- * `aria-describedby`, so it reaches a screen reader and survives greyscale
- * (NFR-5). It says "change it if it is wrong" because an agent who cannot tell
- * whether they are allowed to edit a filled field will not edit it.
+ * Used when the document goes away: what an agent typed is still theirs, and
+ * what a document supplied is no longer attributable to anything, so it stops
+ * claiming a source it no longer has.
  */
-function FromFormMark({ name }: { name: string }) {
-  return (
-    <p className="field__source" id={`${name}-from-form`}>
-      Read from the application form. Change it if it is wrong.
-    </p>
-  )
-}
-
 /**
- * Join names the way a sentence does, so the announcement reads as English
- * rather than as a comma-separated list. Used only in the live region, where a
- * screen reader speaks the punctuation it is given.
+ * The five application-side values, in the order the interface shows them.
+ *
+ * The four compared ones plus the beverage type, which is never compared and
+ * is why it is last (A-12, A-13).
  */
-function names(items: string[]): string {
-  if (items.length <= 1) return items.join('')
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
-}
-
-/** The three classes 27 CFR names. Kept in the words a label reviewer uses. */
-const BEVERAGE_TYPES = [
-  { value: '', label: 'Choose one' },
-  { value: 'distilled spirits', label: 'Distilled spirits' },
-  { value: 'wine', label: 'Wine' },
-  { value: 'malt beverage', label: 'Malt beverage' },
+const APPLICATION_FIELDS: (keyof ApplicationData)[] = [
+  'brand_name',
+  'class_type',
+  'alcohol_content',
+  'net_contents',
+  'beverage_type',
 ]
 
-/**
- * The id of the panel the disclosure controls. A constant rather than `useId`
- * because it is referenced from `aria-controls` and from the toggle in the same
- * component, and a stable string is easier to read in a failing test.
- */
-const TYPED_FIELDS_PANEL = 'typed-application-values'
-
-const TEXT_FIELDS: { name: keyof ApplicationData; label: string; hint?: string }[] = [
-  { name: 'brand_name', label: 'Brand name' },
-  { name: 'class_type', label: 'Class or type designation' },
-  { name: 'alcohol_content', label: 'Alcohol content', hint: 'For example 45% or 45' },
-  { name: 'net_contents', label: 'Net contents', hint: 'For example 750 mL' },
-]
-
-/**
- * Mirrors TTB_MAX_LABEL_PHOTOS. The API refuses more than this and names the
- * limit; this stops an agent reaching that refusal by hiding the control that
- * would cause it, which is the shape NFR-4 asks for.
- */
-const MAX_PHOTOS = 3
-
-const ACCEPTED = 'image/jpeg,image/png,image/webp,image/tiff'
+function onlyTyped(previous: SourceMap, application: ApplicationData): SourceMap {
+  const next: SourceMap = {}
+  for (const [name, source] of Object.entries(previous) as [
+    keyof ApplicationData,
+    SourceMap[keyof ApplicationData],
+  ][]) {
+    if (source === 'typed' && application[name].trim()) next[name] = 'typed'
+  }
+  return next
+}
 
 export function SingleLabelTab() {
-  // One slot per photograph, in submission order. `null` is an empty slot: an
-  // added slot exists before a file is chosen for it, so the drop zone has
-  // somewhere to be.
-  const [slots, setSlots] = useState<(File | null)[]>([null])
-  const [slotNews, setSlotNews] = useState('')
+  // Everything the agent uploaded for this label, in the order they chose it.
+  // One list, not two: what each file is, is the server's judgement (FR-12).
+  const [files, setFiles] = useState<File[]>([])
   const [application, setApplication] = useState<ApplicationData>(EMPTY_APPLICATION)
-  // Which fields currently hold a value read off an uploaded application, so
-  // each one can say so. A field the agent then edits leaves this set.
-  const [fromForm, setFromForm] = useState<Set<keyof ApplicationData>>(new Set())
-  // The disclosure over the typed fields. Collapsed on load; opened by the
-  // agent, or by one of the two document cases below, and never closed by
-  // anything but the agent.
+  /*
+   * Where each value came from (ADR 0010, ADR 0011). A map rather than the set
+   * of "read from the form" names it replaces, because there are now three
+   * document-side sources and an agent looking at a prefilled field is entitled
+   * to know which one they are looking at: a value read out of a text layer
+   * cannot be misread, and a value recognized off a picture can.
+   */
+  const [sources, setSources] = useState<SourceMap>({})
+  /*
+   * Whether anything has been uploaded and read yet. It is what separates the
+   * two layouts: before it, the Session 10 disclosure over five empty boxes;
+   * after it, summary lines for what was read and visible fields for what was
+   * not (US-26).
+   */
+  const [processed, setProcessed] = useState(false)
+  /*
+   * Which values the upload did not supply. Decided when the upload is read and
+   * not recomputed as the agent types, because a field that moved between the
+   * two sections mid-edit would remount under them and drop focus.
+   */
+  const [gaps, setGaps] = useState<(keyof ApplicationData)[]>([])
+  // The disclosure. Collapsed on load; opened by the agent, or by a document
+  // that failed to parse, and never closed by anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
-  const addRef = useRef<HTMLButtonElement>(null)
-  /*
-   * Put focus back on "Add another photo of this label" after a slot is
-   * removed. It has to happen after the render rather than in the click
-   * handler: removing the third slot is what brings that button back into the
-   * DOM, so at the moment of the click the ref is still null and focus would
-   * fall to the document body, which is where a keyboard user loses their
-   * place.
-   *
-   * A ref rather than state for the flag, and cleared before the focus call.
-   * State would mean a second render whose only purpose is to unset a boolean
-   * nothing renders, which is the cascading-render shape React warns about.
-   */
-  const returnFocusToAdd = useRef(false)
-  useEffect(() => {
-    if (!returnFocusToAdd.current) return
-    returnFocusToAdd.current = false
-    addRef.current?.focus()
-  }, [slots.length])
-
-  const photos = slots.filter((file): file is File => file !== null)
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
-    // The agent has taken this field over. The mark goes, so the interface
-    // never tells them a value came off the form when it did not.
-    setFromForm((previous) => {
-      if (!previous.has(name)) return previous
-      const next = new Set(previous)
-      next.delete(name)
-      return next
-    })
+    // The agent has taken this field over. The source becomes theirs, so the
+    // interface never tells them a value came off a document when it did not.
+    setSources((previous) => ({ ...previous, [name]: value.trim() ? 'typed' : 'absent' }))
   }
 
   /**
-   * Fill the fields from an uploaded application (FR-11).
+   * Fill the fields from what the server read off the uploaded application.
+   *
+   * Called with the whole classification, because a submission carrying only
+   * label pictures found no application at all and still counts as processed:
+   * the fields section has to stop showing five empty boxes either way.
+   */
+  function fillFromClassification(result: ClassificationResult) {
+    setProcessed(true)
+    if (!result.application_document) {
+      // Nothing on the application side: a label picture and nothing else. What
+      // the agent typed stays theirs; everything they did not type is a gap,
+      // because nothing supplied it.
+      setSources((previous) => onlyTyped(previous, application))
+      setGaps(APPLICATION_FIELDS.filter((name) => !application[name].trim()))
+      return
+    }
+    fillFromDocument(result.application_document)
+  }
+
+  /**
+   * Write what the document said into the fields it answers (FR-11).
    *
    * Every value the document supplied is written into its field, including over
-   * something already typed there: attaching the form is a deliberate act and
-   * the agent is asking for what it says. Nothing is lost that cannot be typed
-   * back, every field stays editable, and the live region in ApplicationUpload
-   * names what was filled.
+   * something already typed there: uploading the application is a deliberate
+   * act and the agent is asking for what it says. Nothing is lost that cannot
+   * be typed back, every value stays editable, and the source is recorded per
+   * field so the interface can say where each one came from.
    */
   function fillFromDocument(document: ApplicationDocumentResult) {
     const filled = document.fields.filter((entry) => entry.found_on_document)
@@ -210,46 +220,47 @@ export function SingleLabelTab() {
       }
       return next
     })
-    setFromForm(new Set(filled.map((entry) => entry.name as keyof ApplicationData)))
+    setSources(() => {
+      const next: SourceMap = {}
+      for (const entry of document.fields) {
+        next[entry.name as keyof ApplicationData] = entry.found_on_document
+          ? documentSource(entry.source)
+          : 'absent'
+      }
+      return next
+    })
 
-    /*
-     * The second auto-expansion case: the document was read and left gaps.
-     * Gaps are normal rather than exceptional, because the form proper carries
-     * no class or type, alcohol content or net contents boxes at all (A-17),
-     * so this is the common path for a real TTB F 5100.31 and the rare one for
-     * a Registry printout. The fields open with the parsed values in place and
-     * the gaps empty, so the agent sees exactly what is left to do.
-     */
-    const gaps = document.fields.filter((entry) => !entry.found_on_document)
-    if (!gaps.length) return
-    setFieldsOpen(true)
-    setFieldsNews(
-      `The application values are open below, because this form did not carry ${names(
-        gaps.map((entry) => entry.display_name.toLowerCase()),
-      )}. What it did carry is already filled in.`,
+    // A gap is a compared value neither the document nor the agent supplied.
+    // Something already typed is not a gap: the agent answered it.
+    const supplied = new Set(
+      filled.map((entry) => entry.name).filter((name) => name in EMPTY_APPLICATION),
     )
+    setGaps(APPLICATION_FIELDS.filter((name) => !supplied.has(name) && !application[name].trim()))
   }
 
-  /** Taking the document back off the form clears only the marks, not the values. */
+  /** Taking every file back off returns the view to its unprocessed state. */
   function clearFormMarks() {
-    setFromForm(new Set())
+    setSources((previous) => onlyTyped(previous, application))
+    setProcessed(false)
+    setGaps([])
   }
 
   /**
-   * The third auto-expansion case: a document was attached and could not be
-   * read (FR-9). The agent meant to supply the application and it did not
-   * arrive, so the boxes open as the fallback the error message promises. The
-   * error itself is rendered and announced by `ApplicationUpload`; this only
-   * says that the fields are now open, so the two live regions do not say the
-   * same thing twice.
+   * A document was uploaded and could not be read (FR-9).
+   *
+   * The agent meant to supply the application and it did not arrive, so the
+   * boxes open as the fallback the error message promises. The error itself is
+   * rendered and announced by `UploadPanel`; this only says that the fields are
+   * now open, so the two live regions do not say the same thing twice.
    */
   function openFieldsAfterFailure() {
-    setFromForm(new Set())
+    setSources((previous) => onlyTyped(previous, application))
+    setProcessed(false)
+    setGaps([])
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
 
-  /** The first auto-expansion case, and the only one that can also close. */
   function toggleFields() {
     // The button's own aria-expanded announces this one, so the live region is
     // cleared rather than written to: an agent who pressed the control does not
@@ -258,36 +269,27 @@ export function SingleLabelTab() {
     setFieldsOpen((open) => !open)
   }
 
-  function setSlot(position: number, file: File | null) {
-    setSlots((previous) => previous.map((slot, index) => (index === position ? file : slot)))
-  }
-
-  function addSlot() {
-    if (slots.length >= MAX_PHOTOS) return
-    const next = slots.length + 1
-    setSlots((previous) => [...previous, null])
-    setSlotNews(
-      next === MAX_PHOTOS
-        ? `Photo ${next} added. That is the most photos you can add for one label.`
-        : `Photo ${next} added. You can add ${MAX_PHOTOS - next} more.`,
-    )
-  }
-
-  function removeSlot(position: number) {
-    setSlots((previous) => previous.filter((_, index) => index !== position))
-    const remaining = slots.length - 1
-    setSlotNews(
-      `Photo ${position + 1} removed. ${remaining} photo${remaining === 1 ? '' : 's'} left.`,
-    )
-    returnFocusToAdd.current = true
-  }
+  /*
+   * There is something to check as soon as anything has been uploaded. The
+   * label image requirement is gone as a hard gate (FR-12): the author's words
+   * on 2026-08-29 were "if COLA is uploaded, I don't also need an image".
+   *
+   * What cannot be checked is decided by the server, which has read the files,
+   * and reported as an FR-9 message naming the missing piece. Guessing at it
+   * here would mean this component classifying files it has not read, which is
+   * the thing FR-12 removes.
+   */
+  const canCheck = files.length > 0
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
-    if (!photos.length || checking) return
+    if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
-    setOutcome(await verifyLabel(photos, application))
+    // What the agent typed, and nothing the interface filled in from the
+    // document (FR-14). See `typedValues` for what posting the rest back does
+    // to a document-only submission.
+    setOutcome(await verifyLabel(files, typedValues(application, sources)))
     setChecking(false)
   }
 
@@ -304,199 +306,59 @@ export function SingleLabelTab() {
   return (
     <div className="layout">
       <section className="panel" aria-labelledby="submit-heading">
-        <Kicker glyph="scan">Label scanning</Kicker>
-        <h2 id="submit-heading">Point. Upload. Check.</h2>
+        <Kicker glyph="label">Label check</Kicker>
+        {/*
+          The heading names three things this interface actually performs.
+          It used to read "Point. Upload. Check.", inherited from a pattern
+          built for a phone camera; there is no camera here and nothing is
+          pointed at anything, so the first verb promised a capability the
+          tool does not have (US-27).
+        */}
+        <h2 id="submit-heading">Upload. Read. Check.</h2>
 
         <form onSubmit={submit} noValidate>
-          <fieldset className="photos">
-            <legend className="photos__legend">
-              Photos of this label{' '}
-              <span className="photos__count">
-                <Chip>
-                  {photos.length} of {MAX_PHOTOS} chosen
-                </Chip>
-              </span>
-            </legend>
-            <p className="field__hint" id="photos-hint">
-              One photo is usually enough. A label wraps around the bottle, so add a second or a
-              third if one photo cannot show all of it.
-            </p>
-
-            {slots.map((file, position) => (
-              <div className="photos__slot" key={position}>
-                <DropZone
-                  label={position === 0 ? 'Label image' : `Label image, photo ${position + 1}`}
-                  hint="Drag a file here, or choose one. JPEG, PNG, WebP or TIFF."
-                  accept={ACCEPTED}
-                  preview
-                  files={file ? [file] : []}
-                  onFiles={(chosen) => setSlot(position, chosen[0] ?? null)}
-                />
-                {position > 0 ? (
-                  <button
-                    className="button button--quiet"
-                    type="button"
-                    onClick={() => removeSlot(position)}
-                  >
-                    Remove photo {position + 1}
-                  </button>
-                ) : null}
-              </div>
-            ))}
-
-            {slots.length < MAX_PHOTOS ? (
-              <button
-                ref={addRef}
-                className="button button--quiet"
-                type="button"
-                onClick={addSlot}
-                aria-describedby="photos-hint"
-              >
-                Add another photo of this label
-              </button>
-            ) : (
-              <p className="field__hint">
-                That is the most photos you can add for one label. Remove one to add a different
-                one.
-              </p>
-            )}
-
-            {/*
-              Adding and removing a slot changes the form without moving focus
-              anywhere that announces it, so the change is spoken here. Its own
-              region rather than the results one, which would be clobbered by
-              whichever text was written last.
-            */}
-            <div
-              className="visually-hidden"
-              role="status"
-              aria-live="polite"
-              aria-label="Photo list"
-            >
-              {slotNews}
-            </div>
-          </fieldset>
-
-          <ApplicationUpload
-            onParsed={fillFromDocument}
+          <UploadPanel
+            files={files}
+            onFilesChange={setFiles}
+            onClassified={fillFromClassification}
             onCleared={clearFormMarks}
             onUnreadable={openFieldsAfterFailure}
           />
 
+          <ApplicationFields
+            application={application}
+            sources={sources}
+            processed={processed}
+            gaps={gaps}
+            open={fieldsOpen}
+            onToggle={toggleFields}
+            onChange={update}
+            onGapNews={setFieldsNews}
+          />
+
           {/*
-            The typed values, behind a disclosure (US-24). A button with
-            aria-expanded and aria-controls rather than <details>, because the
-            open state has to be settable from the two document cases as well as
-            from the control, and a controlled native disclosure is harder to
-            reason about than an explicit one.
-
-            The panel keeps its contents in the DOM when collapsed and hides
-            them with the `hidden` attribute, so the fields leave the tab order
-            and the accessibility tree together rather than one without the
-            other.
+            Its own region, for the same reason the uploads have one. It carries
+            what the fields section has to say for itself: which value was not
+            read and what to do about it, or that the boxes were opened as the
+            fallback after a document failed to parse.
           */}
-          <div className="disclosure">
-            <button
-              className="button button--quiet disclosure__toggle"
-              type="button"
-              aria-expanded={fieldsOpen}
-              aria-controls={TYPED_FIELDS_PANEL}
-              onClick={toggleFields}
-            >
-              <span className="disclosure__marker" aria-hidden="true" />
-              Or type the application values
-            </button>
-
-            <div className="disclosure__panel" id={TYPED_FIELDS_PANEL} hidden={!fieldsOpen}>
-              <p className="field__hint">
-                The check runs on whatever is in these boxes. A value you type here is used instead
-                of the one read off the application. Leave a box empty and that field is not
-                compared.
-              </p>
-
-              {TEXT_FIELDS.map((field) => {
-                const marked = fromForm.has(field.name)
-                const describedBy = [
-                  field.hint ? `${field.name}-hint` : null,
-                  marked ? `${field.name}-from-form` : null,
-                ]
-                  .filter(Boolean)
-                  .join(' ')
-                return (
-                  <div className="field" key={field.name}>
-                    <label htmlFor={field.name}>{field.label}</label>
-                    {marked ? <FromFormMark name={field.name} /> : null}
-                    {field.hint ? (
-                      <p className="field__hint" id={`${field.name}-hint`}>
-                        {field.hint}
-                      </p>
-                    ) : null}
-                    <input
-                      id={field.name}
-                      name={field.name}
-                      type="text"
-                      autoComplete="off"
-                      aria-describedby={describedBy || undefined}
-                      value={application[field.name]}
-                      onChange={(event) => update(field.name, event.target.value)}
-                    />
-                  </div>
-                )
-              })}
-
-              {/*
-                Last, and no longer the first field an agent meets. It is never
-                compared: it only says which numeric rule to expect, and the
-                result's own reason line names the rule that actually ran.
-              */}
-              <div className="field">
-                <label htmlFor="beverage_type">Beverage type</label>
-                {fromForm.has('beverage_type') ? <FromFormMark name="beverage_type" /> : null}
-                <p className="field__hint" id="beverage_type-hint">
-                  Not compared against the label. It says which numeric rule to expect: the proof
-                  cross-check for spirits, range handling for wine.
-                </p>
-                <select
-                  id="beverage_type"
-                  name="beverage_type"
-                  value={application.beverage_type}
-                  aria-describedby={
-                    fromForm.has('beverage_type')
-                      ? 'beverage_type-hint beverage_type-from-form'
-                      : 'beverage_type-hint'
-                  }
-                  onChange={(event) => update('beverage_type', event.target.value)}
-                >
-                  {BEVERAGE_TYPES.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/*
-              Its own region, for the same reason the photo list has one. It is
-              written to only when something other than the agent opened the
-              panel, because the button's aria-expanded already reports the
-              agent's own press.
-            */}
-            <div
-              className="visually-hidden"
-              role="status"
-              aria-live="polite"
-              aria-label="Application values"
-            >
-              {fieldsNews}
-            </div>
+          <div
+            className="visually-hidden"
+            role="status"
+            aria-live="polite"
+            aria-label="Application values"
+          >
+            {fieldsNews}
           </div>
 
-          <button className="button button--primary" type="submit" disabled={!photos.length}>
+          <button className="button button--primary" type="submit" disabled={!canCheck}>
             {checking ? 'Checking...' : 'Check this label'}
           </button>
-          {!photos.length ? (
-            <p className="field__hint">Choose a label image to turn on the check.</p>
+          {!canCheck ? (
+            <p className="field__hint">
+              Upload something to turn on the check: the label application, an image of the label,
+              or both.
+            </p>
           ) : null}
         </form>
       </section>
@@ -522,13 +384,38 @@ export function SingleLabelTab() {
 
         {result ? (
           <>
+            {/*
+              Two measured numbers and one honestly named difference (NFR-1).
+              This used to attribute the gap between them to "sending the image
+              and receiving the answer", which was an explanation nobody had
+              measured and which a control run showed was wrong by about three
+              and a half seconds. See src/lib/timing.ts.
+            */}
             <p className="timing">
               Checked in {outcome!.seconds.toFixed(1)} seconds.{' '}
               <span className="timing__detail">
-                {result.elapsed_ms.toFixed(0)} ms of that was inside the checker, the rest was
-                sending the image and receiving the answer.
+                {timingSummary(outcome!.seconds, result.elapsed_ms)}
               </span>
             </p>
+            {result.timings ? <TimingBreakdown timings={result.timings} /> : null}
+            {/*
+              One short line, once, when the label being checked came out of the
+              application document rather than off a bottle (ADR 0010). It is
+              the honest limitation, stated where the agent is reading the
+              result rather than left to a document.
+            */}
+            {/*
+              The summary line, and the reason it is not "5 of 5 fields match"
+              (FR-14, ADR 0013). Where some of the five rows compared a value
+              against the artwork it was read from, saying five would count
+              fields that could not have come out any other way. The line says
+              what is true instead: how many of the verifiable ones match, and
+              how many were only read.
+            */}
+            <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
+            {result.label_source === 'application_artwork' ? (
+              <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
+            ) : null}
             <PhotoNotes photos={result.photos} />
             <div className="cards">
               {result.fields.map((field) => (
@@ -549,12 +436,52 @@ export function SingleLabelTab() {
 
         {!result && !outcome?.error && !checking ? (
           <p className="placeholder">
-            Take your photos, attach the label application, and select
-            <strong> Check this label</strong>. The five results appear here. No application to
-            attach? Open <strong>Or type the application values</strong> and type them instead.
+            Upload the label application, an image of the label, or both, then select
+            <strong> Check this label</strong>. The five results appear here. Nothing to upload for
+            the application side? Open <strong>Or type the application values</strong> and type them
+            instead.
           </p>
         ) : null}
       </section>
     </div>
+  )
+}
+
+/**
+ * Where the server's time actually went, behind a disclosure (NFR-1).
+ *
+ * **Behind a disclosure because an agent checking a label does not need it, and
+ * on the page at all because the person who does need it has nowhere else to
+ * look.** NFR-4's benchmark is an agent who should not have to read past
+ * anything, so a phase table above the results would be the tool talking about
+ * itself in the middle of somebody's work. But a prototype that takes longer
+ * than Sarah Chen's five seconds should be able to say where the time went
+ * without anyone attaching a profiler, and until 2026-08-30 it could not: the
+ * only figure it published was measuring the wrong span.
+ *
+ * Every row is a timer around the work it names. The last row, where there is
+ * one, is what no timer covered, and it says so.
+ */
+function TimingBreakdown({ timings }: { timings: PhaseTimings }) {
+  const rows = spans(timings)
+  if (!rows.length) return null
+
+  return (
+    <details className="timing-detail">
+      <summary>Where the time went</summary>
+      <p className="field__hint">{readingNote(timings)}</p>
+      <dl className="timing-detail__list">
+        {rows.map((span) => (
+          <div className="timing-detail__row" key={span.label}>
+            <dt>{span.label}</dt>
+            <dd>{span.ms.toFixed(0)} ms</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="field__hint">
+        These are measured, not estimated. They cover the server only; time in your browser and on
+        the network is not something the server can see.
+      </p>
+    </details>
   )
 }

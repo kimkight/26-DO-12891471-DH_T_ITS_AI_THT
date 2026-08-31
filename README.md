@@ -20,8 +20,14 @@ seconds, or agents go back to doing it manually.
 >
 > The first measurements against the deployed URL were taken on 2026-08-28 and
 > are in [Measured performance and accuracy](#measured-performance-and-accuracy)
-> below. A single label comes back in 1.5 seconds and a batch of 300 finishes in
-> under seven minutes, both through the load balancer. What those runs did not
+> below. A single label image comes back in 1.5 seconds and a batch of 300
+> finishes in under seven minutes, both through the load balancer. A COLA
+> document submitted alone came back in **5.0 seconds** on 2026-08-30 against
+> deploy #12, which is NFR-1's roughly five seconds **at the line rather than
+> under it**. The extra second and a half over the 3.5 s the same document
+> measured against deploy #11 is the 180-degree orientation check, and it is
+> the reason the readings are right at all: it is a real trade and the section
+> below states it rather than smoothing it over. What those runs did not
 > settle is accuracy on real label artwork: three phone photographs of a round
 > bottle still leave the brand and the class unreadable on curved glass, which is
 > the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
@@ -56,7 +62,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.0.1","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.1.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -212,7 +218,7 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, and the government warning near miss |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -225,13 +231,15 @@ and the first figures measured on the deployed target are below.**
 | Capability | State |
 | --- | --- |
 | `GET /api/health` | Works |
-| `POST /api/verify` (one label against its application data) | Works |
+| `POST /api/verify` (one label against its application data) | Works: everything for one label goes in one repeated `files` part, and the server decides what each file is from the file rather than from the part it arrived in. The older `image` and `application_document` parts still work and go through the same classifier. See [ADR 0011](docs/adr/0011-one-upload.md). |
+| `POST /api/classify` (sort an upload, read the application side, compare nothing) | Works: what each uploaded file was taken to be and why, plus the application values, so the interface can show both before a check runs. |
 | `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
-| `POST /api/read-application` (read a COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
+| `POST /api/read-application` (read one COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, including the label artwork embedded in it ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)), so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
 | Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
 | Comparison against application data | Works: `backend/app/compare.py` |
-| Government warning checks, text and capitalization | Works: `backend/app/warning.py` |
-| Verification interface, one label | Works: one screen, up to three photographs of the same label, then the label application upload as the primary application-side input, the five application fields behind a disclosure that opens when the agent opens it or when a document leaves a gap or fails to parse, five result cards, and a note saying what was done to each photograph |
+| Government warning checks, text and capitalization | Works: `backend/app/warning.py`. The comparison is exact; a difference of one or two characters is routed to human review with the character-level difference shown rather than reported as a mismatch, and is never a pass ([ADR 0012](docs/adr/0012-warning-near-miss.md)). |
+| Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and a note saying what was read and how |
+| Verification interface, values that were read | Works: each is a read-only line with where it came from, typed or the application form or the label artwork inside it. If every value was read, no editable field is shown at all; one collapsed disclosure holds them. A gap takes focus and is announced |
 | Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
@@ -242,7 +250,8 @@ and the first figures measured on the deployed target are below.**
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
-| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** One real photograph has been submitted; what it found is A-15 and OQ-21. |
+| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). |
+| Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** Real photographs have been submitted; what they found is A-15, OQ-21, and the scope line in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6. A label wrapped on a round bottle is not a supported input. |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
 
@@ -274,11 +283,98 @@ values against its checklist.
 | --- | --- | --- | --- |
 | One label: the synthetic 1200x1600 fixture rotated 90 degrees, submitted with a Public COLA Registry printout attached | **1.5 s** | 1.4 s | All five fields matched. The rotation was detected and reported. |
 | One label: three real phone photographs of a round bottle, which is the hard case | **7.8 s** | Not recorded separately | Brand name and class or type stayed unreadable on that bottle's curved glass and were reported honestly as mismatch and not found. |
+| One label: the author's own mezcal COLA document (382 KB PDF) submitted **alone**, so its embedded artwork is the label side | **5.0 s** | 4.9 s, and this figure measures the request | All five fields returned, and this time read correctly. Re-measured 2026-08-30 against **deploy #12**, build 1.1.0, two runs: 4999 and 4992 ms wall clock; `elapsed_ms` 4928 and 4918 ms; `ocr_passes` 1; `tesseract_reads` 4. This supersedes the 3468 / 3505 / 3543 ms taken against deploy #11 earlier the same day, which were the cost of reading this document wrongly. |
 | A batch at the configured cap: 300 label images with their 300 paired COLA documents in one submission | **Approximately 6.5 to 7 minutes**, roughly **1.3 s per label** | Not recorded separately | 300 of 300 rows returned. Results streamed progressively through the load balancer: 83 labels complete at the 109 second mark, observed live. |
 
-**NFR-1, about five seconds, is met with margin on the single-label path.** One
-photograph and its application document came back in 1.5 seconds end to end
-through the load balancer, against a target of roughly five seconds.
+**NFR-1 is met on both single-label paths.** They are different paths and the
+honest statement names both:
+
+- **The image path meets NFR-1 at 1.5 s.** One photograph and its application
+  document came back in 1.5 seconds end to end through the load balancer,
+  against a target of roughly five seconds.
+- **The application-document path meets it at 5.0 s, which is at the line
+  rather than under it.** Re-measured 2026-08-30 against deploy #12, build
+  1.1.0, with the author's own mezcal COLA PDF submitted alone: 4999 and
+  4992 ms wall clock, with the response's own `elapsed_ms` at 4928 and 4918 ms,
+  `ocr_passes` 1 and `tesseract_reads` 4. Not rounded down. The margin against
+  the bar is what is left of about 70 ms, and the paragraph below says what
+  consumed it and why that was worth paying.
+
+**The instrumentation was wrong, and it was wrong in the flattering
+direction.** On all three of those runs `elapsed_ms` and `ocr_ms` came back
+within 2 ms of each other, because `elapsed_ms` was measuring the label-side OCR
+span and calling itself the request. The interface then printed the wall clock,
+subtracted that figure, and told the agent the remainder was "sending the image
+and receiving the answer". Two controls from the same page and session bound
+what the network could have been: `GET /api/health` round-tripped in 18 to
+25 ms, and a POST of the identical 382 KB file to a path that processes nothing
+took 68 to 111 ms. So about 3.5 seconds of real server work per request was both
+missing from the instrumentation and mislabelled as network time.
+
+**What the honest instrumentation then showed.** The picture chosen as the label
+side was being read twice: once to fill the application values, and again as the
+label side, through the identical pipeline for an identical result. Reusing that
+read removes one full OCR pass, and reading stops once every value has been
+found rather than continuing through pictures that cannot add anything. Measured
+on a session container, which is not production hardware and is reported here
+only as a before-and-after on the same machine:
+
+| Document | Before | After | OCR passes |
+| --- | --- | --- | --- |
+| One embedded label image | 2.19 s | 1.12 s | 2 to 1 |
+| Two embedded label images | 3.17 s | 1.15 s | 3 to 1 |
+
+**And it was re-measured, twice.** The earlier edition of this section said the
+6.8 s figure would stand until the same document was submitted to the same URL
+on a build carrying the fix, because halving the OCR passes on a path whose
+passes were about 3.3 seconds each *should* land near 3.5 seconds and "should"
+is arithmetic rather than measurement. It was submitted, on 2026-08-30 against
+deploy #11, three consecutive runs at 3468, 3505 and 3543 ms, with
+`unaccounted_ms` at 1.3 ms, which is what says the phase breakdown beside it
+measures the request rather than a part of it. It was submitted again the same
+day against deploy #12, once the release that corrected the reading had landed,
+and came back at 4999 and 4992 ms. The table above carries the second figure,
+because it is the one taken against a build that reads this document correctly.
+Both are in [09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9.
+
+**The fix that made the readings correct is what consumed the margin, and that
+is the trade.** The 3.5 s figure was measured while the artwork OCR on this
+document was still failing: the label was being turned 180 degrees on a
+Tesseract verdict of 0.03 confidence and then flattened to grayscale, so
+3.5 seconds was the cost of reading a wrongly turned, wrongly rendered image
+and getting three of five fields wrong. v1.1.0 changed what is read, and the
+figure moved: 5.0 seconds against deploy #12 on 2026-08-30. About 1.4 seconds
+of that increase is the 180-degree check, which reads the image at both
+candidate rotations and keeps the better-scoring one. It runs only when
+Tesseract's own orientation confidence falls under `LOW_ORIENTATION_CONFIDENCE`,
+which on this document it did at 0.03, and on the twelve sample labels it does
+not run at all. It is the reason the OCR confidence on this artwork went from
+37.9 to 89.6 and the reason the alcohol content and net contents are found.
+
+Paying a second and a half of a five-second budget to stop reading a label
+upside down is worth it. What it is not is free, and the honest statement is
+that this path now sits at the bar rather than comfortably inside it. There is
+a costed optimisation in [OQ-27](docs/OPEN_QUESTIONS.md#oq-27): the two
+rotation candidates are read at full resolution, and reading them at half
+resolution separated 62.2 from 25.0 on this artwork against 91.8 from 32.1 at
+full, for about a third less time. It is measured on one image, so it is
+recorded rather than built.
+
+**The panel segmentation in this release does not move the figure**, because it
+adds no Tesseract read: both the column split and the block grouping are
+arithmetic on the word table the single existing pass already returns.
+Confirmed on a session container, which is not production hardware and is
+reported only as a before-and-after on one machine: the same document measured
+a median of 3300 ms over five runs before the change and 3280 ms after it, with
+`ocr_passes` 1 and `tesseract_reads` 4 on every run either side.
+`test_panel_segmentation.py` asserts the read count rather than leaving it to
+the measurement.
+
+The earlier before-and-after for the colour arm, on the same machine and the
+same terms: the same document shape with colour artwork measured
+1512 / 1563 / 1547 ms before that change and 1526 / 1425 / 1587 ms after it, at
+one OCR pass either way, because the colour read replaces two reads rather than
+adding a third.
 
 **The three-photograph case is over that target, and that is a measurement
 rather than a failure to report.** 7.8 seconds for three photographs of one
@@ -330,6 +426,40 @@ five fields did not come back at all.
   and the plain image and keeps the better one. What that does not do is make
   the point below untrue. One label read correctly is not a measurement, and the
   same degraded fixture still leaves half the sample set unreadable.
+- **And flat artwork is not a rendered label either, which is what v1.1.0
+  cost.** The author's own mezcal COLA artwork, lifted out of the filed PDF and
+  therefore flat, crisp and not a photograph at all, read as `AMoviy TS` against
+  `DEL MAGUEY` on two consecutive deploys. Two causes, and both were a number
+  that looked confident about text it had never seen. Tesseract answered the
+  orientation with 180 degrees at a confidence of 0.03, and the floor that would
+  have rejected that verdict had been in the code since v1.0.1 as a caption
+  only; below it the verdict is now scored against its opposite. And converting
+  a label printed in three tones to grayscale drops an entire ink class, which
+  mean word confidence structurally cannot detect, because a word that was never
+  read lowers no score: the read that lost `42% ALC BY VOL` outright scored
+  89.9 against the colour read's 89.1. The colour image is now read too
+  ([ADR 0014](docs/adr/0014-colour-as-an-ocr-candidate.md)). The same caution
+  applies as above: this is one document, and per-field accuracy against real
+  label artwork is still unmeasured.
+- **A label wrapped on a round bottle is not a supported input, and the scope
+  line is written down.** The author's mezcal test of 2026-08-29 established
+  three things about that case, and they are evidence rather than opinion. The
+  GOVERNMENT WARNING block is printed at 90 degrees to the body copy on the same
+  label, so no single global rotation makes both upright and the best-of-four
+  rotation net cannot succeed on both at once. A sweep of 4 rotations by 5 page
+  segmentation modes over the isolated warning crop returned `4 AANDVW 1AG` at
+  2.1 percent similarity to 27 CFR 16.21, which is a failure to read rather than
+  a degraded read. And the real COLA for that product gives Brand `DEL MAGUEY`
+  and Fanciful `VIDA` while the largest text on the label is "Vida Clasico", so
+  even a perfect transcription could not attribute the brand under the type-size
+  heuristic. Since v1.1.0 that heuristic declines rather than guessing on such a
+  label and the field reports not found (FR-1), which turns a confident wrong
+  answer into an honest absence and solves nothing about the attribution. **Bottle photography stays in the prototype as a
+  best-effort path with honest failure reporting and is not claimed as a
+  capability**; the input that works, and that every measured figure came from,
+  is flat label artwork. The full statement, and what each of the four possible
+  fixes would cost, is
+  [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6.
 - **Accuracy has been measured against synthetic labels only.** `samples/`
   renders twelve labels from text with Pillow; `scripts/measure.py` scores the
   engine against them. Rendered text is far easier to read than a photographed
@@ -344,10 +474,23 @@ five fields did not come back at all.
   balancer unbuffered, which it does. The one box still open is the CloudWatch
   `MemoryUtilization` figure for the batch window, and the README says "memory
   utilization measurement pending" rather than a number until it is in hand.
-- **Three photographs of one label is over the five-second target.** The
-  single-label path with one photograph measures 1.5 seconds against NFR-1's
-  roughly five; three photographs of a round bottle measured 7.8 seconds on the
-  same hardware on the same day. It is recorded rather than tuned away, and both
+- **NFR-1 is met on both single-label paths and is still missed on the
+  three-photograph case, and the miss is published rather than redefined.** One
+  label image with its application document measures 1.5 seconds against
+  NFR-1's roughly five. A COLA document submitted alone measures 5.0 seconds,
+  re-measured against deploy #12 on 2026-08-30, which is at the line rather
+  than under it and is published as 5.0 rather than rounded down. It measured
+  3.5 seconds against deploy #11 earlier the same day, 6.8 seconds earlier
+  still, and until that day the instrumentation reported 3.2 seconds for it and
+  told the agent the difference was the network. It was not the network; it was
+  a picture being read twice. The measurement was fixed, the duplicate read
+  removed, and the figure re-taken against the deployed URL rather than
+  inferred. The rise from 3.5 to 5.0 is the 180-degree orientation check, which
+  is what made this document's readings correct: a real trade, stated rather
+  than smoothed over. Three photographs of a round bottle measured 7.8 seconds on the same
+  hardware, which is over the bar and stays reported as over it. A prototype
+  that reports missing its own acceptance criterion is worth more than one that
+  quietly moves the criterion. It is recorded rather than tuned away, and both
   levers are task environment variables rather than code:
   `TTB_MAX_LABEL_PHOTOS` and `TTB_CORRECT_ORIENTATION`. No source states a batch
   latency target at all (OQ-6), so the batch figure is reported without one.

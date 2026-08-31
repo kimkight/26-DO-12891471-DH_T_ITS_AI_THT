@@ -79,9 +79,8 @@ rather than leaving this paragraph stale.
 
 Both OSD misreads were on the sample with the least text on it, and both
 reported an orientation confidence below 1.0 where every correct answer was
-above 11. The figure is reported in the response rather than used to override
-the answer: there is nothing better to fall back to, and an agent who can see
-that the tool was unsure can retake the photograph.
+above 11. That figure is the floor, and until v1.1.0 it was only reported. See
+"What v1.1.0 added below the floor" below.
 
 Downscaling the image before the OSD call was measured and rejected: at a
 900-pixel long edge accuracy fell to 38 of 48, and at 600 pixels to 22 of 48,
@@ -108,6 +107,47 @@ soft-contrast image produces noise rather than glyphs, and OSD cannot judge
 noise. That is the whole of the reported blackout: the EXIF tag was applied
 correctly, the threshold destroyed the image, OSD turned what was left the wrong
 way, and the read came back empty.
+
+**What v1.1.0 added below the floor.** The 46 of 48 above is untouched and above
+the floor OSD still decides alone. What is added is that a verdict *below* the
+floor stops being applied on trust. The author's mezcal COLA artwork produced
+one on 2026-08-30: 180 degrees at a confidence of 0.03, applied, and the brand
+read as `AMoviy TS`.
+
+The four-rotation sweep rejected above is not what was added, and the difference
+is the reason this is safe. That sweep loses because it cannot separate 0 from
+90; below is the same score on the same artwork, over all four rotations:
+
+| Image variant | rot 0 | rot 90 | rot 180 | rot 270 |
+| --- | --- | --- | --- | --- |
+| Colour | 257 words, 89.1 | 257 words, 89.7 | 254 words, 35.3 | 253 words, 35.5 |
+| Grayscale | 106 words, 89.9 | 109 words, 88.4 | 107 words, 30.4 | 116 words, 31.9 |
+
+0 against 90 is a difference of 0.6 and 1.5 points, which is nothing. 0 against
+180 is more than fifty. So below the floor the verdict is scored against its
+opposite alone, two rotations and never four, and a tie leaves Tesseract's
+answer in place. `backend/tests/test_orientation_floor.py` asserts the
+mechanism, both directions of override, and that a verdict at or above the floor
+is not second-guessed at all.
+
+**And what v1.1.0 added beside the grayscale: the colour image.** Every variant
+in the tables above is grayscale, and none of them is the image the file holds.
+On a label printed in more than two tones a threshold separates two luminance
+classes and not three, so an ink class dissolves; and mean word confidence
+cannot detect that, because a word that was never read contributes no confidence
+to lower. On the author's artwork the grayscale read scored 89.9 against the
+colour read's 89.1 while being the one that lost `42% ALC BY VOL` outright.
+
+| Where the read is taken | Words | Mean confidence | `42% ALC BY VOL` |
+| --- | --- | --- | --- |
+| Colour, as the file holds it | 257 | 89.1 | read |
+| Upright grayscale | 106 | 89.9 | not read |
+
+The decision, the chroma measurement that decides which images pay for it, and
+the one-point band that lets coverage break a tie on confidence, are
+[ADR 0014](adr/0014-colour-as-an-ocr-candidate.md).
+`backend/tests/test_colour_arm.py` carries the assertions, including the
+regression guard that more words never beats a materially higher confidence.
 
 **Preprocessing is compared against no preprocessing, per image.** The same
 degradation shows that thresholding can be worse than nothing at the read as
@@ -212,6 +252,37 @@ highest a losing preprocessed read reached was 68.4.
   is held to an allow-list of `bytes_received`, `ocr_ms` and
   `beverage_type_supplied`, so a field added to it later has to be added there
   deliberately.
+
+### A sheet of several panels, and a line that belongs to one of them
+
+`backend/tests/test_panel_segmentation.py`, against a three-panel sheet with a
+strip of type set at 90 degrees in each gutter, rendered at test time. Each
+panel carries a vocabulary that appears nowhere else on the sheet, so "this line
+came from two panels" is a fact about the line rather than an impression of it.
+
+- No assembled line carries words from two panels, and no panel is returned to
+  after leaving it in reading order. The two are asserted separately because
+  they are two mechanisms: Tesseract returning a line that spans the sheet, and
+  a reading order that alternates between panels. Four of the six lines this
+  fixture reads as fail the first against the build this release starts from.
+- The government warning, printed in one panel with two panels of decoys beside
+  it, matches 27 CFR 16.21 exactly rather than nearly. The same fixture scores
+  213 edits against the previous build.
+- The strips are marked as type set at 90 degrees, which is what keeps them out
+  of the type-size ranking that locates the brand name.
+- **A single-panel label is byte-identical.** Asserted against the previous
+  grouping rule reproduced in four lines inside the test rather than against a
+  stored expectation, because a stored expectation only proves the output has
+  not changed since somebody wrote it down.
+- **The segmentation adds no Tesseract read** (NFR-1). Asserted twice: that
+  assembling lines from a word table reads nothing at all, and that a
+  multi-panel sheet costs exactly the reads its own reported read path names.
+- One class in that module is built from a word table rather than from pixels,
+  and says so. Tesseract does not return a line spanning two panels on clean
+  synthetic artwork at any geometry tried, and it did so repeatedly on the
+  author's filing where the blocks spanned x 44 to 1526 of a 1600 pixel sheet. A
+  fixture that cannot reproduce the mistake cannot prove it is handled, so the
+  mistake is stated directly.
 
 ## 3. Accuracy tests
 
@@ -442,6 +513,49 @@ reads records the application emitted rather than what CloudWatch received.
 | 56 | Submit a photograph whose EXIF tag disagrees with its pixels, for example an upright image saved with orientation 6 by an editor that turned the pixels and left the tag | The label still reads, because the quarter-turn check runs whether or not a tag was applied. The result shows the disagreement: a tag was found and applied, and a further turn was needed | Deployed-target evidence, 2026-08-28; A-15 |
 | 57 | Submit a front label whose brand is set in a blackletter logotype | The brand reports not found rather than a misreading of the logotype. **Reporting shrapnel from nearby fine print as the brand name is a failure of this test.** Out of scope to solve: see SG-1 and the v1.0.1 changelog entry | Deployed-target evidence, 2026-08-28; FR-1; OOS |
 
+| 58 | Upload the author's own mezcal COLA PDF and nothing else: no photograph, no typed values | All five compared fields reconcile, from that one file. The brand name and the class or type come from the document's text; the alcohol content and the net contents come from the label artwork embedded in it, and each field says which. **Two of five reconciling, which is what v1.0.1 returned, is a failure of this test.** | The author's evidence, 2026-08-29; FR-11; ADR 0010; A-17 |
+| 59 | Read the result of row 58 | It states, once, that the label checked was the artwork inside the application rather than a photo of a bottle, and that checking the bottle still needs a photo of the bottle. **A result that reads as a check of the product is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; OOS-8 |
+| 60 | Upload a COLA document whose only embedded pictures are a seal, a barcode and a signature block | The artwork values report not found with the reasons A-17 gives, nothing crashes, and the submission is refused with a message naming the missing piece and offering the photo upload. **A field outcome on that refusal is a failure of this test.** | The author's evidence, 2026-08-29; ADR 0010; FR-9 |
+
+| 61 | Upload the mezcal COLA PDF and a photo of the label together, through the one picker | Each file is listed with what it was taken to be: the PDF as the label application, the photo as the label picture. The check runs against the photo, with the document as the application side | The author's evidence, 2026-08-29; FR-12; ADR 0011 |
+| 62 | Deliberately put the COLA PDF where a photo would have gone, and the photo where the application would have gone | Both are still used on the correct side, because the classification is made from the file rather than from the control. **A COLA form read as label artwork is a failure of this test.** | The author's evidence, 2026-08-29; FR-12 |
+| 63 | Work the upload from the keyboard alone, with a screen reader | One labelled control, reachable by Tab and operable by Enter or Space; each accepted file announced with what it was taken to be; drag and drop offered on top of that rather than instead of it | FR-12; NFR-5 |
+
+| 64 | Upload a document that answers every compared value, then look at the fields section | Every value is one read-only line saying what it is and where it came from. **A single editable box on screen is a failure of this test.** One collapsed control, "Review the values", holds the boxes for an agent who disagrees with one | The author's evidence, 2026-08-29; FR-13; US-26 |
+| 65 | Upload a document that answers all but one, without touching the keyboard | Exactly one editable field is on screen, the cursor is in it, and a screen reader says which value is missing and that it can be entered or a clearer image uploaded | The author's evidence, 2026-08-29; FR-13; NFR-5 |
+| 66 | Load the page and look at it before uploading anything | Unchanged from Session 10: one collapsed disclosure over the five boxes, and no summaries of values that do not exist yet | FR-13; US-24 |
+
+| 67 | Submit the mezcal COLA PDF alone and read the government warning card | The outcome is needs human review, not "does not match". The card names the number of characters, shows the exact difference with the missing character struck through, and says in words that this is not a match | The author's evidence, 2026-08-29; FR-5; ADR 0012 |
+| 68 | Submit a label whose warning is missing the clause "or operate machinery" | The outcome is a mismatch. **Needs human review on a missing clause is a failure of this test.** The difference is still shown, because it is evidence either way | FR-5; ADR 0012 |
+| 69 | Submit a label whose warning is word for word correct and whose prefix reads "Government Warning:" | The outcome is a mismatch, and the reason names capitalization. **A capitalization failure routed to needs human review is a failure of this test**: it is a defect a person caught on a real submission, not something OCR produces from a compliant label | Jenny Park interview; FR-6; ADR 0012 |
+
+Rows 67 to 69 come from the author's first problem report of 2026-08-29 read
+through to its consequence. The artwork embedded in their filing reads the
+statement with one character wrong, and rows 68 and 69 are the two ways the
+routing must not overreach: a real wording difference and a real capitalization
+defect both stay mismatches.
+
+Rows 64 to 66 come from the author's design instruction of 2026-08-29:
+"Collapse the form fields and only expand if there is something that isn't read
+in from the application or picture." Row 66 is the regression half: US-24's
+behaviour before an upload is what it was, and this row exists so that making
+the fields quieter afterwards cannot make them louder beforehand.
+
+Rows 61 to 63 come from the author's third report of 2026-08-29, the design
+instruction: "these should be combined; just one upload; simplify the interface.
+You should be able to upload (pdfs or images)." Row 62 is the one worth running
+adversarially, because it is the failure the two pickers actually produced: a
+file put in the wrong box was read as the wrong thing, silently.
+
+Rows 58 to 60 come from the author's second problem report of 2026-08-29 and
+are the first of the two problems reported that day. The document was a real
+TTB Form 5100.31, OMB No. 1513-0020, three pages, and the deployed v1.0.1 build
+reconciled two of its five fields. The values were not missing from the file:
+the alcohol content and the net contents were printed on the flat label artwork
+embedded on page 3 at 1750 by 1150 pixels, which the parser never looked at.
+Row 60 is the honest other half, because a filing that embeds only furniture has
+to fail visibly rather than by reporting a label side that is a signature block.
+
 Rows 54 to 57 come from one submission, on 2026-08-28, of a photograph of a
 Ketel One vodka back label: crisp, flat, the full government warning in clear
 capitals, and `750 mL`. The deployed v1.0.0 build returned the brand as `Sal.`,
@@ -490,6 +604,25 @@ says is manual by nature, is the screen reader pass and the greyscale check.
   issues. No real filed application is committed, and none has been parsed;
   that limit is OQ-22.
 - Sample label artwork is generated or sourced by the contributor and is
-  git-ignored; see `samples/README.md` for why.
+  git-ignored; see `samples/README.md` for why. That includes the multi-panel
+  sheets `samples/labelmaker.py` renders for the segmentation tier: the panel
+  text is nonsense vocabulary chosen so that a crossed line is detectable, and
+  it is generated at test time like everything else.
+- **A real filing is evidence, not a fixture.** The defect the panel
+  segmentation fixes was found on the author's own mezcal COLA, which carries a
+  real company, a real tax identifier and a real address. Every measurement in
+  `app/ocr.py`, in the CHANGELOG and in this document was taken on it, and none
+  of it is committed: not to `tests/`, not to `docs/`, not as an encoded blob,
+  and not in a pull request description. What is committed is the synthetic
+  fixture that reproduces the same defect.
+- **No extracted image is written, logged, or kept, and a signature is not read
+  at all.** A filed application carries the applicant's handwritten signature,
+  which is the most personal artefact on the form. Nothing lifts an embedded
+  image out of a document to disk or to a log line at any point, and the
+  rejection record the response carries holds a page number, two dimensions and
+  a named reason and nothing else, asserted on the record's fields in
+  `backend/tests/test_embedded_artwork.py` rather than on one instance of it.
+  The signature-shaped fixtures in that module are strokes drawn from
+  arithmetic; no signature, real or imitated, is committed.
 - Ground truth lives in `samples/expected.csv` and is version controlled once it
   exists, because accuracy numbers are meaningless without a fixed reference.

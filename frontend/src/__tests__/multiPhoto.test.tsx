@@ -13,150 +13,155 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PhotoNotes } from '../components/PhotoNotes'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import { photoNote } from '../lib/photos'
-import { field, photo, verification } from './fixtures'
+import { classification, field, photo, verification } from './fixtures'
 
 function pngFile(name: string) {
   return new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' })
 }
 
-function respondWith(body: unknown, ok = true, status = 200) {
-  return vi.fn().mockResolvedValue({ ok, status, json: async () => body } as Response)
+/**
+ * One stub for both endpoints the single-label view calls (FR-12).
+ *
+ * `/api/classify` sorts the uploaded files; `/api/verify` runs the check. The
+ * classification is stubbed to say every file is a label picture, which is what
+ * these tests are about.
+ */
+function stubApi(result: unknown = null) {
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url === '/api/classify') {
+      return {
+        ok: true,
+        status: 200,
+        json: async () =>
+          classification({ application_document: null, files: [], label_images: 1 }),
+      } as Response
+    }
+    return { ok: true, status: 200, json: async () => result ?? verification() } as Response
+  })
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
-/** The FormData the interface actually sent, so the wire format is asserted. */
-function sentForm(): FormData {
-  return (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock
-    .calls[0][1].body as FormData
+/** The FormData sent to `/api/verify`, so the wire format is asserted. */
+function verifyForm(): FormData {
+  const calls = (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+    .calls
+  const call = calls.find(([url]) => url === '/api/verify')
+  if (!call) throw new Error('No request was made to /api/verify.')
+  return call[1].body as FormData
 }
 
-async function addPhoto(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'Add another photo of this label' }))
+/** Choose files through the one picker, the way an agent does (FR-12). */
+async function upload(user: ReturnType<typeof userEvent.setup>, ...files: File[]) {
+  await user.upload(screen.getByLabelText('Files for this label'), files)
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled(),
+  )
 }
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('adding and removing photos of one label', () => {
-  it('starts with a single photo slot, which is what most checks are', () => {
+describe('more than one picture of one label, through one picker', () => {
+  it('starts with nothing chosen and the check off', () => {
     render(<SingleLabelTab />)
-    expect(screen.getByLabelText('Label image')).toBeInTheDocument()
-    expect(screen.queryByLabelText('Label image, photo 2')).not.toBeInTheDocument()
-    expect(screen.getByText('0 of 3 chosen')).toBeInTheDocument()
+    expect(screen.getByLabelText('Files for this label')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
   })
 
-  it('adds a second and a third slot, then stops offering more', async () => {
+  it('takes several pictures at once and lists each one', async () => {
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
 
-    await addPhoto(user)
-    expect(screen.getByLabelText('Label image, photo 2')).toBeInTheDocument()
+    await upload(user, pngFile('front.png'), pngFile('back.png'))
 
-    await addPhoto(user)
-    expect(screen.getByLabelText('Label image, photo 3')).toBeInTheDocument()
-
-    // The cap is enforced by not offering the control, so an agent never
-    // reaches the API's refusal (NFR-4).
-    expect(
-      screen.queryByRole('button', { name: 'Add another photo of this label' }),
-    ).not.toBeInTheDocument()
-    // Twice: once as the visible hint under the slots, once in the live region
-    // that announced the third slot being added.
-    expect(screen.getAllByText(/That is the most photos you can add for one label/)).toHaveLength(2)
+    expect(screen.getByText('front.png')).toBeInTheDocument()
+    expect(screen.getByText('back.png')).toBeInTheDocument()
   })
 
-  it('announces each change to the photo list (NFR-5)', async () => {
+  it('adds to the list rather than replacing it, so a second choice means "and this too"', async () => {
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
-    const region = screen.getByRole('status', { name: 'Photo list' })
 
-    await addPhoto(user)
-    expect(region).toHaveTextContent('Photo 2 added. You can add 1 more.')
+    await upload(user, pngFile('front.png'))
+    await upload(user, pngFile('back.png'))
 
-    await addPhoto(user)
-    expect(region).toHaveTextContent(
-      'Photo 3 added. That is the most photos you can add for one label.',
+    expect(screen.getByText('front.png')).toBeInTheDocument()
+    expect(screen.getByText('back.png')).toBeInTheDocument()
+  })
+
+  it('offers a labelled control to take any one of them back off', async () => {
+    stubApi()
+    const user = userEvent.setup()
+    render(<SingleLabelTab />)
+    await upload(user, pngFile('front.png'), pngFile('back.png'))
+
+    await user.click(screen.getByRole('button', { name: 'Remove front.png' }))
+
+    await waitFor(() => expect(screen.queryByText('front.png')).not.toBeInTheDocument())
+    expect(screen.getByText('back.png')).toBeInTheDocument()
+  })
+
+  it('turns the check off again when the last file is removed', async () => {
+    stubApi()
+    const user = userEvent.setup()
+    render(<SingleLabelTab />)
+    await upload(user, pngFile('only.png'))
+
+    await user.click(screen.getByRole('button', { name: 'Remove only.png' }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled(),
     )
-
-    await user.click(screen.getByRole('button', { name: 'Remove photo 3' }))
-    expect(region).toHaveTextContent('Photo 3 removed. 2 photos left.')
-  })
-
-  it('removes the right slot and leaves focus somewhere usable', async () => {
-    const user = userEvent.setup()
-    render(<SingleLabelTab />)
-    await addPhoto(user)
-    await user.upload(screen.getByLabelText('Label image, photo 2'), pngFile('second.png'))
-    expect(screen.getByText('second.png')).toBeInTheDocument()
-
-    await user.click(screen.getByRole('button', { name: 'Remove photo 2' }))
-
-    expect(screen.queryByLabelText('Label image, photo 2')).not.toBeInTheDocument()
-    expect(screen.queryByText('second.png')).not.toBeInTheDocument()
-    // Focus would otherwise fall to the document body, which loses a keyboard
-    // user's place entirely.
-    expect(screen.getByRole('button', { name: 'Add another photo of this label' })).toHaveFocus()
-  })
-
-  it('never offers to remove the first slot, so a check always has a photo', async () => {
-    const user = userEvent.setup()
-    render(<SingleLabelTab />)
-    await addPhoto(user)
-    expect(screen.queryByRole('button', { name: 'Remove photo 1' })).not.toBeInTheDocument()
-  })
-
-  it('counts only the slots that actually hold a photo', async () => {
-    const user = userEvent.setup()
-    render(<SingleLabelTab />)
-    await user.upload(screen.getByLabelText('Label image'), pngFile('first.png'))
-    await addPhoto(user)
-
-    expect(screen.getByText('1 of 3 chosen')).toBeInTheDocument()
-    // An empty second slot does not turn the check off, because the first
-    // slot has a photo and one photo is a complete submission.
-    expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled()
   })
 })
 
 describe('what reaches the API', () => {
-  it('sends one image part per photo, under the same field name', async () => {
-    vi.stubGlobal('fetch', respondWith(verification()))
+  it('sends every file under one repeated part, in the order chosen', async () => {
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
 
-    await user.upload(screen.getByLabelText('Label image'), pngFile('front.png'))
-    await addPhoto(user)
-    await user.upload(screen.getByLabelText('Label image, photo 2'), pngFile('back.png'))
+    await upload(user, pngFile('front.png'), pngFile('back.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
-    const images = sentForm().getAll('image') as File[]
-    expect(images.map((file) => file.name)).toEqual(['front.png', 'back.png'])
+    await waitFor(() => expect(verifyForm()).toBeTruthy())
+    const sent = verifyForm().getAll('files') as File[]
+    expect(sent.map((file) => file.name)).toEqual(['front.png', 'back.png'])
+    // Nothing decides which side a file is on before the server has read it.
+    expect(verifyForm().getAll('image')).toHaveLength(0)
+    expect(verifyForm().getAll('application_document')).toHaveLength(0)
   })
 
-  it('sends exactly one part for a single photo, as it always did', async () => {
-    vi.stubGlobal('fetch', respondWith(verification()))
+  it('sends exactly one part for a single picture', async () => {
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
 
-    await user.upload(screen.getByLabelText('Label image'), pngFile('only.png'))
+    await upload(user, pngFile('only.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
-    expect(sentForm().getAll('image')).toHaveLength(1)
+    await waitFor(() => expect(verifyForm()).toBeTruthy())
+    expect(verifyForm().getAll('files')).toHaveLength(1)
   })
 
-  it('skips a slot that was added and left empty', async () => {
-    vi.stubGlobal('fetch', respondWith(verification()))
+  it('does not send the same file twice when it is chosen twice', async () => {
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
+    // The same file, chosen again: a browser hands back a second File object
+    // with the same name, size and modified time, which is what identifies it.
+    const chosen = pngFile('only.png')
 
-    await user.upload(screen.getByLabelText('Label image'), pngFile('only.png'))
-    await addPhoto(user)
+    await upload(user, chosen)
+    await user.upload(screen.getByLabelText('Files for this label'), chosen)
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
-    expect(sentForm().getAll('image')).toHaveLength(1)
+    await waitFor(() => expect(verifyForm()).toBeTruthy())
+    expect(verifyForm().getAll('files')).toHaveLength(1)
   })
 })
 
@@ -177,10 +182,10 @@ describe('what the result says about the photos', () => {
   }
 
   it('says which photo each field was read from', async () => {
-    vi.stubGlobal('fetch', respondWith(twoPhotos))
+    stubApi(twoPhotos)
     const user = userEvent.setup()
     render(<SingleLabelTab />)
-    await user.upload(screen.getByLabelText('Label image'), pngFile('front.png'))
+    await upload(user, pngFile('front.png'), pngFile('back.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
     const card = await screen.findByRole('article', { name: 'Net contents' })
@@ -188,10 +193,10 @@ describe('what the result says about the photos', () => {
   })
 
   it('says nothing about which photo when there was only one', async () => {
-    vi.stubGlobal('fetch', respondWith(verification()))
+    stubApi()
     const user = userEvent.setup()
     render(<SingleLabelTab />)
-    await user.upload(screen.getByLabelText('Label image'), pngFile('only.png'))
+    await upload(user, pngFile('only.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
     await screen.findByText(/Checked in/, { selector: 'p.timing' })
@@ -199,10 +204,10 @@ describe('what the result says about the photos', () => {
   })
 
   it('lists every photo once more than one was sent', async () => {
-    vi.stubGlobal('fetch', respondWith(twoPhotos))
+    stubApi(twoPhotos)
     const user = userEvent.setup()
     render(<SingleLabelTab />)
-    await user.upload(screen.getByLabelText('Label image'), pngFile('front.png'))
+    await upload(user, pngFile('front.png'), pngFile('back.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
     const notes = await screen.findByRole('region', { name: 'Your 2 photos' })
@@ -224,6 +229,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 90,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(turned)).toBe('We turned it 90 degrees to read it.')
@@ -237,6 +243,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 0,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(tagged)).toBe('It was saved sideways by the camera.')
@@ -250,6 +257,7 @@ describe('the note for one photo', () => {
         rotation_degrees: 180,
         method: 'osd',
         confidence: 13,
+        check: null,
       },
     })
     expect(photoNote(both)).toBe(
@@ -282,6 +290,7 @@ describe('the note for one photo', () => {
               rotation_degrees: 270,
               method: 'osd',
               confidence: 12,
+              check: null,
             },
           }),
         ]}
@@ -295,21 +304,30 @@ describe('when no photo could be read (FR-9)', () => {
   it('renders the multi-photo message rather than the single-photo one', async () => {
     vi.stubGlobal(
       'fetch',
-      respondWith(
-        {
-          error: {
-            code: 'all_photos_unreadable',
-            message: 'All 2 photographs of this label were unreadable.',
-            limit: null,
-          },
-        },
-        false,
-        422,
+      vi.fn(async (url: string) =>
+        url === '/api/classify'
+          ? ({
+              ok: true,
+              status: 200,
+              json: async () =>
+                classification({ application_document: null, files: [], label_images: 1 }),
+            } as Response)
+          : ({
+              ok: false,
+              status: 422,
+              json: async () => ({
+                error: {
+                  code: 'all_photos_unreadable',
+                  message: 'All 2 photographs of this label were unreadable.',
+                  limit: null,
+                },
+              }),
+            } as Response),
       ),
     )
     const user = userEvent.setup()
     render(<SingleLabelTab />)
-    await user.upload(screen.getByLabelText('Label image'), pngFile('a.png'))
+    await upload(user, pngFile('a.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
     const alert = await screen.findByRole('alert')

@@ -33,6 +33,10 @@ updates every artifact the answer affects.
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
+| [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010) |
+| [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
+| [OQ-26](#oq-26) | Answered 2026-08-30: met at 5.0 s, at the line | Nothing; re-measured against deploy #12, and the 1.4 s the orientation check costs is what took the margin |
+| [OQ-27](#oq-27) | Open | Nothing; it would buy back part of the NFR-1 margin the orientation check consumed (OQ-26) |
 
 ---
 
@@ -1176,3 +1180,282 @@ actually look like when it lands, and what is on the files.
 **Blocks:** nothing. The pairing rule is stated on the batch page, a mismatch
 names the file it is about, and the rest of the batch still runs. The cost of
 being wrong is that agents rename files they should not have had to.
+
+## OQ-24
+**Which COLA form editions embed the label artwork in the filed PDF, and which
+file it separately? And how big are those embedded images in practice?**
+
+**Status: Open, 2026-08-29.**
+
+[ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
+image from an uploaded COLA document, discards the ones below a size floor, and
+reads the rest as label artwork. Two things about that rest on one document.
+
+**What one document establishes.** The author's own filing, put through the
+deployed v1.0.1 build on 2026-08-29, is TTB Form 5100.31, OMB No. 1513-0020,
+three pages, and it carries the complete flat label artwork as an embedded image
+on page 3 at 1750 by 1150 pixels. That is a filing that embeds its artwork. The
+form's own item 15 refers to "THE LABELS AFFIXED BELOW", so the practice of
+affixing labels to the application is the form's, not this filing's alone.
+
+**What it does not establish.** Whether every edition of the form embeds the
+artwork rather than attaching it as separate files; whether a COLAs Online
+submission produces the same shape as a filed paper form scanned to PDF;
+whether an approved application retrieved from the Public COLA Registry carries
+the artwork at all, or only the typed items; and what range of pixel sizes real
+embedded label images actually span. That last one is what the size floor was
+chosen against, and it was chosen as a judgement about what a seal, a barcode
+and a signature block look like next to a label scan, not from a distribution
+anybody measured. The defaults are 400 pixels on the shortest edge, 250,000
+pixels of area and a long-to-short edge ratio of 3.0, all settable
+(`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`,
+`TTB_MAX_ARTWORK_ASPECT_RATIO`).
+
+**What the ratio adds, and why it was added in v1.1.0.** The two absolute
+floors are properties of the scanner as much as of the thing scanned. The
+author's document carries the applicant's handwritten signature on page 2 at
+687 by 195, which both of them reject twice over; the same strip scanned at
+300 dpi rather than 100 is about 2000 by 580, which clears both comfortably and
+is still a signature. The shape does not move with resolution. That makes the
+ratio the part of the floor least dependent on the distribution this question
+asks about, and it is also the part that trades something away: a neck or strip
+label filed on its own is genuinely long and thin and is rejected by it. Every
+rejection is reported with its page, its size and a named reason, so the trade
+is visible in the response rather than silent.
+
+**What would answer it:** a set of real filings across editions and submission
+routes, with the embedded image sizes reported, the way
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) section 3 reports per-field accuracy
+for label artwork. A redacted or synthetic set produced by TTB would serve and
+would not carry the personal-data problem that keeps a real filing out of this
+repository (07_TEST_STRATEGY.md section 8).
+
+**Who can answer:** Sarah Chen or Jenny Park, for which document shapes actually
+reach an agent's desk; measurement, for the sizes.
+**Blocks:** nothing in the prototype. A filing whose artwork sits below the
+floor reports the artwork fields as absent, which is exactly where v1.0.1 was,
+and the agent types them. A filing that embeds something large that is not a
+label has it reported as the label side, in the response and on screen, where
+the agent can see it. It bounds the claim that this works across filings, and it
+is the reason no such claim is made.
+
+
+
+## OQ-25
+**Should a label whose stated proof is not twice its stated alcohol content be
+reported as a mismatch rather than as needs human review?**
+
+**Status: Decided and closed, 2026-08-30. It stays needs human review, and the
+constant is not flipped.**
+
+**The decision, and the reasoning behind it.** Three sourced documents fix this
+outcome and they agree: FR-7's third acceptance criterion, assumption A-12, and
+UAT row 21 in [07_TEST_STRATEGY.md](07_TEST_STRATEGY.md). All three give the
+same reason, which is that a proof disagreeing with an ABV "indicates an
+internal inconsistency on the label itself".
+
+That reason is the decision. A proof-against-percentage disagreement read off
+one imperfect scan is exactly the judgement call Dave Morrison's human-review
+band exists for: the tool has two numbers off one picture, they do not agree,
+and it cannot tell from the picture whether the label is wrong or the reading
+is. A mismatch says the label is wrong, which is a claim about the bottle. A
+review says the label contradicts itself and a person should look, which is a
+claim about the evidence. The second is what the evidence supports, and it is
+what all three documents already say.
+
+Neither outcome passes a label, so nothing about compliance turns on it. What
+turns on it is what an agent is asked to do next, and asking a person to look at
+a contradiction is the right ask.
+
+**What was actually at issue, and why it was never the constant.** The author's
+brief of 2026-08-30 described the defect as one that "is reported as a mismatch,
+not as artwork-derived". Read in context the contrast is with the new
+`artwork_derived` state rather than with `needs_review`: the requirement is that
+a real defect must never be absorbed by a state meaning "nothing was checked".
+That requirement is implemented and tested
+([ADR 0013](adr/0013-artwork-derived-values.md)), and it is satisfied by either
+failing outcome.
+
+**Blocks:** nothing, and nothing is changed. `backend/app/compare.py` keeps the
+constant it has, and the three documents keep the criterion they state.
+
+**The question as it stood, kept for the record.**
+
+FR-7's third acceptance criterion and assumption A-12 both fix this outcome as
+**needs human review**, and both give the same reason: a proof that does not
+equal twice the ABV "indicates an internal inconsistency on the label itself",
+which is a person's call rather than the tool's. UAT row 21 in
+[07_TEST_STRATEGY.md](07_TEST_STRATEGY.md) states the same expectation.
+
+The author's brief of 2026-08-30, which is what
+[ADR 0013](adr/0013-artwork-derived-values.md) implements, described the same
+defect as one that "is reported as a mismatch, not as artwork-derived". Read in
+context the contrast in that sentence is with the new `artwork_derived` state
+rather than with `needs_review`: the requirement it states is that a real defect
+must never be absorbed by a state that means "nothing was checked". That
+requirement is implemented and tested.
+
+What is left open is the outcome itself. Both are failing outcomes and neither
+passes a label, so nothing turns on it for correctness; what turns on it is what
+an agent is asked to do. A mismatch says the label is wrong. A review says the
+label contradicts itself and a person should look. The second is what FR-7 and
+A-12 say today, and it was chosen deliberately.
+
+**Why this is not resolved by guessing.** Flipping it means amending FR-7's
+acceptance criterion, A-12, and UAT row 21 together, which is an assumption
+change rather than a code change. Making that change silently would leave three
+sourced documents disagreeing with the code, which is the failure mode
+[CONTRIBUTING.md](../CONTRIBUTING.md) rule 1 exists to prevent.
+
+**What would answer it:** the author confirming which of the two they intended,
+or a compliance agent stating what they do with a label that contradicts itself.
+
+**Who can answer:** the author, for the requirement; Jenny Park or Dave
+Morrison, for the practice.
+**Blocks:** nothing. The check runs, the contradiction is reported, and it is
+never reported as artwork-derived. The change, if it is wanted, is one constant
+in `backend/app/compare.py` plus the three document edits above.
+## OQ-26
+**Does the application-document path meet NFR-1 once the duplicated OCR pass is
+gone, on the deployed target rather than on a session container?**
+
+**Status: Answered and closed, 2026-08-30. It does, at 5.0 s against a target of
+roughly five: at the line rather than under it.**
+
+**The answer, re-taken against deploy #12.** The same document was submitted to
+the same URL once the release that reads this artwork correctly had landed, two
+consecutive runs from the author's browser:
+
+| run | wall clock | server `elapsed_ms` | `ocr_passes` | `tesseract_reads` |
+| --- | --- | --- | --- | --- |
+| 1 | 4999 ms | 4928 ms | 1 | 4 |
+| 2 | 4992 ms | 4918 ms | 1 | 4 |
+
+`ocr_passes` reads 1, which is what this question asked for. It is written as
+5.0 s and not rounded down, because 4999 ms against a bar of about five seconds
+is a fact worth stating precisely rather than a number to be tidied.
+
+**What consumed the margin, stated plainly: the fix that made the readings
+correct.** Against deploy #11 earlier the same day the same document measured
+3468, 3505 and 3543 ms, with `unaccounted_ms` at 1.3 ms. Those runs were taken
+while the artwork OCR on this document was still failing: the label was being
+turned 180 degrees on an orientation verdict of 0.03 confidence and then
+flattened to grayscale, so 3.5 seconds was the cost of reading a wrongly turned,
+wrongly rendered image and getting three of five fields wrong. About 1.4 s of
+the rise from 3.5 to 5.0 is the 180-degree check that replaced that: it reads
+the image at both candidate rotations and keeps the better-scoring one, and it
+runs only where Tesseract's own orientation confidence falls under the floor.
+It took this artwork's OCR confidence from 37.9 to 89.6 and found the alcohol
+content and net contents. On the twelve sample labels it does not run at all.
+
+That is a real engineering trade and it is worth making: a second and a half of
+a five-second budget to stop reading a label upside down. It is also worth
+seeing rather than averaging away, which is why it is here and in the three
+other places the figure appears. A costed but unbuilt way to get some of it
+back is [OQ-27](#oq-27).
+
+`elapsed_ms` is within 80 ms of the browser's wall clock on both runs, which is
+what says the phase breakdown covers the request rather than a part of it. The
+matrix row, the README and [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 all
+carry these figures.
+
+**The panel segmentation released after deploy #12 is not expected to move
+this,** because it adds no Tesseract read: the column split and the block
+grouping are both arithmetic on the word table the single existing pass already
+returns, and `backend/tests/test_panel_segmentation.py` asserts the read count
+rather than leaving it to a measurement. Confirmed on a session container, which
+is not production hardware and is quoted only as a before-and-after on one
+machine: a median of 3300 ms over five runs before that change and 3280 ms after
+it, `ocr_passes` 1 and `tesseract_reads` 4 either side. Re-run
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) step 8.3a against the next deploy anyway,
+and record what is measured rather than what was expected.
+
+**The history, kept because the shape of the mistake is the useful part.**
+
+**What is measured.** The author submitted their own mezcal COLA document, a
+382 KB PDF, alone to the deployed URL on 2026-08-30, build 1.1.0, three
+consecutive runs from the browser: 6883, 6786 and 6781 ms wall clock. That is
+outside NFR-1's roughly five seconds, and it is recorded as a miss in the README
+and in [09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9.
+
+**What was wrong with the number beside it.** The response reported `elapsed_ms`
+of 3323, 3214 and 3198 ms, within 2 ms of `ocr_ms` on every run, because
+`elapsed_ms` was measuring the label-side OCR span rather than the request. Two
+controls from the same session bound the network at 18 to 25 ms for a health
+round trip and 68 to 111 ms for a POST of the same file to a path that processes
+nothing, so the roughly 3.5 seconds the interface was calling "sending the
+image" was server work nobody was counting.
+
+**What changed.** `elapsed_ms` now covers the handler end to end, the response
+carries a measured phase breakdown, and the picture chosen as the label side is
+read once instead of twice. On a session container a one-image document went
+from 2.19 s to 1.12 s and a two-image document from 3.17 s to 1.15 s, with the
+Tesseract passes going from two and three to one.
+
+**Why this is still open.** A session container is not a Fargate task behind a
+load balancer, and halving the number of OCR passes on hardware where each pass
+took about 3.3 seconds *should* put this near 3.5 seconds, but that is
+arithmetic. This repository does not publish arithmetic as measurement
+([README](../README.md), "Measured performance and accuracy"). The 6.8 s figure
+stands until it is re-measured.
+
+**What would answer it:** deploy a build carrying this change and re-run
+`docs/09_DEPLOYMENT.md` step 8.3a with the same document, recording the wall
+clock and the `timings` block. `ocr_passes` should read 1.
+
+**Who can answer:** the author, with the deployed URL and that PDF.
+**Blocks:** nothing in the prototype. It blocks any claim that NFR-1 is met on
+this path, which is why no such claim is made.
+
+## OQ-27
+
+**Would reading the two rotation candidates at a lower resolution separate them
+just as reliably, and how much of NFR-1's margin would that buy back?**
+
+**Status: Open, raised 2026-08-30. Costed here and deliberately not built.**
+
+**Why it is worth asking.** The 180-degree check in `backend/app/ocr.py` is what
+made the author's mezcal artwork readable, and it is what took this path from
+3.5 s to 5.0 s against NFR-1's roughly five (OQ-26). It costs two full Tesseract
+reads at the working resolution, and it does so only to decide between two
+numbers that are far apart: on that artwork, 91.8 upright against 32.1 upside
+down. Separating 91.8 from 32.1 does not obviously need every pixel.
+
+**What was measured, on one image.** The same artwork, both candidates scored at
+each scale, on a session container. The time is for both candidates together;
+the confidences are upright against upside down.
+
+| scale | long edge | both candidates | upright | upside down | chose |
+| --- | --- | --- | --- | --- | --- |
+| 1.00 | 1600 px | 1013 ms | 91.8 | 32.1 | correctly |
+| 0.60 | 960 px | 838 ms | 82.2 | 28.9 | correctly |
+| 0.50 | 800 px | 671 ms | 62.2 | 25.0 | correctly |
+| 0.40 | 640 px | 648 ms | 39.0 | 21.9 | correctly |
+| 0.30 | 480 px | 285 ms | 35.3 | 21.7 | correctly |
+| 0.25 | 400 px | 183 ms | 0.0 | 1.0 | **backwards** |
+
+**The estimate.** At half resolution the check costs about a third less, which
+on the deployed figures is roughly 0.5 s off a 5.0 s request, and the two
+candidates are still 37 points apart. At 0.30 it costs about 70 percent less,
+roughly 1.0 s, and the gap has narrowed to 14 points. At 0.25 the text has
+dissolved far enough that the check answers backwards, which is the failure
+mode that matters: a cheap check that turns a readable label upside down is
+worse than no check.
+
+**Why it is not built.** One image is not a measurement of a decision rule. The
+figure that would justify changing this is the one ADR 0003 was decided on: the
+twelve-label sample set at all four cardinal rotations, forty-eight cases, with
+the check forced to run on every one of them, scored at each candidate scale.
+Until that exists, picking a scale from a single sheet would be exactly the kind
+of arithmetic this repository declines to publish as measurement
+([README](../README.md), "Measured performance and accuracy"). The margin it
+would buy is real but the path is inside the bar without it.
+
+**What would answer it:** run that sweep, and report the accuracy at each scale
+beside the time saved. A scale is only a candidate if it is right in as many of
+the 48 cases as full resolution is.
+
+**Who can answer:** anyone with a checkout, Tesseract and the sample set; it
+needs no deployed environment and no real applicant artwork.
+**Blocks:** nothing. NFR-1 is met at 5.0 s without it. It would restore margin
+on the path that has least of it.

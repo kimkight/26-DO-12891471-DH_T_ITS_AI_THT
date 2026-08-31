@@ -2,9 +2,12 @@
 import type {
   ApplicationDocumentResult,
   BatchLine,
+  ClassificationResult,
   FieldResult,
+  FileClassification,
   Outcome,
   ParsedApplicationField,
+  PhaseTimings,
   PhotoResult,
   VerificationResult,
   WarningResult,
@@ -33,18 +36,22 @@ export function field(name: string, outcome: Outcome, overrides: Partial<FieldRe
 export function photo(index = 1, overrides: Partial<PhotoResult> = {}): PhotoResult {
   return {
     index,
+    origin: 'uploaded',
     orientation: {
       exif_orientation: null,
       exif_transposed: false,
       rotation_degrees: 0,
       method: 'osd',
       confidence: 13.7,
+      check: null,
     },
     ocr_confidence: 95.4,
     read_path: {
       variant: 'preprocessed',
       preprocessed_confidence: 95.4,
       plain_confidence: null,
+      colour_confidence: null,
+      decided_by: 'short_circuit',
     },
     text_found: true,
     error: null,
@@ -60,6 +67,33 @@ export function warningDetail(overrides: Partial<WarningResult> = {}): WarningRe
     body_matches_regulation: true,
     bold_type_checked: false,
     bold_type_note: BOLD_TYPE_NOTE,
+    edit_distance: 0,
+    near_miss: false,
+    diff: [],
+    ...overrides,
+  }
+}
+
+/**
+ * The phase breakdown as the API returns it (NFR-1). The defaults are the shape
+ * of a photograph submission: one label read, a little comparison, and no
+ * document work at all.
+ */
+export function phaseTimings(overrides: Partial<PhaseTimings> = {}): PhaseTimings {
+  return {
+    total_ms: 540,
+    classify_ocr_ms: 0,
+    document_pdfium_ms: 0,
+    document_ocr_ms: 0,
+    page_ocr_ms: 0,
+    artwork_ocr_ms: 0,
+    label_ocr_ms: 530,
+    compare_ms: 0.3,
+    ocr_ms: 530,
+    ocr_passes: 1,
+    tesseract_reads: 2,
+    accounted_ms: 530.3,
+    unaccounted_ms: 9.7,
     ...overrides,
   }
 }
@@ -79,8 +113,12 @@ export function verification(outcomes: Outcome[] = ['match', 'match', 'match', '
     ocr_confidence: 95.4,
     elapsed_ms: 540,
     ocr_ms: 530,
+    timings: phaseTimings(),
     external_call_made: false,
     application_document: null,
+    files: [],
+    label_source: 'uploaded_photographs',
+    self_consistency_note: null,
   } satisfies VerificationResult
 }
 
@@ -119,6 +157,9 @@ export function parsedField(
     display_name: name.replace(/_/g, ' '),
     value,
     found_on_document: value !== null,
+    // The ordinary case is a value read out of the document's own text. A
+    // fixture for the ADR 0010 case overrides this with 'embedded_artwork'.
+    source: value === null ? 'absent' : 'embedded_text',
     ...overrides,
   }
 }
@@ -144,12 +185,58 @@ export function applicationDocument(
     ],
     fanciful_name: 'Small Batch Reserve',
     class_type_code: null,
+    // No embedded artwork by default, which is the v1.0.1 shape of this
+    // document. The ADR 0010 fixtures override all three.
+    artwork_images_found: 0,
+    artwork_images_read: 0,
+    artwork_images_rejected: [],
+    label_artwork_page: null,
+    label_artwork_available: false,
     notes: [
       'The class or type designation is not an item on TTB F 5100.31 (04/2023).',
       'The alcohol content is not an item on TTB F 5100.31 (04/2023).',
       'The net contents is an item on TTB F 5100.31 (04/2023) only when it is blown, branded or embossed on the container.',
       "The type of product is item 5 on TTB F 5100.31 (04/2023), three checkboxes. A ticked box cannot be read from a document's text.",
     ],
+    ...overrides,
+  }
+}
+
+/** One sorted file, as POST /api/classify and POST /api/verify report it. */
+export function fileClassification(
+  filename: string,
+  classifiedAs: FileClassification['classified_as'] = 'label_image',
+  overrides: Partial<FileClassification> = {},
+): FileClassification {
+  const isDocument = classifiedAs === 'application_document'
+  return {
+    filename,
+    classified_as: classifiedAs,
+    basis: isDocument ? 'pdf_header' : 'no_form_markers',
+    reason: isDocument
+      ? 'This is a PDF, so we read it as the label application.'
+      : 'We read this picture as a label.',
+    used: true,
+    ...overrides,
+  }
+}
+
+/**
+ * What POST /api/classify returns for one pile of files (FR-12, ADR 0011).
+ *
+ * The default is the ordinary two-file case: one application and one photo.
+ */
+export function classification(
+  overrides: Partial<ClassificationResult> = {},
+): ClassificationResult {
+  return {
+    files: [
+      fileClassification('application.pdf', 'application_document'),
+      fileClassification('label.png'),
+    ],
+    application_document: applicationDocument(),
+    label_images: 1,
+    application_error: null,
     ...overrides,
   }
 }

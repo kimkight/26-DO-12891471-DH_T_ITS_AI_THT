@@ -7,7 +7,586 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.1] - unreleased until tagged
+## [1.1.0] - unreleased until tagged
+
+The author's own use of the deployed v1.0.1 build on 2026-08-29, with a real
+COLA document: TTB Form 5100.31, OMB No. 1513-0020, three pages. Two problems
+reported and one design instruction, and this release is the answer to all
+three.
+
+### The evidence
+
+**Only two of the five fields reconciled.** The diagnosis was made against the
+file rather than guessed. The brand name and the class or type designation came
+out of the PDF's embedded text layer, both correct. The alcohol content and the
+net contents are genuinely absent from the form's text layer, exactly as
+assumption A-17 already said. **But they are not absent from the document**:
+pages 2 and 3 each carry an embedded raster image, and page 3 is the complete
+flat label artwork at 1750 by 1150 pixels, carrying `DEL MAGUEY`,
+`VIDA SINGLE VILLAGE MEZCAL`, `42% ALC BY VOL`, `750 ML` and the full horizontal
+GOVERNMENT WARNING. The parser never rasterized or extracted those images, so it
+never saw values that were sitting inside the file it had been handed. OCR of
+that artwork at 2x reads the warning with exactly one character wrong, `MPAIRS`
+for `IMPAIRS`.
+
+**Submission was blocked because a label image was required.** The author's
+words: "if COLA is uploaded, I don't also need an image."
+
+**And the instruction:** "these should be combined; just one upload; simplify
+the interface. You should be able to upload (pdfs or images). Collapse the form
+fields and only expand if there is something that isn't read in from the
+application or picture."
+
+### Added
+
+- **The COLA document's own label artwork is read**
+  ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). Every embedded raster
+  image at or above a size floor is lifted out of the PDF at its own resolution
+  and read through the same OCR pipeline label artwork goes through, with the
+  v1.0.1 orientation and preprocessing decisions unchanged. What it says fills
+  application values the text layer left empty.
+  - The floor has three parts, all of which have to be met: at least 400 pixels
+    on the shortest edge and at least 250,000 pixels of area, which between them
+    reject a seal or a logo, and a long-to-short edge ratio no greater than 3.0,
+    which rejects a signature strip at any scanning resolution. All three are
+    settings (`TTB_MIN_ARTWORK_EDGE_PX`, `TTB_MIN_ARTWORK_PIXELS`,
+    `TTB_MAX_ARTWORK_ASPECT_RATIO`), and `TTB_MAX_ARTWORK_IMAGES` bounds how
+    many are read. The ratio was added later in this release; see
+    "Fixed: the label artwork is turned the right way and read in colour".
+  - Extracted rather than rendered. A page rasterized at a fixed scale loses
+    resolution the embedded picture already has and hands the engine the form's
+    own printed captions along with the label text. The alternatives rejected,
+    and why, are in ADR 0010.
+- **A three-source precedence, reported per field.** Typed by the agent, then
+  the document's text layer or form fields, then the embedded artwork, then
+  absent. Artwork never overrides text, because a value the file states is read
+  and a value off a picture is recognized. Every field says which of the four
+  supplied it, in the response and on screen, and the artwork case carries a
+  line telling the agent to check it.
+- **An application document alone is now a complete submission.** Where the
+  agent uploaded no photograph and the document carries readable artwork, the
+  largest such image is the label side and the check runs. Where it carries
+  none, the submission is refused with a message naming the missing piece and
+  offering the photo upload, which is an FR-9 message rather than a validation
+  error on a field.
+
+- **A government warning that differs by one or two characters goes to a person**
+  ([ADR 0012](docs/adr/0012-warning-near-miss.md)). The comparison is unchanged
+  and still exact: a statement is a match only when it is identical to
+  27 CFR 16.21 after whitespace normalization. What changed is what a very small
+  difference is reported **as**.
+  - The author's own artwork OCRs the statement with exactly one character
+    wrong, `MPAIRS` for `IMPAIRS`. Reported as a flat mismatch, that tells an
+    agent their label is defective when the truth is that the scan is imperfect.
+  - A difference of at most `TTB_WARNING_NEAR_MISS_EDITS` characters, two by
+    default, is reported as needing human review, with the exact character-level
+    difference shown. **It is never a pass**: it is one of the two failing
+    outcomes, and the reason says "This is not a match" in those words.
+  - Anything beyond the threshold is still a mismatch. A capitalization failure
+    on the prefix is never a near miss: it is a defect a person caught on a real
+    submission, not something OCR produces from a compliant label.
+  - The difference is shown on a mismatch too, because it is evidence either
+    way, and each run is marked by text as well as by styling so the distinction
+    survives greyscale.
+  - **This is not a fuzzy match.** A fuzzy match would let a label through on a
+    similarity score. Nothing here lets anything through; what changed is which
+    sentence the agent reads and whether they are handed the difference to look
+    at. The existing FR-5 fixtures are unchanged in outcome, and that is
+    asserted.
+
+- **A value read off the artwork is filled in, and never called a match**
+  ([ADR 0013](docs/adr/0013-artwork-derived-values.md), FR-14). ADR 0010 put the
+  artwork into the application side and let it stand in as the label side. Both
+  are right on their own; together they produce a row that compares a value
+  against the picture it was read from, and such a row always agrees.
+  - The values are still filled, because asking an agent to hand-type what the
+    tool has already read puts back the data entry the tool exists to remove,
+    and on the batch path there is nobody there to type it.
+  - A row whose application value came off the same artwork that supplied the
+    label side reports a fifth outcome, `artwork_derived`, carrying no score. It
+    is not a verdict about agreement; it says the value was read and that there
+    was nothing independent to check it against.
+  - The summary line stops saying "5 of 5 fields match" and says what is true:
+    "3 of 3 verifiable fields match; 2 read from the artwork only". Where no row
+    is artwork-derived the qualifier disappears and the line reads as before.
+  - The state carries a word, "Read from the artwork", and a picture-frame
+    silhouette no other outcome uses, before any colour (NFR-5). The row states
+    its own source, "Label artwork (same source as the label)", on the row
+    rather than in a footnote.
+  - **The rule keys on provenance, not on a field name.** It covers whatever
+    fields fell that way on a given filing, and it does not fire when the agent
+    supplied a photograph: comparing that photograph against the filed artwork
+    is two pictures and is reported as the real comparison it is. A batch row
+    pairs a document with a label image (ADR 0009), so no batch row is
+    artwork-derived.
+  - **Only an agreement is relabelled.** Reading one picture twice can
+    manufacture agreement; it cannot manufacture a mismatch, a review or a
+    not-found. Every other outcome on such a row is left exactly as the
+    comparison found it.
+- **Presence is reported as a finding rather than as "not compared"**
+  (FR-14, FR-1). 27 CFR 5.63(a)(3) and 4.32(b)(3) require alcohol content on the
+  label and 5.63(b)(2), 4.32(b)(2) and 7.63(a)(5) require net contents, whatever
+  the application form says. A label that carries neither the value nor a form
+  value used to report "nothing to compare"; it now reports the finding, and the
+  reason names the section and its carve-outs, including that net contents may
+  be "blown, embossed, or molded into the container". All three sections fetched
+  from eCFR on 2026-08-30.
+- **The proof cross-check reads the label on its own** (FR-14, FR-7, A-12). A
+  spirits label stating both a percentage and a proof states the same number
+  twice, and whether they agree is a property of that label. The check now runs
+  before the application side is considered, so a label that contradicts itself
+  is reported whether or not anything was declared against it; it used to be
+  silenced by a row that had nothing to compare. Its outcome is unchanged and
+  still needs human review, as FR-7 and A-12 fix it; see
+  [OQ-25](docs/OPEN_QUESTIONS.md).
+
+### The limitation, stated rather than implied
+
+Checking a label lifted out of an application against that same application is
+a **self-consistency check**. It shows that the artwork on file carries the
+mandatory elements and agrees with the typed form data. It shows nothing about
+a physical bottle; verifying the bottle against the filing still needs a
+photograph of the bottle. That sentence is in the parser's notes, in the
+response as `self_consistency_note`, and once on screen above the result,
+because a limitation that lives only in an ADR is a limitation nobody reads.
+
+### Changed
+
+- `POST /api/verify` takes one repeated `files` part. The older `image` and
+  `application_document` parts remain accepted and are routed through the same
+  classifier, so a caller written against v1.0 keeps working and a COLA PDF sent
+  in the `image` part is now read as the application rather than as a label.
+- `POST /api/verify` accepts a submission with no label picture at all, when the
+  application document carries label artwork.
+- The response gains `label_source`, `self_consistency_note`, `photos[].origin`,
+  a per-value `source` on the parsed application block, and
+  `artwork_images_found`, `artwork_images_read` and `label_artwork_available`.
+  `application_value_source` gains `parsed_from_artwork` as a fourth value.
+- Assumption A-17 is amended: two of the three values it records as "not items
+  on the form" are recoverable from the artwork embedded in a filing.
+- `frontend/src/components/ApplicationUpload.tsx` is replaced by `UploadPanel.tsx`,
+  and the photograph slots from ADR 0007 are gone from the interface. Up to
+  `TTB_MAX_LABEL_PHOTOS` pictures of one label are still read independently and
+  merged; what has gone is the row of numbered slots and the agent having to say
+  in advance which file is which.
+- `samples/formmaker.py` can embed raster artwork into a synthetic form as an
+  image XObject, so the new fixtures are still generated at test time and no
+  real applicant's filing is committed.
+
+- **One upload, sorted by the server**
+  ([ADR 0011](docs/adr/0011-one-upload.md)). The single-label view has one file
+  picker. It takes the label application, photographs of the label, or any mix,
+  as PDFs or images, and the server decides what each file is **from the file
+  itself** rather than from which control it arrived in.
+  - The rule: a PDF by its header, or by its declared type; an image by whether
+    its text carries a COLA form or Public COLA Registry marker, or reads as a
+    filled-in form; anything else is a label picture; an image that will not
+    decode is a label picture carrying its error.
+  - The classification is reported per file, in `POST /api/classify` and on
+    every verification response, so a wrong call is visible rather than silent.
+    That was the failure the two pickers actually produced: a COLA PDF dropped
+    into the photo picker was read as label artwork.
+  - Each image is read exactly once. The OCR result from classifying is handed
+    to whichever side the file lands on. Measured on a session runner:
+    single-label verification stayed at about 1.5 seconds end to end.
+- **The label image requirement is gone as a hard gate.** The check turns on as
+  soon as anything is uploaded. Three submissions are valid and all three
+  complete end to end: the application document alone, a label photograph plus
+  typed values, or both. An application with no readable artwork and no
+  photograph is refused with a message naming the missing piece and offering the
+  photo upload, which is an FR-9 message rather than a validation error on a
+  field.
+- **The values that were read go quiet; the ones that were not go loud** (FR-13,
+  US-26). Once an upload has been read, each value it supplied is a read-only
+  line carrying the value and where it came from, and each compared value it did
+  not supply is an editable field, shown. If it supplied all of them, no
+  editable field is shown at all and one collapsed disclosure, "Review the
+  values", holds them.
+  - A gap takes focus, scrolls into view, and is announced: "Alcohol content was
+    not found in your upload. Enter it, or upload a clearer image."
+  - The two sections are decided when the upload is read, not from what is
+    currently in the boxes. A field that moved between them as the agent typed
+    would remount under them and drop focus after the first keystroke.
+  - Beverage type keeps its own line with the ADR 0008 truth: read where the
+    document states it in text, and otherwise reported as not read from the form
+    because the product-type boxes are check marks, which a text layer cannot
+    report. It is never compared, so it never takes focus and is never counted
+    as a gap.
+  - Before anything is uploaded the view is exactly what Session 10 left: one
+    collapsed disclosure, no summaries of values that do not exist.
+  - The result panel is unchanged. This is the input side only.
+- `POST /api/classify` sorts an upload and reads the application side without
+  comparing anything. It exists for the interface, in the same sense
+  `POST /api/read-application` does: the parsed values have to reach the agent as
+  editable fields before the comparison runs.
+
+### Changed: the interface stops talking about taking a picture
+
+- **The heading is "Upload. Read. Check."** (US-27). It read "Point. Upload.
+  Check.", transcribed in Session 9 from a pattern written for a phone camera.
+  This application has no camera. Nothing is pointed at anything; a file is
+  chosen and uploaded, and the first word described a capability the tool does
+  not have.
+- **The rule applied across the sweep is narrower than "remove the word
+  photo".** A word that implies the tool takes the picture goes. A word that
+  names a file the agent already has stays: "photo", "photograph" and "scan"
+  are all correct as nouns for something being uploaded, and replacing them
+  would make the copy vaguer without making it truer.
+- Strings changed: the `LABEL SCANNING` kicker is now `LABEL CHECK`; the batch
+  results kicker says `READING` rather than `SCANNING` while the stream is
+  open; "Upload the label application, a photo of the label, or both" is "an
+  image of the label", in the upload heading, the results empty state, the
+  disabled-check hint and the API's own `no_files` message; "PDFs and photos"
+  is "PDFs and images", and "a photo shows us what it does say" is "an image of
+  the label shows us what it does say"; "One photograph for each label" on the
+  batch picker is "One image for each label"; "upload a clearer picture" is
+  "upload a clearer file"; "Try a clearer photo" is "Try a clearer image" on
+  both unreadable-image messages; a file classified as the label side is a
+  "Label image" rather than a "Label picture"; "the way we read a label photo"
+  and "the same reading we use on a label photo" both say "label image"; "you
+  do not have to add a photo" says "add an image"; and the API's
+  `no_label_to_check` message says "Add an image of the label".
+- Strings deliberately kept, and asserted so a later sweep does not take them:
+  "Try clearer photos, in better light" for a submission where every photograph
+  failed, because those are the agent's own photographs and retaking them is
+  the right advice; "a photo or scan of the form" and "A PDF, or a scan or
+  photograph of the form", because both name files an agent holds; "Your
+  photos", "Photo 2" and "Read from photo 2"; and "it was saved sideways by the
+  camera", which is a fact the EXIF tag states about the file.
+- **The viewfinder brackets are gone; the preview stays.** The four gold corner
+  brackets around the chosen file failed the same test the heading did: corner
+  brackets mean align the subject here and the device will capture it, and by
+  the time that panel renders the file has been chosen, uploaded and read. The
+  frame, the image and the caption stay, because the reason they exist is good
+  and unrelated: before them, an agent who chose the wrong file could not tell
+  until the results came back. The `scan*` class names are now `preview*`, the
+  batch progress line's `scanning*` classes are `reading-line*`, and the
+  viewfinder kicker glyph is replaced by a label glyph, so the code stops
+  calling it a scan too.
+- Everything from Session 9 that does not concern capture is untouched: the
+  palette, the pill controls, the key-value result rows, the status chips, the
+  persistent prototype banner and its exact wording, and the footer.
+- Regression-gated as always: axe green over the built page including the
+  removed brackets and the new heading, the computed-contrast check green, the
+  keyboard walk unchanged, and the live-region announcements updated to the new
+  strings.
+
+### Documented, not built
+
+- **A judged scope line on bottle photography**
+  ([02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6), answering the
+  author's question: "Should I even be contemplating a label on a bottle, or is
+  everything coming through COLA?"
+  - **The input that works is flat label artwork**: the images filed with the
+    COLA application, and photographs of flat labels or of a label lying flat.
+    Every measured performance and accuracy figure in this repository came from
+    that input.
+  - **The input that does not work reliably is a photograph of a label still
+    wrapped on a round bottle**, with three findings from the 2026-08-29 mezcal
+    test stated as evidence: the GOVERNMENT WARNING block is printed at 90
+    degrees to the body copy so no single global rotation makes both upright; a
+    4 by 5 rotation and page-segmentation sweep over the isolated warning crop
+    returned `4 AANDVW 1AG` at 2.1 percent similarity; and the real COLA gives
+    Brand `DEL MAGUEY` and Fanciful `VIDA` while the largest text is "Vida
+    Clasico", so the type-size heuristic is wrong on a real product even with
+    perfect OCR.
+  - **The decision:** bottle photography stays in the prototype as a best-effort
+    path with honest failure reporting, and is not claimed as a supported
+    capability. It is not removed, because an agent standing at a bottling line
+    has nothing else; it is not promised, because the evidence says that would be
+    a false promise.
+  - The four things that would make it work are named with their costs:
+    per-text-block orientation detection, cylindrical dewarp, multi-photo
+    stitching (ADR 0007 exists, stitching does not), or a vision model, which is
+    SG-2 and carries the FedRAMP and data-handling questions already recorded
+    there.
+  - Cross-linked from assumption SG-1's discussion in
+    [ASSUMPTIONS.md](docs/ASSUMPTIONS.md) and from the traceability matrix. **No
+    code changed and no capability is claimed.**
+- **ADR 0009 answers the batch question this release raises.** A batch row still
+  requires its label image, because rows are enumerated from the images so the
+  stream can report a total before any document is read. What a batch does get:
+  a paired document's embedded artwork now fills application values its text
+  layer left empty. The simplification left on the table is named as such.
+
+### Fixed
+
+- **`elapsed_ms` is elapsed, and the interface stops inventing an explanation
+  for the difference** (NFR-1). The field was measured inside
+  `verify_photos`, which starts after the multipart form is parsed, after the
+  files are classified and after the COLA document is read. On the
+  application-document path those three are most of the request. Measured
+  against the deployed build on 2026-08-30 with the author's own mezcal COLA
+  PDF, `elapsed_ms` and `ocr_ms` came back within 2 ms of each other on all
+  three runs: the field was reporting the label-side OCR span and calling itself
+  the request.
+  - The panel then printed the browser's wall clock, subtracted that figure and
+    told the agent the remainder was "sending the image and receiving the
+    answer". A control POST of the identical 382 KB file to a path that
+    processes nothing crossed the wire in 68 to 111 ms, and a health round trip
+    took 18 to 25 ms. About 3.5 seconds of real server work per request was both
+    missing from the instrumentation and mislabelled as network time.
+  - `elapsed_ms` now starts on entry to the handler and stops when the response
+    is built. The response carries a `timings` block whose phases are each
+    measured by a timer around the work they name: sorting the upload, PDFium
+    work, page OCR, artwork OCR, label OCR, and the comparison. The phases are
+    disjoint, and what no timer covered is reported as `unaccounted_ms` rather
+    than attributed to whichever phase is nearest.
+  - The panel reports the wall clock and the server's total and names their
+    difference as time in the browser and on the network, which is a location
+    rather than a mechanism. The phase breakdown is on the page behind a closed
+    disclosure.
+  - A batch line gets its own recording per row, so its figures are that row's
+    work rather than a share of the batch's.
+
+### Performance
+
+- **The label artwork is read once instead of twice** (NFR-1). The honest
+  measurement above exposed it immediately: the picture chosen as the label side
+  is by construction a picture the document parser has just put through the OCR
+  pipeline to fill the application values, and the label side was putting the
+  identical bytes through the identical pipeline again for an identical result.
+  The read is now handed on, the same way ADR 0011 already hands on the
+  classifier's read.
+- **Reading stops once every value has been found.** A further embedded picture
+  can only add a value no earlier picture showed, because values are taken in
+  size order and never overwritten. Once all four are in hand the remaining
+  passes cannot change one thing in the response, so they are not run. The
+  front-and-back case ADR 0010 reads several pictures for is untouched: a
+  largest picture that answers only some of the four does not trigger it.
+- Measured on a session container, which is not production hardware and is
+  quoted only as a before-and-after on one machine: a one-image document went
+  from **2.19 s to 1.12 s** and a two-image document from **3.17 s to 1.15 s**,
+  with Tesseract passes going from two and three respectively to **one**.
+
+### The acceptance criterion this release reported missing, and then re-measured
+
+**The application-document path measured 6.8 s against NFR-1's roughly five
+seconds** on the deployed target on 2026-08-30, build 1.1.0 as first deployed,
+with the author's own mezcal COLA PDF submitted alone: 6883, 6786 and 6781 ms
+over three runs. The image path meets NFR-1 at 1.5 s and is a different path;
+one number covering both would be a claim about neither.
+
+That entry said the figure would stand until the same document was submitted to
+the deployed URL on a build carrying the fixes above, because halving the OCR
+passes on hardware where each took about 3.3 seconds *should* land near 3.5
+seconds and "should" is arithmetic rather than measurement.
+
+**It was submitted, against deploy #11, the same day, the same URL, the same
+document.** Three consecutive runs:
+
+| run | wall clock | server `elapsed_ms` | `unaccounted_ms` | `ocr_passes` |
+| --- | --- | --- | --- | --- |
+| 1 | 3468 ms | 3387 ms | 1.3 ms | 1 |
+| 2 | 3505 ms | 3411 ms | 1.3 ms | 1 |
+| 3 | 3543 ms | 3463 ms | 1.3 ms | 1 |
+
+**NFR-1 is met on this path at about 3.5 s, with about 1.5 s of margin.**
+`elapsed_ms` now sits within 80 ms of the browser's wall clock instead of 3.5
+seconds away from it, `unaccounted_ms` of 1.3 ms is what says the phase
+breakdown covers the request rather than a part of it, and `ocr_passes` reads 1
+against the 2 the same document paid before. The traceability matrix row, the
+README performance section and `docs/09_DEPLOYMENT.md` section 9 all carry these
+figures with the date, the build and the sample named. OQ-26 is closed with
+them.
+
+**One caveat, recorded rather than assumed away.** Those runs were taken while
+the artwork OCR on this document was still failing: the label was being turned
+180 degrees on an orientation verdict of 0.03 confidence and then flattened to
+grayscale, so the 3.5 seconds was the cost of reading a wrongly turned, wrongly
+rendered image. The fixes below change what is read. **It was re-measured, and
+it moved: 5.0 s against deploy #12 the same day.** See "Changed" at the end of
+this release for the figures and for what consumed the margin.
+
+### Fixed: the label artwork is turned the right way and read in colour
+
+The same document, on the same deploy, still read `AMoviy TS` for `DEL MAGUEY`,
+`CLI).` for the class, and did not find the government warning at all. Three
+causes, one branch, and each was a number that looked confident about text it
+had never seen.
+
+- **An orientation verdict of 0.03 confidence was applied on trust, and the
+  floor to reject it already existed.** `LOW_ORIENTATION_CONFIDENCE` has been in
+  `app/ocr.py` since v1.0.1 and was only ever a caption: the response said the
+  engine had guessed, and the rotation was applied regardless. Below the floor
+  the verdict is now scored against its own opposite by mean word confidence and
+  the better one is kept.
+
+  This refines [ADR 0003](docs/adr/0003-local-ocr-default-bedrock-optional.md)
+  rather than contradicting it. Its 46 of 48 for OSD against 7 of 48 for a
+  four-rotation sweep stands untouched, and above the floor OSD still decides
+  alone. What the 7 of 48 hides is *which* cases the sweep loses: it loses the
+  quarter-turns, because Tesseract corrects those itself and returns identical
+  output either way, so the score is equal on the two cases it would have to
+  separate. On this very artwork it separates 0 from 180 by more than fifty
+  points. Two rotations, never four, and a tie leaves the engine's answer
+  standing. A-15 carries the refinement.
+- **Flattening a coloured label to grayscale dropped an entire ink class, and
+  mean word confidence could not see it**
+  ([ADR 0014](docs/adr/0014-colour-as-an-ocr-candidate.md)). Filed artwork
+  carries dark-on-light and light-on-dark text on one ground; a threshold
+  separates two luminance classes, not three. On this artwork the colour image
+  read 257 words at 89.1 including `42% ALC BY VOL`, and the grayscale read 106
+  at 89.9 without it: the arm that lost a required field scored *higher*,
+  because a word that was never read lowers no score.
+
+  The colour image is now a first-class candidate and on a coloured source it is
+  read first. Ranking stays mean word confidence; ties inside one point are
+  broken by how much text was recovered, which never overrides a real difference
+  in confidence and fires on no case in the twelve-label sample set. Whether a
+  source has colour to lose is measured as chroma rather than assumed from the
+  channel count, so every image in the sample set and every grayscale scan takes
+  the v1.0.1 path at the v1.0.1 cost. A coloured label that reads cleanly now
+  costs one Tesseract read where this document paid two.
+- **The embedded-image floor was made only of absolute sizes, and a signature
+  clears them at a better scanning resolution.** The author's signature sits on
+  page 2 at 687 by 195 and is rejected twice over; the same strip at 300 dpi is
+  about 2000 by 580 and clears both. A long-to-short edge ratio above 3.0 is now
+  rejected too (`TTB_MAX_ARTWORK_ASPECT_RATIO`), which is the one part of the
+  floor a better scanner cannot defeat. Every rejection is reported with its
+  page, its size and a named reason. The picture never is: not to the response,
+  not to a log, not to disk.
+
+`ocr_passes` still counts pictures. `tesseract_reads` is added beside it,
+because every arm above happens inside one pass, and a release that tripled the
+engine invocations while the reported pass count held at 1 would be the same
+mistake the timing finding above was.
+
+### Known limits
+
+- The size floor is a judgement about what a filing looks like, not a
+  measurement of one. Which form editions embed their artwork, and what pixel
+  sizes real embedded label images span, is [OQ-24](docs/OPEN_QUESTIONS.md#oq-24).
+- The batch path is unchanged: a row still requires its label image, because
+  rows are enumerated from the images so the stream can report a total before
+  any document is read. The reason, and what it would take to change, is in
+  ADR 0010 under "Effect on the batch path". The batch also keeps its two named
+  parts rather than folding into one; ADR 0011 records why the two paths differ.
+- A label picture is read twice on the interface path, once to classify it when
+  the agent chooses it and once to check it when they press the button. The
+  agent's wait for the check is unchanged, because the first read happens while
+  they are still working; what it costs is server CPU. An API caller sending
+  everything to `POST /api/verify` in one request pays it once.
+- The classification can be wrong. A photograph of a label that prints "Alcohol
+  and Tobacco Tax and Trade Bureau", which some labels do, would be taken for a
+  form. It is reported per file and the agent can remove it; there is no silent
+  path.
+
+### Fixed: a sheet of several panels is read as several panels
+
+The same document again, on deploy #12, with the orientation and colour work
+above in place. The artwork read at 89.6 against 37.9, the alcohol content and
+net contents were found, and three fields were still wrong. One cause, one layer
+downstream: the filed artwork is one flat sheet carrying a left panel, a front
+panel, a right panel and a narrow strip of type set at 90 degrees in each
+gutter, and the reader was assembling its words into lines across the full width
+of it.
+
+| field | read as | should read |
+| --- | --- | --- |
+| brand name | the producer's tax identifier, off the vertical strip | `DEL MAGUEY` |
+| class or type | the producer's street address, off the same strip | something containing `MEZCAL` |
+| government warning | the statute with `ORIGEN PROTEGIDA` and `NOM-041X` spliced through it from the left panel | the statute, exactly |
+
+- **The sheet is cut at its gutters before its words are grouped into lines.**
+  A blank column of pixels that no word box covers is a gutter when it clears
+  two conditions: 2.5 percent of the image width, and 1.25 times the largest
+  type touching it. The three gutters on this artwork measure 63, 86 and 70
+  pixels at the reader's 1600 pixel working width, which is 3.94, 5.38 and 4.38
+  percent; the widest blank on it that is not a gutter is 28 pixels, 1.75
+  percent.
+  - The width share alone is not sufficient, and sample label 05 is the case
+    that shows it: it sets `LANTERN HILL` in 75 pixel display type with a 53
+    pixel word space in it, 4.97 percent of that label's width, wider as a
+    share than two of the three real gutters. The type either side of a blank
+    is what separates the two, measured on the shorter side of each word box so
+    that a strip set sideways is measured by the same rule as the panels beside
+    it. As a multiple of that type the three gutters are 2.17, 1.59 and 3.33
+    and every non-gutter is 0.93 or less.
+  - Words are then grouped inside a column by Tesseract's own block and
+    paragraph, as they always were. Blocks alone were never sufficient here:
+    on this artwork Tesseract returns blocks spanning x 44 to 1526 of a 1600
+    pixel image, so `HECHO EN MEXICO` from the left panel and
+    `long, smooth finish.` from the right one arrive in one block, one
+    paragraph and one line.
+  - Reading order is column by column and each column top to bottom, which is
+    what lets the government warning be collected as a run of consecutive lines
+    without another panel's words falling into the middle of it.
+  - **This adds no Tesseract read.** Both segmentations are arithmetic on the
+    word table the single existing pass already returns; nothing is cropped, no
+    page segmentation mode changes, and nothing is read twice.
+    `test_panel_segmentation.py` asserts the read count rather than arguing it.
+  - A label with no gutter wide enough is one column and reads exactly as it did
+    before this existed. All twelve sample labels are byte-identical, asserted
+    against the previous grouping rule reproduced in the test rather than
+    against a stored expectation.
+- **The brand name and the class or type designation are ranked among upright
+  regions only, and the ranking may now decline.** A word set at 90 degrees
+  reports a box about one cap-height wide and one word long, so its height
+  measures its length: on this artwork that made the producer's tax identifier
+  the tallest text on the sheet at 81.5 pixels against a 43 pixel display line.
+  Type set sideways is excluded from the size ranking and from nothing else.
+  - And where the largest upright text is not clear of the next largest by 0.70,
+    type size has identified nothing and the field reports not found rather than
+    the winner of a photo finish (FR-1). On the twelve sample labels that ratio
+    runs 0.46 to 0.64 and every brand name is still found. On this artwork it is
+    0.83, and not found is the honest answer: the filing declares a brand name
+    of `DEL MAGUEY` and a fanciful name of `VIDA` while the largest text on the
+    artwork is `Vida Clasico`, so a largest-text rule is not merely
+    inconclusive here, it is wrong here. The row says which of the two happened
+    rather than reporting a bare not found.
+- **Letter case joins whitespace as presentational in the FR-5 body
+  comparison.** After the split, the statement on this artwork is 283
+  characters in exactly the order 27 CFR 16.21 sets them, and the exact
+  comparison still failed on 209 differences of which every one was a capital
+  letter. 27 CFR 16.21 fixes the wording; 27 CFR 16.22(a)(2) governs the
+  setting, and FR-6 checks the prefix separately and still case-sensitively. An
+  altered, added or omitted word fails in either case, asserted in both, and the
+  difference an agent is shown is still the label's own text because the fold is
+  length-preserving and the diff segments are sliced from what was printed.
+- **The browser stops posting values it read out of the document back as values
+  the agent typed.** The five application boxes are filled from the uploaded
+  COLA and the whole set was sent with the check. A value arriving in a typed
+  part is a typed value, so `resolve_application` recorded all five as typed,
+  which is the top of ADR 0010's precedence, and FR-14's circularity overlay
+  could not see the two rows that were one reading of one picture compared with
+  itself. Measured on 2026-08-30 with this filing: the alcohol content and the
+  net contents came back as matches and the panel read "2 of 5 fields match.
+  3 does not match." The API returns those rows correctly as `artwork_derived`
+  when the browser sends nothing; the round trip was what broke it, which is
+  why the accessibility fixture, which stubs the endpoint, could not catch it.
+  The browser now sends what the agent typed, including anything they edited,
+  and lets the server re-derive the rest from the document it is being sent
+  anyway.
+
+### Added
+
+- `photos[].segmentation` on every photograph: how many columns the sheet was
+  cut into, how many Tesseract blocks the words fell into, and the cuts
+  themselves as pixel bounds. One column spanning the image is a sheet that was
+  not cut at all.
+- `fields[].label_region` on every field: which column and which block the value
+  was read from, or null where it was not found on the label. An agent who sees
+  a brand name should be able to see it came from the front panel, and an agent
+  looking at a surprising value should be able to see it came from somewhere the
+  value has no business coming from.
+
+### Changed
+
+- NFR-1 on the application-document path is re-measured and the figure moved.
+  Against deploy #12 on 2026-08-30, the author's own mezcal COLA submitted
+  alone: 4999 and 4992 ms wall clock, `elapsed_ms` 4928 and 4918 ms,
+  `ocr_passes` 1, `tesseract_reads` 4. **5.0 s against a target of roughly five
+  is at the line rather than under it, and it is published as 5.0 rather than
+  rounded down.** About 1.4 s of the rise from the 3.5 s measured against deploy
+  #11 is the 180-degree orientation check, which is the fix that made this
+  document's readings correct at all. That is what consumed the margin, it was
+  worth paying, and it is stated rather than smoothed over. A costed but unbuilt
+  optimisation is [OQ-27](docs/OPEN_QUESTIONS.md#oq-27). The README,
+  [09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9, the traceability matrix
+  NFR-1 row and [OQ-26](docs/OPEN_QUESTIONS.md#oq-26) all carry the new figures.
+
+## [1.0.1] - 2026-08-29
 
 Hotfix against the released v1.0.0, branched from `main` per the Git Flow path
 in [docs/08_SDLC_PROCESS.md](docs/08_SDLC_PROCESS.md) section 2. It goes to

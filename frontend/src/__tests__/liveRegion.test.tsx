@@ -15,22 +15,35 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import { announcement } from '../lib/outcomes'
-import { verification } from './fixtures'
+import { classification, verification } from './fixtures'
 
 function pngFile(name = 'label.png') {
   return new File([new Uint8Array([137, 80, 78, 71])], name, { type: 'image/png' })
 }
 
+/**
+ * One stub for both endpoints the view calls (FR-12): `/api/classify` sorts the
+ * uploaded files, `/api/verify` runs the check. Only the second is what these
+ * tests are about, so the first always answers "one label picture".
+ */
 function respondWith(body: unknown, ok = true, status = 200) {
-  return vi.fn().mockResolvedValue({
-    ok,
-    status,
-    json: async () => body,
-  } as Response)
+  return vi.fn(async (url: string) =>
+    url === '/api/classify'
+      ? ({
+          ok: true,
+          status: 200,
+          json: async () =>
+            classification({ application_document: null, files: [], label_images: 1 }),
+        } as Response)
+      : ({ ok, status, json: async () => body } as Response),
+  )
 }
 
 async function submitOneLabel(user: ReturnType<typeof userEvent.setup>) {
-  await user.upload(screen.getByLabelText('Label image'), pngFile())
+  await user.upload(screen.getByLabelText('Files for this label'), pngFile())
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Check this label' })).toBeEnabled(),
+  )
   await user.click(screen.getByRole('button', { name: 'Check this label' }))
 }
 
@@ -120,14 +133,29 @@ describe('an error', () => {
     await submitOneLabel(user)
 
     const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent("We couldn't read this label. Try a clearer photo.")
+    expect(alert).toHaveTextContent("We couldn't read this label. Try a clearer image.")
     // The API's own message is kept as the detail rather than discarded.
     expect(alert).toHaveTextContent('Could not decode.')
     expect(screen.queryByText('Match')).not.toBeInTheDocument()
   })
 
   it('says something an agent can act on when the API cannot be reached at all', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    // Only the check is unreachable. Sorting the upload succeeded, which is
+    // what put the agent in a position to press the button in the first place.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (url === '/api/classify') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () =>
+              classification({ application_document: null, files: [], label_images: 1 }),
+          } as Response
+        }
+        throw new TypeError('Failed to fetch')
+      }),
+    )
     const user = userEvent.setup()
     render(<SingleLabelTab />)
     await submitOneLabel(user)
@@ -140,7 +168,7 @@ describe('the form', () => {
   it('binds a label to every input, and does not require any of them (FR-2, NFR-5)', () => {
     render(<SingleLabelTab />)
     for (const label of [
-      'Label image',
+      'Files for this label',
       'Beverage type',
       'Brand name',
       'Class or type designation',
@@ -155,9 +183,17 @@ describe('the form', () => {
     }
   })
 
-  it('keeps the check off until a label image is chosen, and says why', () => {
+  it('keeps the check off until there is something to check, and says why', () => {
+    // Anything uploaded turns it on (FR-12). What cannot be checked is the
+    // server's judgement, made on files it has read, and comes back as an FR-9
+    // message naming the missing piece; guessing at it here would mean the
+    // interface classifying files it has not read.
     render(<SingleLabelTab />)
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
-    expect(screen.getByText('Choose a label image to turn on the check.')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        /Upload something to turn on the check: the label application, an image of the label, or both/i,
+      ),
+    ).toBeInTheDocument()
   })
 })
