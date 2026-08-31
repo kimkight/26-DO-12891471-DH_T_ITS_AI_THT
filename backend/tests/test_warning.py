@@ -66,6 +66,55 @@ class TestWarningBody:
         result = check_warning(WARNING_STATEMENT.replace("or operate machinery, ", ""))
         assert not result.body_matches
 
+    def test_the_statement_set_in_capitals_matches(self):
+        """FR-5: case is presentational, exactly as whitespace is.
+
+        27 CFR 16.21 fixes the wording; 27 CFR 16.22(a)(2) governs the setting,
+        and FR-6 checks the one part of it this prototype checks. Filed labels
+        routinely print the whole statement in capitals, and the author's mezcal
+        artwork is one of them: it reads as the regulation's own 283 characters
+        in the regulation's own order, differing only in 209 capital letters.
+        """
+        shouted = WARNING_STATEMENT.upper()
+
+        result = check_warning(shouted)
+
+        assert result.body_matches
+        assert result.body_edit_distance == 0
+        assert result.near_miss is False
+        assert result.passes
+
+    def test_an_altered_word_still_fails_when_the_statement_is_in_capitals(self):
+        """The half of the case rule that keeps FR-5 exact.
+
+        Normalizing case would be a loosening if it also let a difference of
+        wording through, so the same defect is asserted in both settings. This
+        one is the capitals setting; ``test_one_altered_word_is_a_mismatch``
+        above is the regulation's own.
+        """
+        result = check_warning(ALTERED_WORD.upper())
+
+        assert not result.body_matches
+        assert not result.passes
+        assert result.body_edit_distance > 0
+
+    def test_an_omitted_word_still_fails_when_the_statement_is_in_capitals(self):
+        shouted = WARNING_STATEMENT.replace("or operate machinery, ", "").upper()
+
+        assert not check_warning(shouted).body_matches
+
+    def test_the_difference_is_shown_in_the_case_the_label_printed(self):
+        """The fold decides the comparison; it does not rewrite the evidence.
+
+        An agent looking at a diff is checking it against the artwork in front
+        of them, so the segments have to be the characters the label set.
+        """
+        result = check_warning(ALTERED_WORD.upper())
+
+        added = "".join(segment.text for segment in result.body_diff if segment.kind == "added")
+        assert added == added.upper()
+        assert added != ""
+
     def test_no_warning_at_all_reports_not_found(self):
         """UAT row 5."""
         result = check_warning("STONE'S THROW\nKentucky Straight Bourbon Whiskey\n750 mL")

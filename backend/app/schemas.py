@@ -57,6 +57,61 @@ ApplicationSource = Literal["typed", "parsed_from_form", "parsed_from_artwork", 
 DocumentValueSource = Literal["form_fields", "embedded_text", "embedded_artwork", "absent"]
 
 
+class SegmentationDetail(BaseModel):
+    """How this photograph was cut up before its words were read (FR-1, FR-10).
+
+    Filed label artwork is often one flat sheet carrying several panels side by
+    side, and until v1.1.0 the reader assembled its words into lines across the
+    whole width of it, so a sentence on one panel could end with two words from
+    another. What stops that is cutting the sheet at its gutters first and
+    grouping words inside a column second, and this reports what that cut found.
+
+    Reported rather than kept internal for the same reason the orientation is.
+    An agent holding a value has no way to tell a field read off the wrong panel
+    from a field read badly, and those two need different things done about
+    them. One column and bounds spanning the whole image is a sheet that was not
+    cut at all, which is every single-panel label.
+    """
+
+    columns: int = Field(
+        description=(
+            "How many columns the sheet was cut into at its gutters, left to "
+            "right. 1 means no blank on the sheet was wide enough to be a "
+            "gutter, and the reading is exactly what it would have been before "
+            "this existed."
+        )
+    )
+    blocks: int = Field(
+        description=(
+            "How many distinct Tesseract layout blocks the words fell into "
+            "across all the columns. A line never spans two of them."
+        )
+    )
+    column_bounds: list[tuple[int, int]] = Field(
+        default_factory=list,
+        description=(
+            "The cuts themselves, as (left, right) pixel pairs in the image as "
+            "it was read, left edge inclusive and right edge exclusive. They "
+            "cover the whole width with no gaps, so every word falls in exactly "
+            "one column."
+        ),
+    )
+
+
+class TextRegionDetail(BaseModel):
+    """Which part of the segmented sheet one field's value was read from.
+
+    ``column`` is the panel, numbered left to right from zero, and ``block`` is
+    Tesseract's own layout block inside it. An agent who sees a brand name
+    should be able to see that it came from the front panel, and an agent
+    looking at a surprising value should be able to see that it came from
+    somewhere the value has no business coming from.
+    """
+
+    column: int = Field(description="The column, numbered left to right from zero.")
+    block: int = Field(description="Tesseract's layout block number within that column.")
+
+
 class FieldResult(BaseModel):
     """One field, its two values, its score, its outcome, and why (FR-3)."""
 
@@ -91,6 +146,14 @@ class FieldResult(BaseModel):
         )
     )
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
+    label_region: TextRegionDetail | None = Field(
+        default=None,
+        description=(
+            "Which panel of the label the value was read from, or null where "
+            "the field was not found on the label. See SegmentationDetail for "
+            "what the numbers mean."
+        ),
+    )
     source_photo: int | None = Field(
         default=None,
         description=(
@@ -605,6 +668,10 @@ class PhotoResult(BaseModel):
     )
     read_path: ReadPathDetail = Field(
         description="Whether preprocessing or the plain grayscale produced the text kept."
+    )
+    segmentation: SegmentationDetail = Field(
+        default_factory=lambda: SegmentationDetail(columns=1, blocks=0, column_bounds=[]),
+        description="How this photograph's sheet was cut into panels before it was read.",
     )
     text_found: bool = Field(description="Whether any text was read from this photograph.")
     error: ErrorDetail | None = Field(

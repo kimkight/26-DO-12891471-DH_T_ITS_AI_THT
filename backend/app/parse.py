@@ -10,11 +10,21 @@ fields).
 contents and the warning are located by pattern, which is deterministic. Brand
 name and class or type designation carry no pattern to match, so they are
 located by type size: Tesseract reports a bounding box per word, and on a label
-the brand name is the largest text. Nothing in the assignment states a layout
-rule, so inventing one is not available; type size is a property of the artwork
-itself rather than an assumption about it. Where the heuristic fails, the field
-reports not found rather than reporting a guess, which is what FR-1 requires.
-The rate at which it fails is measured, not asserted: see scripts/measure.py.
+the brand name is usually the largest text. Nothing in the assignment states a
+layout rule, so inventing one is not available; type size is a property of the
+artwork itself rather than an assumption about it. Where the heuristic fails,
+the field reports not found rather than reporting a guess, which is what FR-1
+requires. The rate at which it fails is measured, not asserted: see
+scripts/measure.py.
+
+**"Usually" is doing real work in that paragraph, and the author's own filing
+is where it stops being true.** Her mezcal COLA declares a brand name of
+``DEL MAGUEY`` and a fanciful name of ``VIDA``, while the largest text on the
+artwork is ``Vida Clasico``. Type size does not identify the brand name on that
+label, and no amount of tuning makes it. So the ranking has to be able to
+decline, and ``_standout`` is where it does: see it for the two conditions a
+candidate has to clear, and see FR-1 for why declining is the required answer
+rather than a shortfall.
 """
 
 from __future__ import annotations
@@ -31,6 +41,26 @@ from app.warning import (
     join_line_break_hyphens,
     normalize_whitespace,
 )
+
+
+@dataclass(frozen=True)
+class TextRegion:
+    """Which part of the segmented sheet one field was read from (FR-1, FR-10).
+
+    ``column`` is the panel ``app.ocr`` cut the sheet into, numbered left to
+    right from zero; ``block`` is Tesseract's own block inside it. Together they
+    name one region, and a field that reports one was read entirely inside it,
+    because no line and no block spans two.
+
+    It exists so that an agent can see *where* a value came from and not only
+    what it was. On a four-panel sheet a value read off the wrong panel looks,
+    to anyone holding only the value, exactly like a value read badly, and those
+    two need different things done about them.
+    """
+
+    column: int
+    block: int
+
 
 _NUMBER = r"\d+(?:\.\d+)?"
 
@@ -107,6 +137,13 @@ class ParsedFields:
     warning_text: str | None
     confidence: dict[str, float] = field(default_factory=dict)
     prominence: dict[str, float] = field(default_factory=dict)
+    region: dict[str, TextRegion] = field(default_factory=dict)
+    # Field names the type-size ranking declined rather than failed to see: the
+    # label carried candidates and none of them stood out (see ``_standout``).
+    # Carried so the response can tell an agent which of the two happened. A
+    # label with nothing on it and a label whose brand name the tool could not
+    # identify are both "not found", and they are not the same finding.
+    declined: frozenset[str] = frozenset()
 
 
 def lines_from_text(text: str) -> list[OcrLine]:
@@ -132,11 +169,33 @@ def parse_fields(lines: list[OcrLine]) -> ParsedFields:
 
     claimed = set(warning_indices)
     claimed.update(index for index in (abv_index, net_index) if index is not None)
+    # Type set at 90 degrees is excluded from the ranking, not from the
+    # reading. Its words are still in the text and still available to every
+    # field located by pattern; what it cannot do is compete on type size,
+    # because the number the ranking would use is not its type size. See
+    # ``OcrLine.sideways``.
+    claimed.update(index for index, line in enumerate(lines) if line.sideways)
 
     blocks = group_blocks(lines, claimed)
-    brand = _largest(blocks)
-    remaining = [block for block in blocks if block is not brand]
-    class_type = _largest(remaining)
+    brand = _standout(blocks)
+    # A class or type designation is the second largest thing on the label, so
+    # there has to be a largest for it to be second to. Where type size did not
+    # find the brand name it has not found this either, and saying so twice is
+    # the same answer given consistently rather than one field guessing on
+    # evidence the other one rejected.
+    remaining = [block for block in blocks if block is not brand] if brand else []
+    class_type = _standout(remaining) if brand else None
+
+    # Declined, not absent. Both report not found; only one of them means the
+    # label had nothing to read. See ``ParsedFields.declined``.
+    declined = frozenset(
+        name
+        for name, candidates, found in (
+            ("brand_name", blocks, brand),
+            ("class_type", remaining if brand else blocks, class_type),
+        )
+        if candidates and found is None
+    )
 
     return ParsedFields(
         brand_name=brand.text if brand else None,
@@ -156,7 +215,34 @@ def parse_fields(lines: list[OcrLine]) -> ParsedFields:
             "brand_name": brand.height if brand else 0.0,
             "class_type": class_type.height if class_type else 0.0,
         },
+        declined=declined,
+        region={
+            name: region
+            for name, region in (
+                ("brand_name", _region(brand)),
+                ("class_type", _region(class_type)),
+                ("alcohol_content", _region_at(lines, abv_index)),
+                ("net_contents", _region_at(lines, net_index)),
+                (
+                    "government_warning",
+                    _region_at(lines, warning_indices[0] if warning_indices else None),
+                ),
+            )
+            if region is not None
+        },
     )
+
+
+def _region(block: TextBlock | None) -> TextRegion | None:
+    """Where on the sheet a ranked block was set, or None if it was not found."""
+    return None if block is None else TextRegion(column=block.column, block=block.block)
+
+
+def _region_at(lines: list[OcrLine], index: int | None) -> TextRegion | None:
+    """Where on the sheet a located line was set, or None if it was not found."""
+    if index is None:
+        return None
+    return TextRegion(column=lines[index].column, block=lines[index].block)
 
 
 def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
@@ -221,22 +307,37 @@ class TextBlock:
     A brand name too long for one line is set across two, in one size, and is
     still one brand name. Grouping before ranking is what stops "STONE'S THROW"
     from being read as a brand of "STONE'S" and a class or type of "THROW".
+
+    ``column`` and ``block`` are where on the sheet it was set, carried through
+    so the response can say which panel a field was read from (FR-1, FR-10).
+    Every line in a block shares both, because a block that spanned two panels
+    would be two pieces of text reported as one.
     """
 
     text: str
     height: float
     top: int
     confidence: float = 0.0
+    column: int = 0
+    block: int = 0
 
 
 def group_blocks(lines: list[OcrLine], claimed: set[int]) -> list[TextBlock]:
     """Group unclaimed adjacent lines of similar type size into blocks.
 
-    Two lines join when they are adjacent on the label, their type sizes are
-    within ``_SIZE_TOLERANCE`` of each other, and the vertical gap between them
-    is no more than ``_GAP_LINES`` line heights. Lines with no size information,
-    which is the plain-text path, never join: there is nothing to compare, and
-    merging on position alone would join a brand name to whatever follows it.
+    Two lines join when they are in the same region of the sheet, are adjacent
+    on the label, their type sizes are within ``_SIZE_TOLERANCE`` of each other,
+    and the vertical gap between them is no more than ``_GAP_LINES`` line
+    heights. Lines with no size information, which is the plain-text path, never
+    join: there is nothing to compare, and merging on position alone would join
+    a brand name to whatever follows it.
+
+    **Same region is the condition this release adds, and it is the same idea
+    one level up.** ``app.ocr`` stops a line spanning two panels; this stops a
+    block doing it. Without it the last line of one panel and the first line of
+    the next are adjacent in reading order, and on the author's mezcal artwork
+    that grouped the left panel's ``NOM-041X`` with a garbled fragment from the
+    front panel into a single candidate for the brand name.
     """
     blocks: list[TextBlock] = []
     current: list[OcrLine] = []
@@ -274,6 +375,8 @@ _GAP_LINES = 2.5
 def _joins(previous: OcrLine, line: OcrLine, index: int, previous_index: int) -> bool:
     if index != previous_index + 1:
         return False
+    if (previous.column, previous.block) != (line.column, line.block):
+        return False
     if previous.height <= 0 or line.height <= 0:
         return False
     tallest = max(previous.height, line.height)
@@ -288,14 +391,68 @@ def _as_block(lines: list[OcrLine]) -> TextBlock:
         height=max(line.height for line in lines),
         top=min(line.top for line in lines),
         confidence=round(sum(line.confidence for line in lines) / len(lines), 1),
+        column=lines[0].column,
+        block=lines[0].block,
     )
 
 
-def _largest(blocks: list[TextBlock]) -> TextBlock | None:
-    """The block with the largest type, ties broken by reading order."""
+# How far clear of the next candidate the largest block has to be before type
+# size is taken to have identified anything.
+#
+# **The ranking has to be able to decline, and this is where it does.** Ranking
+# by type size answers "which is biggest" on any label whatever, including one
+# where the two biggest things are the same size and one where the biggest thing
+# is a misread. Reporting the winner of a photo finish as the brand name is a
+# guess dressed as a reading, and FR-1 asks for not found instead.
+#
+# Measured as the ratio of the second candidate's type size to the first, over
+# the twelve sample labels and the author's mezcal artwork:
+#
+# ==========================================  =============  ============
+# label                                        second/first   third/second
+# ==========================================  =============  ============
+# the twelve sample labels                      0.46 - 0.64   0.40 - 0.51
+# the author's mezcal artwork                          0.83          0.76
+# ==========================================  =============  ============
+#
+# 0.70 is between the two clusters, and the whole of the space between them is
+# 0.64 to 0.76. On every sample label the brand name is set at least half again
+# the size of the class or type designation below it, which is what a label
+# designer does and what this reads. On the mezcal artwork nothing separates:
+# the tallest upright text on the sheet is a misread of a decorative element,
+# the next is a misread of ``Vida Clasico``, and they are within a sixth of each
+# other. The honest answer there is that type size did not find the brand name,
+# which is the truth: the COLA declares ``DEL MAGUEY`` and the artwork's own
+# largest text is ``Vida Clasico``, so the heuristic is not merely inconclusive
+# on that label, it is wrong on it.
+_STANDOUT_RATIO = 0.70
+
+
+def _standout(blocks: list[TextBlock]) -> TextBlock | None:
+    """The block type size actually singles out, or None if it singles out none.
+
+    Two conditions. The block has to be the largest, ties broken by reading
+    order, which is the rule this has always used. And every other candidate has
+    to be smaller than it by more than ``_STANDOUT_RATIO``, which is the rule
+    this release adds and the reason the function can return None on a label
+    that is full of text.
+
+    A sole candidate stands out by default: there is nothing for it to be
+    confused with. That is what keeps a label carrying only a brand name
+    reading as a brand name.
+    """
     if not blocks:
         return None
-    return max(blocks, key=lambda block: (block.height, -block.top))
+    leader = max(blocks, key=lambda block: (block.height, -block.top))
+    others = [block for block in blocks if block is not leader]
+    if not others:
+        return leader
+    if leader.height <= 0:
+        # The plain-text path, which has no geometry at all. Reading order is
+        # the only signal there and it is the one this has always used.
+        return leader
+    runner_up = max(block.height for block in others)
+    return leader if runner_up <= _STANDOUT_RATIO * leader.height else None
 
 
 def _text_at(lines: list[OcrLine], index: int | None) -> str | None:

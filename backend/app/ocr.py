@@ -150,6 +150,69 @@ _COLOUR_PIXEL_SHARE = 0.01
 PREPROCESS_SHORT_CIRCUIT_CONFIDENCE = 85.0
 
 
+# What separates the gutter between two printed panels from the space between
+# two words. Two conditions, and a blank has to clear both to be read as a
+# column boundary.
+#
+# **Why a column split is needed on top of Tesseract's own blocks.** Filed label
+# artwork is one flat sheet carrying several panels side by side, and the
+# author's mezcal COLA is three panels plus a strip of text set at 90 degrees
+# between them. Grouping words by ``block_num`` already keeps that strip out of
+# the panels either side of it, and it is not enough: on the same artwork
+# Tesseract returns blocks spanning x 44 to 1526 of a 1600 pixel image, with the
+# left panel's ``ORIGEN PROTEGIDA`` sitting inside the government warning
+# printed on the right one. Splicing one panel's words into another panel's
+# sentence is what made the statement read as altered when the label prints it
+# correctly.
+#
+# **The first condition is a share of the image width.** A gutter is a fraction
+# of the sheet, and the same artwork arrives at whatever resolution the filing
+# was scanned at, so the figure has to scale with the image rather than be a
+# pixel count. 2.5 percent is 40 pixels at the 1600 pixel working width
+# ``resize_long_edge`` gives a landscape sheet, which is the width the three
+# gutters on the author's artwork were measured at: 63, 86 and 70 pixels, or
+# 3.94, 5.38 and 4.38 percent. The widest blank on that sheet that is not a
+# gutter is 28 pixels, 1.75 percent, inside the vertical strip. So the condition
+# separates the two clusters on this artwork with margin on both sides.
+#
+# **The second condition is the size of the type beside the blank, and a width
+# share alone cannot do without it.** Sample label 05 sets ``LANTERN HILL``
+# across the head of the label in 75 pixel display type, and the word space in
+# it is 53 pixels, 4.97 percent of that label's width: wider, as a share, than
+# two of the three real gutters. Nothing else on that sparse label prints at
+# that x, so the blank survives the projection and a width rule alone cuts the
+# brand name in half. It is not a gutter, and what says so is the type either
+# side of it: 53 pixels is two thirds of one glyph.
+#
+# So a blank also has to be wider than the largest type touching it by
+# ``COLUMN_GAP_TYPE_SIZES``. Measured over every blank of 8 pixels or more on
+# the author's artwork and on the twelve sample labels, as a multiple of that
+# type:
+#
+# ==============================================  ========  ==========
+# blank                                            width     multiple
+# ==============================================  ========  ==========
+# mezcal, gutter left of the front panel                63        2.17
+# mezcal, gutter right of the front panel               86        1.59
+# mezcal, gutter left of the back panel                 70        3.33
+# mezcal, inside the vertical strip                     28        0.93
+# mezcal, four word spaces                               8   0.15-0.38
+# sample 05, the word space in ``LANTERN HILL``         53        0.71
+# ==============================================  ========  ==========
+#
+# 1.25 sits between 0.93 and 1.59, which is the whole of the gap between the two
+# clusters. A blank wider than the type beside it is tall is not a word space in
+# any typeface; a blank narrower than that is not a gutter on any sheet.
+#
+# **Type size here is the shorter side of the word's box, not its height.** A
+# word set at 90 degrees comes back about one cap-height wide and one word long,
+# so height measures its length there and width measures it on upright type. The
+# shorter side is the cap height either way, which is what lets the strip on
+# this artwork be measured by the same rule as the panels beside it.
+COLUMN_GAP_WIDTH_SHARE = 0.025
+COLUMN_GAP_TYPE_SIZES = 1.25
+
+
 class UndecodableImageError(Exception):
     """The bytes submitted could not be decoded as an image (FR-9)."""
 
@@ -162,12 +225,56 @@ class OcrLine:
     of the preprocessed image. It is the only signal available for telling a
     brand name from body text, because Tesseract reports geometry per word and
     reports nothing about typeface.
+
+    ``column`` and ``block`` say which region of the sheet the line was set in:
+    the column ``_columns`` cut the page into, and Tesseract's own block number
+    inside it. A line never spans two of either (see ``_assemble_lines``), so
+    the pair identifies one piece of the layout and is what the response uses to
+    say which panel a field was read from. ``width`` is the mean glyph box width
+    over the line's words, carried because it is the other half of the only
+    signal that tells upright type from type set at 90 degrees; see
+    ``sideways`` and ``app.parse``.
+
+    All four default so that ``lines_from_text``, the plain-text path that has
+    no image behind it, still builds a line record.
     """
 
     text: str
     confidence: float
     height: float
     top: int
+    column: int = 0
+    block: int = 0
+    width: float = 0.0
+
+    @property
+    def sideways(self) -> bool:
+        """Whether this line is type set at 90 degrees rather than upright.
+
+        **The reported height of a rotated word is its length, not its type
+        size.** Tesseract reads a vertical strip in place and reports the
+        bounding box in page coordinates, so a word set sideways comes back
+        about one cap-height wide and one word long. On the author's mezcal
+        artwork that made the producer's tax identifier, printed in the gutter
+        strip, the tallest text on the sheet at 81.5 pixels against a 43 pixel
+        display line, which is how it came to be reported as the brand name. The
+        box is not lying; it is answering a different question, and any ranking
+        by type size has to know that before it uses the number.
+
+        Wider than tall is the whole test, and it carries no threshold because
+        the two cases are nowhere near each other. Measured on that artwork, over
+        the mean word box of each line: the panels' own lines run from 0.05 to
+        0.85 in height over width, and the four lines of the two vertical strips
+        run 3.30, 3.59, 3.90 and 5.43.
+
+        One line on that sheet lands between them, at 1.17, and it is a
+        two-character misreading of a rule printed under the lot number. It is
+        excluded as sideways and nothing is lost by that: the exclusion decides
+        only which lines may compete on type size, and a garbled fragment is not
+        a candidate for the brand name in either case. That is the shape of this
+        rule's error, and it is the cheap direction to be wrong in.
+        """
+        return self.width > 0 and self.height > self.width
 
 
 @dataclass(frozen=True)
@@ -313,6 +420,29 @@ class ReadPath:
 
 
 @dataclass(frozen=True)
+class Segmentation:
+    """How the sheet was cut up before its words were assembled into lines.
+
+    Reported out to the response (FR-1, FR-10) for the same reason the
+    orientation is: a field read off the wrong panel is indistinguishable, to an
+    agent looking only at the value, from a field read badly. An agent who sees
+    ``DEL MAGUEY`` should be able to see which part of the sheet it came from,
+    and an agent who sees something odd should be able to see that the sheet was
+    read as four panels rather than one.
+
+    ``columns`` is how many the x-gap rule cut, ``blocks`` how many distinct
+    Tesseract blocks survived inside them, and ``column_bounds`` the cuts
+    themselves in pixels of the image as read, left edge inclusive and right
+    edge exclusive. One column and bounds spanning the whole width is a sheet
+    that was not cut at all, which is every single-panel label.
+    """
+
+    columns: int = 1
+    blocks: int = 0
+    column_bounds: tuple[tuple[int, int], ...] = ()
+
+
+@dataclass(frozen=True)
 class OcrResult:
     """Everything the extraction step produces, and nothing about compliance."""
 
@@ -322,6 +452,7 @@ class OcrResult:
     lines: list[OcrLine] = field(default_factory=list)
     orientation: Orientation = Orientation()
     read_path: ReadPath = ReadPath()
+    segmentation: Segmentation = Segmentation()
 
     @property
     def has_text(self) -> bool:
@@ -664,7 +795,7 @@ def _second_opinion_on_180(
     opposite = (osd_degrees + 180) % 360
     scored: list[RotationScore] = []
     for degrees in (osd_degrees, opposite):
-        lines, confidence = _read(rotate_cardinal(gray, degrees))
+        lines, confidence, _ = _read(rotate_cardinal(gray, degrees))
         scored.append(
             RotationScore(
                 rotation_degrees=degrees,
@@ -749,16 +880,16 @@ def extract_text(
 
     arms: list[_Arm] = []
     if prepared.colour is not None:
-        lines, confidence = _read(prepared.colour)
-        arms.append(_Arm("colour", lines, confidence))
+        lines, confidence, segmentation = _read(prepared.colour)
+        arms.append(_Arm("colour", lines, confidence, segmentation))
 
     if not arms or arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
-        lines, confidence = _read(prepared.binary)
-        arms.append(_Arm("preprocessed", lines, confidence))
+        lines, confidence, segmentation = _read(prepared.binary)
+        arms.append(_Arm("preprocessed", lines, confidence, segmentation))
 
     if _needs_the_plain_read(arms, colour_read=prepared.colour is not None):
-        lines, confidence = _read(prepared.gray)
-        arms.append(_Arm("plain", lines, confidence))
+        lines, confidence, segmentation = _read(prepared.gray)
+        arms.append(_Arm("plain", lines, confidence, segmentation))
 
     winner, decided_by = _rank(arms)
     scored = {arm.variant: round(arm.confidence, 1) for arm in arms}
@@ -770,6 +901,7 @@ def extract_text(
         elapsed_ms=round(elapsed_ms, 1),
         lines=winner.lines,
         orientation=prepared.orientation,
+        segmentation=winner.segmentation,
         read_path=ReadPath(
             variant=winner.variant,
             preprocessed_confidence=scored.get("preprocessed", 0.0),
@@ -798,11 +930,18 @@ def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
 
 @dataclass(frozen=True)
 class _Arm:
-    """One rendering of the image, read, with what it scored."""
+    """One rendering of the image, read, with what it scored and how it was cut.
+
+    The segmentation travels with the arm rather than being taken from the last
+    read, because each rendering is segmented on its own word boxes and only the
+    winning arm's lines are kept. Reporting another arm's layout beside them
+    would describe a reading that was discarded.
+    """
 
     variant: Literal["preprocessed", "plain", "colour"]
     lines: list[OcrLine]
     confidence: float
+    segmentation: Segmentation = Segmentation()
 
     @property
     def words(self) -> int:
@@ -846,25 +985,146 @@ def _rank(arms: list[_Arm]) -> tuple[_Arm, Literal["short_circuit", "confidence"
     return leader, "coverage"
 
 
-def _read(image: np.ndarray) -> tuple[list[OcrLine], float]:
-    """Read one prepared image and return its lines and mean word confidence."""
+def _read(image: np.ndarray) -> tuple[list[OcrLine], float, Segmentation]:
+    """Read one prepared image and return its lines, confidence and layout.
+
+    One Tesseract pass, which is the same one this function has always made.
+    The segmentation below is arithmetic on the word boxes that pass already
+    returns, so a sheet of four panels costs exactly what a sheet of one costs.
+    """
     timing.tesseract_read()
     data = pytesseract.image_to_data(image, lang="eng", output_type=Output.DICT)
-    lines, confidences = _assemble_lines(data)
+    lines, confidences, segmentation = _assemble_lines(data, width=int(image.shape[1]))
     mean_confidence = float(sum(confidences) / len(confidences)) if confidences else 0.0
-    return lines, mean_confidence
+    return lines, mean_confidence, segmentation
 
 
-def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
-    """Group Tesseract's word rows into lines, keeping confidence and size."""
-    grouped: dict[tuple[int, int, int, int], list[int]] = {}
-    for index, word in enumerate(data.get("text", [])):
-        if not str(word).strip():
+def _columns(data: dict, indices: list[int], width: int) -> list[tuple[int, int]]:
+    """Cut the sheet into columns at every blank wide enough to be a gutter.
+
+    Every word box the read returned is projected onto the x axis, and a run of
+    pixel columns no box covers is a candidate boundary. A candidate becomes a
+    boundary when it clears both of ``COLUMN_GAP_WIDTH_SHARE`` and
+    ``COLUMN_GAP_TYPE_SIZES``; see those constants for what each one is for and
+    what each was measured against. The cut is placed in the middle of the blank
+    rather than at either end, so a word box overhanging its panel by a pixel
+    cannot move the boundary onto its neighbour.
+
+    Returns one ``(left, right)`` pair per column, left to right, covering the
+    whole width with no gaps between them: the first starts at 0 and the last
+    ends at ``width``, so every word falls in exactly one column and none can be
+    lost between two.
+
+    A sheet with no blank clearing both conditions comes back as a single column
+    spanning the image, which is the answer for every single-panel label and is
+    what keeps their reading identical to what it was before this existed.
+    """
+    if not indices:
+        return [(0, width)]
+
+    boxes = [
+        (
+            max(0, int(data["left"][index])),
+            min(width, max(0, int(data["left"][index])) + max(0, int(data["width"][index]))),
+            min(int(data["width"][index]), int(data["height"][index])),
+        )
+        for index in indices
+    ]
+
+    covered = np.zeros(width + 1, dtype=bool)
+    for left, right, _ in boxes:
+        covered[left : right + 1] = True
+
+    minimum_width = max(1, round(width * COLUMN_GAP_WIDTH_SHARE))
+    bounds: list[int] = [0]
+    run = 0
+    for x in range(width + 1):
+        if not covered[x]:
+            run += 1
             continue
-        if float(data["conf"][index]) < 0:
+        blank = (x - run, x)
+        run = 0
+        # A blank running to either edge is a margin, not a gutter, and cutting
+        # at it would put a column number on no words at all.
+        if blank[0] <= 0 or blank[1] >= width:
             continue
+        if blank[1] - blank[0] < minimum_width:
+            continue
+        if not _is_gutter(boxes, blank):
+            continue
+        cut = blank[0] + (blank[1] - blank[0]) // 2
+        if cut > bounds[-1]:
+            bounds.append(cut)
+
+    bounds.append(width)
+    return [(bounds[index], bounds[index + 1]) for index in range(len(bounds) - 1)]
+
+
+def _is_gutter(boxes: list[tuple[int, int, int]], blank: tuple[int, int]) -> bool:
+    """Whether a blank is wider than the type beside it, so not a word space.
+
+    The type beside it is the largest of the word boxes ending just before the
+    blank and those starting just after it, measured on the shorter side of each
+    box. "Just" is the blank's own width: a word further from it than the blank
+    is wide is not what the blank is separating.
+
+    A blank with no word within that reach is left to the width condition alone.
+    That is the sparse case where there is nothing to measure against, and
+    refusing every such cut would put the whole sheet back in one column.
+    """
+    left, right = blank
+    reach = right - left
+    adjacent = [
+        size
+        for box_left, box_right, size in boxes
+        if (left - reach <= box_right <= left) or (right <= box_left <= right + reach)
+    ]
+    if not adjacent:
+        return True
+    return reach >= COLUMN_GAP_TYPE_SIZES * max(adjacent)
+
+
+def _assemble_lines(data: dict, *, width: int) -> tuple[list[OcrLine], list[float], Segmentation]:
+    """Group Tesseract's word rows into lines within one region of the sheet.
+
+    **A line never spans two panels, and it takes both rules to hold that.**
+
+    The first is Tesseract's own: words are grouped by ``block_num`` and
+    ``par_num`` as well as ``line_num``, so a block the layout analysis
+    separated stays separate. That is what keeps the vertical strip on the
+    author's mezcal artwork, which Tesseract does put in blocks of its own, from
+    being read into the panels either side of it.
+
+    The second is ``_columns``, and it is needed because the first is not
+    sufficient. On the same artwork Tesseract returns blocks spanning almost the
+    full width of the sheet, so ``HECHO EN MEXICO`` from the left panel and
+    ``long, smooth finish.`` from the right one arrive in one block, one
+    paragraph and one line. Cutting at the gutters first and grouping inside a
+    column second separates them, and it is what makes the government warning
+    come out as the statement 27 CFR 16.21 sets rather than as that statement
+    with two lines of a neighbouring panel spliced through it.
+
+    Reading order is column by column, and each column top to bottom. A sheet
+    printed as columns is read as columns; a page whose text runs across it is
+    one column and is read exactly as it was before this existed.
+    """
+    usable = [
+        index
+        for index, word in enumerate(data.get("text", []))
+        if str(word).strip() and float(data["conf"][index]) >= 0
+    ]
+
+    columns = _columns(data, usable, width)
+    grouped: dict[tuple[int, int, int, int, int], list[int]] = {}
+    for index in usable:
+        centre = int(data["left"][index]) + int(data["width"][index]) / 2
+        column = next(
+            (number for number, (left, right) in enumerate(columns) if left <= centre < right),
+            len(columns) - 1,
+        )
         key = (
             data["page_num"][index],
+            column,
             data["block_num"][index],
             data["par_num"][index],
             data["line_num"][index],
@@ -873,11 +1133,16 @@ def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
 
     lines: list[OcrLine] = []
     confidences: list[float] = []
-    for key in sorted(grouped, key=lambda k: (k[0], min(data["top"][i] for i in grouped[k]))):
+    ordered = sorted(
+        grouped,
+        key=lambda k: (k[0], k[1], min(data["top"][i] for i in grouped[k])),
+    )
+    for key in ordered:
         indices = grouped[key]
         words = [str(data["text"][i]).strip() for i in indices]
         word_confidences = [float(data["conf"][i]) for i in indices]
         heights = [float(data["height"][i]) for i in indices]
+        widths = [float(data["width"][i]) for i in indices]
         confidences.extend(word_confidences)
         lines.append(
             OcrLine(
@@ -885,6 +1150,14 @@ def _assemble_lines(data: dict) -> tuple[list[OcrLine], list[float]]:
                 confidence=round(sum(word_confidences) / len(word_confidences), 1),
                 height=round(sum(heights) / len(heights), 1),
                 top=min(int(data["top"][i]) for i in indices),
+                column=key[1],
+                block=key[2],
+                width=round(sum(widths) / len(widths), 1),
             )
         )
-    return lines, confidences
+    segmentation = Segmentation(
+        columns=len(columns),
+        blocks=len({(key[1], key[2]) for key in grouped}),
+        column_bounds=tuple(columns),
+    )
+    return lines, confidences, segmentation

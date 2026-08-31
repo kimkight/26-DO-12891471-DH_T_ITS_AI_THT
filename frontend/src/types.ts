@@ -44,6 +44,12 @@ export interface FieldResult {
   outcome: Outcome
   reason: string
   /**
+   * Which panel of the label the value was read from, or null where the field
+   * was not found on the label. Filed artwork is often one flat sheet of
+   * several panels; see `SegmentationDetail`.
+   */
+  label_region?: TextRegionDetail | null
+  /**
    * Which submitted photograph this value was read from, numbered from 1
    * (ADR 0007). Null where the field was not found on any of them.
    */
@@ -196,8 +202,30 @@ export interface PhotoResult {
   orientation: OrientationDetail
   ocr_confidence: number
   read_path: ReadPathDetail
+  /** How the sheet was cut into panels before its words were read. */
+  segmentation?: SegmentationDetail
   text_found: boolean
   error: ErrorDetail | null
+}
+
+/**
+ * How one photograph's sheet was cut into panels before it was read (FR-10).
+ *
+ * Filed label artwork is often one flat sheet carrying several panels side by
+ * side, and a reader that assembles lines across the whole width of it splices
+ * one panel's words into another panel's sentence. `columns` of 1 is a sheet
+ * with no gutter wide enough to cut at, which is every single-panel label.
+ */
+export interface SegmentationDetail {
+  columns: number
+  blocks: number
+  column_bounds: [number, number][]
+}
+
+/** Which panel of a segmented sheet one value came from, numbered from zero. */
+export interface TextRegionDetail {
+  column: number
+  block: number
 }
 
 /**

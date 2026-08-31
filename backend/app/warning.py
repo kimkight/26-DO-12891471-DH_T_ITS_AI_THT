@@ -1,7 +1,7 @@
 """The government warning statement: exact body text plus a capitalization check.
 
 Governing requirements: FR-5 (the body is compared for exact text after
-whitespace normalization, with no fuzzy tolerance), FR-6 (the
+whitespace and case normalization, with no fuzzy tolerance), FR-6 (the
 ``GOVERNMENT WARNING:`` prefix carries a separate upper-case check, reported
 independently, and the result must not imply that bold type was verified),
 OOS-4 (bold type is out of scope). Decision reference: D-5, ADR 0004.
@@ -76,10 +76,41 @@ _LINE_BREAK_HYPHEN = re.compile(r"(?<=\w)[-\u2010\u2011]\s+(?=\w)")
 def normalize_whitespace(text: str) -> str:
     """Collapse runs of whitespace, including line breaks, and strip the ends.
 
-    This is the only normalization FR-5 permits on the warning body: line breaks
-    and runs of spaces are presentational, and everything else is substantive.
+    Whitespace and letter case are the two normalizations FR-5 permits on the
+    warning body; see ``fold_case`` for the second. Everything else is
+    substantive.
     """
     return _WHITESPACE.sub(" ", text).strip()
+
+
+def fold_case(text: str) -> str:
+    """Flatten letter case, without moving a single character index.
+
+    **Why case is normalized on the body (v1.1.0).** 27 CFR 16.21 fixes the
+    *wording* of the statement; 27 CFR 16.22(a)(2) governs how it is set, and
+    the only part of that this prototype checks is the prefix, which FR-6 checks
+    separately and case-sensitively. Filed labels routinely set the whole
+    statement in capitals, and the author's mezcal artwork is one of them: after
+    the panel segmentation this release adds, its statement reads as 283
+    characters in exactly the order the regulation sets them, and the exact
+    comparison still failed on 209 differences of which every one was a capital
+    letter. Reporting that as altered wording tells an agent their label is
+    defective about the one thing it is demonstrably correct about.
+
+    So case joins whitespace as presentational, and nothing else moves: an
+    altered, added or omitted word still fails in either case, which
+    tests/test_warning.py asserts in both.
+
+    **Length-preserving, deliberately.** ``str.casefold`` is the right function
+    for comparing two strings and the wrong one here, because it can return more
+    characters than it was given, and ``body_diff`` slices the text as printed
+    using indices taken from the folded text. Every character is lowered only
+    where lowering it yields exactly one character, so the two stay index for
+    index aligned and the diff an agent reads is still the label's own text.
+    """
+    return "".join(
+        lowered if len(lowered := character.lower()) == 1 else character for character in text
+    )
 
 
 def join_line_break_hyphens(text: str) -> str:
@@ -128,8 +159,8 @@ class DiffSegment:
 class WarningCheck:
     """The outcome of both warning checks, reported separately (FR-6).
 
-    ``body_matches`` is the FR-5 comparison and is unchanged: identical after
-    whitespace normalization, or not. ``body_edit_distance`` and ``near_miss``
+    ``body_matches`` is the FR-5 comparison: identical after whitespace and
+    case normalization, or not. ``body_edit_distance`` and ``near_miss``
     are about what a difference is *reported* as, and neither can turn a
     mismatch into a match.
     """
@@ -176,8 +207,14 @@ def body_diff(found: str, expected: str) -> list[DiffSegment]:
     appearing in more than 1 percent of a long sequence as junk, which over a
     232-character sentence means the spaces and most vowels, and the resulting
     diff is unreadable.
+
+    Matched on the case-folded pair and sliced from the originals, so a label
+    setting the statement in capitals produces no difference to read while the
+    text an agent is shown is still the text the label prints. ``fold_case``
+    preserves length precisely so that those indices mean the same thing in
+    both.
     """
-    matcher = difflib.SequenceMatcher(None, found, expected, autojunk=False)
+    matcher = difflib.SequenceMatcher(None, fold_case(found), fold_case(expected), autojunk=False)
     segments: list[DiffSegment] = []
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -239,11 +276,16 @@ def check_warning(text: str) -> WarningCheck:
 
     body_found = normalize_whitespace(remainder)
     expected_body = normalize_whitespace(WARNING_BODY)
-    body_matches = body_found == expected_body
+    # Compared on the folded pair and reported as printed. FR-5's exactness is
+    # untouched: the two normalizations are whitespace and case, and every
+    # difference of wording still fails.
+    body_matches = fold_case(body_found) == fold_case(expected_body)
 
     # Measured only when the exact comparison has already failed, so nothing
     # about a matching statement depends on it.
-    distance = 0 if body_matches else Levenshtein.distance(body_found, expected_body)
+    distance = (
+        0 if body_matches else Levenshtein.distance(fold_case(body_found), fold_case(expected_body))
+    )
     near_miss = not body_matches and distance <= settings.warning_near_miss_edits
     diff = [] if body_matches else body_diff(body_found, expected_body)
 
@@ -308,6 +350,6 @@ def _reason_for(
     if not body_matches:
         return f"{body_detail} The prefix capitalization is correct."
     return (
-        "The statement matches 27 CFR 16.21 word for word after whitespace "
-        "normalization, and the prefix is in capital letters."
+        "The statement matches 27 CFR 16.21 word for word after whitespace and "
+        "case normalization, and the prefix is in capital letters."
     )

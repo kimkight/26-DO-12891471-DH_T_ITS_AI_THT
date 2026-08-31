@@ -95,6 +95,7 @@ import { Kicker } from './Ui'
 import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
+import { typedValues } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { announcement, summary } from '../lib/outcomes'
@@ -285,7 +286,10 @@ export function SingleLabelTab() {
     if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
-    setOutcome(await verifyLabel(files, application))
+    // What the agent typed, and nothing the interface filled in from the
+    // document (FR-14). See `typedValues` for what posting the rest back does
+    // to a document-only submission.
+    setOutcome(await verifyLabel(files, typedValues(application, sources)))
     setChecking(false)
   }
 

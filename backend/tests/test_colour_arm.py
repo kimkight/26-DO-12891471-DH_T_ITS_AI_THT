@@ -320,5 +320,5 @@ def _decoded(image_bytes: bytes):
 def _read_text(image) -> str:
     from app.ocr import _read
 
-    lines, _ = _read(image)
+    lines, _, _ = _read(image)
     return "\n".join(line.text for line in lines)
