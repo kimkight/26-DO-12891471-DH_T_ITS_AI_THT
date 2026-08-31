@@ -74,7 +74,7 @@ import re
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Literal
 
 import pypdfium2 as pdfium
@@ -84,6 +84,14 @@ from app import timing
 from app.config import settings
 from app.ocr import OcrLine, OcrResult, UndecodableImageError, extract_text
 from app.parse import parse_fields
+from app.product_type import (
+    CAPTION_TEXT,
+    CaptionBox,
+    ProductTypeReading,
+    caption_boxes_from_words,
+    read_product_type,
+    word_boxes_from_ocr,
+)
 
 # The values a COLA document can supply. Four of them are compared against the
 # label (FR-2); the beverage type is carried for the interface, which asks for
@@ -103,12 +111,14 @@ ExtractionPath = Literal["form_fields", "embedded_text", "ocr"]
 # reading taken off a picture is a different kind of evidence from a reading
 # taken out of a text layer: the first went through OCR and can be misread, the
 # second cannot.
-ValueSource = Literal["form_fields", "embedded_text", "embedded_artwork"]
+ValueSource = Literal["form_fields", "embedded_text", "embedded_artwork", "product_type_box"]
 
 # The four values the embedded artwork can supply. The beverage type is not one
 # of them: item 5 is three check boxes, a label does not print "distilled
 # spirits" as a form answer, and inferring one from the artwork would be exactly
-# the guess FR-1 forbids (ADR 0008).
+# the guess FR-1 forbids (ADR 0008). It is read from the form's own rendered
+# page instead, where the tick actually is; see ``app.product_type`` and
+# [ADR 0016](../../docs/adr/0016-product-type-from-the-page.md).
 ARTWORK_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
 
 PDF_MAGIC = b"%PDF"
@@ -291,6 +301,11 @@ class _PdfContents:
     artwork_found: int
     artwork_rejected: list[RejectedImage]
     pages: int
+    # One rendered page and, where the file carried a text layer, the three
+    # item 5 caption boxes located in it exactly (ADR 0016). None for the boxes
+    # means the page has no text layer and the captions have to be recognized,
+    # which happens outside the lock like every other Tesseract read.
+    item_five: tuple[bytes, list[CaptionBox] | None] | None = None
 
 
 def _parse_pdf(content: bytes) -> ParsedApplication:
@@ -302,10 +317,15 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     # OCR below does: Tesseract is the expensive part and there is no reason for
     # one document's reading to block another's.
     artwork = _read_artwork(contents.artwork, contents.artwork_rejected)
+    # Item 5, sampled off the rendered page (ADR 0016). Outside the lock like
+    # every other expensive step, and only where nothing has answered it already.
+    # None here means no page's text layer named the item; the scan branch below
+    # gets a second chance at it from the pages it renders anyway.
+    item_five = read_item_five(contents.item_five)
 
     if contents.text_side is not None:
         return _with_notes(
-            _merge_artwork(contents.text_side, artwork),
+            _with_product_type(_merge_artwork(contents.text_side, artwork), item_five),
             path=contents.text_side.path,
             pages_read=contents.pages,
         )
@@ -319,6 +339,17 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     for rendered in contents.rendered_pages:
         with timing.phase("page_ocr"):
             ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
+    # Item 5 on a page with no text layer to search (ADR 0016). The captions have
+    # to be recognized, so this is gated on the page OCR above having read the
+    # item's own caption: a document that is not this form never pays for it, and
+    # one that is pays for exactly one page.
+    if (
+        item_five is None
+        and contents.rendered_pages
+        and _ITEM_FIVE_CAPTION.search("\n".join(line.text for line in ocr_lines))
+    ):
+        item_five = read_item_five((contents.rendered_pages[0], None))
+
     if not ocr_lines and not artwork.values:
         raise UnreadableDocumentError(
             "No text could be read from the uploaded PDF, either from the file "
@@ -332,7 +363,9 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
         else ParsedApplication(values=dict.fromkeys(APPLICATION_FIELDS))
     )
     return _with_notes(
-        _merge_artwork(_sourced(from_pages, "embedded_text"), artwork),
+        _with_product_type(
+            _merge_artwork(_sourced(from_pages, "embedded_text"), artwork), item_five
+        ),
         path="ocr",
         pages_read=contents.pages,
     )
@@ -414,6 +447,13 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
         from_text = _from_lines(lines)
 
         merged = _combine(from_fields, from_text)
+
+        # Item 5 is read off the page only where nothing has answered it
+        # already. An AcroForm radio group states it exactly, and a page render
+        # costs real milliseconds (NFR-1), so this is skipped on an unflattened
+        # form and paid for on every other kind of filing.
+        item_five = None if merged.values.get("beverage_type") else _item_five_page(document, pages)
+
         if merged.found_any:
             path: ExtractionPath = "form_fields" if from_fields.found_any else "embedded_text"
             return _PdfContents(
@@ -429,6 +469,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
                 artwork_found=artwork_found,
                 artwork_rejected=artwork_rejected,
                 pages=pages,
+                item_five=item_five,
             )
 
         rendered_pages: list[bytes] = []
@@ -450,6 +491,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
             artwork_found=artwork_found,
             artwork_rejected=artwork_rejected,
             pages=pages,
+            item_five=item_five,
         )
     finally:
         document.close()
@@ -481,9 +523,22 @@ def _parse_image(content: bytes, *, pre_read: OcrResult | None = None) -> Parsed
             "extracted from it. Nothing was taken from it. Type the application "
             "values instead."
         )
-    return _with_notes(
-        _sourced(_from_lines(result.lines), "embedded_text"), path="ocr", pages_read=1
-    )
+    parsed = _sourced(_from_lines(result.lines), "embedded_text")
+
+    # Item 5 (ADR 0016). A photograph or scan of the form **is** the rendered
+    # page, so the sample is taken on the bytes as submitted rather than on a
+    # render of them. The word boxes have to come from a second pass for the same
+    # reason: ``extract_text`` reads a thresholded, resized and deskewed copy, and
+    # every one of those transforms moves the words relative to the pixels a
+    # sample would be taken from.
+    #
+    # Gated on the read above having found item 5's own caption, so a document
+    # that is not this form never pays the pass, and gated on nothing else having
+    # answered, so a form that stated its type in text does not either.
+    if parsed.values.get("beverage_type") is None and _ITEM_FIVE_CAPTION.search(result.text):
+        parsed = _with_product_type(parsed, read_item_five((content, None)))
+
+    return _with_notes(parsed, path="ocr", pages_read=1)
 
 
 # --------------------------------------------------------------------------
@@ -736,6 +791,86 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
     )
 
 
+def _with_product_type(
+    parsed: ParsedApplication, reading: ProductTypeReading | None
+) -> ParsedApplication:
+    """Fill the beverage type from item 5's boxes, where they answered (ADR 0016).
+
+    **It never overrides a value the document already stated**, which is the same
+    precedence every other value follows: an AcroForm radio group and a text layer
+    that names exactly one type are both statements the file makes, and a tick
+    read off pixels is a recognition of one. A reading that did not clear the
+    margin leaves the field exactly as it was, so ``_with_notes`` attaches A-17's
+    absence note and the agent chooses.
+
+    The reason is carried into the notes either way, because "the boxes were
+    sampled and two were too close to separate" is a different thing for an agent
+    to know than "this document did not name one type".
+    """
+    if reading is None or not _may_overwrite_product_type(parsed):
+        return parsed if reading is None else _with_extra_note(parsed, reading.reason)
+    if reading.value is None and not reading.sampled:
+        return _with_extra_note(parsed, reading.reason)
+
+    values = {**parsed.values, "beverage_type": reading.value}
+    sources = dict(parsed.value_sources)
+    if reading.value is None:
+        sources.pop("beverage_type", None)
+    else:
+        sources["beverage_type"] = "product_type_box"
+    return _with_extra_note(
+        _replacing(parsed, values=values, value_sources=sources), reading.reason
+    )
+
+
+def _may_overwrite_product_type(parsed: ParsedApplication) -> bool:
+    """Whether a ticked box outranks what is already in the beverage type.
+
+    **A form field outranks it and a text inference does not**, and the
+    difference is what each of the two actually is.
+
+    An AcroForm radio group is a statement the file makes: item 5's widget
+    records which option is on, and nothing was recognized to get it. A ticked
+    box read off the page is a recognition, so it does not overrule that, exactly
+    as the embedded artwork does not overrule the text layer (ADR 0010).
+
+    ``_sole_product_type`` is neither. It is an inference from absence: the text
+    names one of the three types and not the other two, so it is taken to be
+    stating one rather than offering a choice. That holds on a Registry printout
+    and it fails on a scan, where OCR dropping two captions produces the same
+    evidence and the wrong answer. A ticked box is direct evidence of the thing
+    being inferred, so it wins over the inference and only over the inference.
+
+    **In both directions**, which is the part worth stating. Where the boxes were
+    located and sampled and no single one stood out, the sampling has established
+    that the page offers three options and shows no clear choice among them, and
+    that supersedes an inference which only ever meant "the text mentioned one of
+    them". A scanned form with nothing ticked used to come back as whichever
+    caption OCR happened to read cleanly; it now comes back as not determined,
+    which is what the page says.
+    """
+    current = parsed.values.get("beverage_type")
+    if not current:
+        return True
+    return parsed.value_sources.get("beverage_type") == "embedded_text"
+
+
+def _with_extra_note(parsed: ParsedApplication, note: str) -> ParsedApplication:
+    """Append one note, skipping an empty one."""
+    if not note:
+        return parsed
+    return _replacing(parsed, notes=[*parsed.notes, note])
+
+
+def _replacing(parsed: ParsedApplication, **changes) -> ParsedApplication:
+    """A copy of one reading with some fields changed.
+
+    ``dataclasses.replace`` in a named wrapper, so the several places that need
+    it read as what they are doing rather than as a dataclass idiom.
+    """
+    return replace(parsed, **changes)
+
+
 def _sourced(parsed: ParsedApplication, source: ValueSource) -> ParsedApplication:
     """Attribute every value a reading found to one source."""
     return ParsedApplication(
@@ -756,15 +891,149 @@ def _render_page(document: pdfium.PdfDocument, index: int) -> bytes:
     """
     document.init_forms()
     with _open_page(document, index) as page:
-        scale = max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
-        bitmap = page.render(scale=scale)
-        buffer = io.BytesIO()
-        bitmap.to_pil().save(buffer, format="PNG")
-        # Materialized before the page is closed. ``to_pil`` can hand back an
-        # image sharing the bitmap's buffer, and the bitmap is the page's child,
-        # so closing the page frees it. The encode happens above, inside the
-        # block, and only the bytes leave it.
-        return buffer.getvalue()
+        return _render_at(page, _render_scale(page))
+
+
+def _render_scale(page) -> float:
+    """The scale one page is rasterized at, from the page size and NFR-11.
+
+    Split out so that the item 5 read can render a page **and** convert the text
+    layer's page-point coordinates into that render's pixels using the same
+    number. Two places computing it separately is exactly how a sample window
+    ends up a few pixels off the box it was meant to cover.
+    """
+    return max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
+
+
+def _render_at(page, scale: float) -> bytes:
+    """One already-open page, rasterized to PNG bytes at a given scale."""
+    bitmap = page.render(scale=scale)
+    buffer = io.BytesIO()
+    bitmap.to_pil().save(buffer, format="PNG")
+    # Materialized before the page is closed. ``to_pil`` can hand back an image
+    # sharing the bitmap's buffer, and the bitmap is the page's child, so closing
+    # the page frees it. The encode happens above, inside the caller's block, and
+    # only the bytes leave it.
+    return buffer.getvalue()
+
+
+# What identifies item 5's page, in the caption the form prints above the three
+# boxes. Matched loosely and case-insensitively, because a scan reads it in
+# whatever case the form sets it and a different edition may punctuate it
+# differently.
+_ITEM_FIVE_CAPTION = re.compile(r"type\s+of\s+product", re.IGNORECASE)
+
+
+def _item_five_page(
+    document: pdfium.PdfDocument, pages: int
+) -> tuple[bytes, list[CaptionBox] | None] | None:
+    """Render the page carrying item 5, with its caption boxes where they exist.
+
+    **Every PDFium call for item 5 is here, under the lock**, and nothing
+    expensive is: the page comes back as PNG bytes and the sampling, and the OCR
+    fallback where a page has no text layer, both happen after the lock is
+    released.
+
+    The page is found by its own caption rather than by number. Item 5 is on page
+    1 of TTB F 5100.31 (04/2023), and hard-coding that would be the same mistake
+    as hard-coding a pixel: the form has editions, a filing can carry a cover
+    sheet, and a Registry printout is not this form at all. A document with no
+    "TYPE OF PRODUCT" caption anywhere simply has no item 5 to read.
+
+    **The caption boxes come out of the text layer where there is one.** They are
+    exact, they cost nothing, and they went through no recognition step, which is
+    the same argument that puts the text layer ahead of OCR everywhere else in
+    this module. A page with no text layer returns None for them and pays for a
+    Tesseract read instead.
+    """
+    for index in range(pages):
+        try:
+            with _open_page(document, index) as page:
+                textpage = page.get_textpage()
+                text = textpage.get_text_bounded()
+                if not _ITEM_FIVE_CAPTION.search(text):
+                    continue
+                scale = _render_scale(page)
+                captions = _item_five_captions(textpage, page.get_height(), scale)
+                rendered = _render_at(page, scale)
+        except Exception as exc:
+            # One page that will not render or read is not the document failing.
+            # As everywhere else here, the log gets the class name and the page
+            # number and nothing the page said (NFR-6).
+            logger.warning(
+                "item 5 could not be read from this page",
+                extra={"page": index + 1, "cause": type(exc).__name__},
+            )
+            continue
+        return rendered, captions
+    return None
+
+
+def _item_five_captions(textpage, page_height: float, scale: float) -> list[CaptionBox] | None:
+    """Item 5's three caption boxes from the text layer, in render pixels.
+
+    PDFium reports character boxes in page points with the origin at the bottom
+    left; a render puts the origin at the top left and multiplies by the scale.
+    Both conversions happen here, so nothing downstream has to know that the two
+    coordinate systems differ.
+
+    Returns None where the page carries no usable text layer, which is the signal
+    to recognize the captions instead.
+    """
+    found: list[CaptionBox] = []
+    for option, caption in CAPTION_TEXT.items():
+        boxes = _search_boxes(textpage, caption)
+        if boxes is None:
+            continue
+        left, bottom, right, top = boxes
+        found.append(
+            CaptionBox(
+                option=option,
+                left=left * scale,
+                top=(page_height - top) * scale,
+                right=right * scale,
+                bottom=(page_height - bottom) * scale,
+            )
+        )
+    return found or None
+
+
+def _search_boxes(textpage, text: str) -> tuple[float, float, float, float] | None:
+    """The bounding box of the first occurrence of one caption, in page points."""
+    searcher = textpage.search(text, match_case=False)
+    try:
+        found = searcher.get_next()
+        if found is None:
+            return None
+        start, count = found
+        boxes = [textpage.get_charbox(index) for index in range(start, start + count)]
+    finally:
+        searcher.close()
+    usable = [box for box in boxes if box is not None]
+    if not usable:
+        return None
+    return (
+        min(box[0] for box in usable),
+        min(box[1] for box in usable),
+        max(box[2] for box in usable),
+        max(box[3] for box in usable),
+    )
+
+
+def read_item_five(page: tuple[bytes, list[CaptionBox] | None] | None) -> ProductTypeReading | None:
+    """Decide item 5 from the rendered page, outside the PDFium lock (ADR 0016).
+
+    ``None`` in means the document carried no item 5 page, and ``None`` out means
+    exactly what it always meant: the type of product was not determined and the
+    agent chooses.
+    """
+    if page is None:
+        return None
+    rendered, captions = page
+    if captions is None:
+        with timing.phase("item_five_ocr"):
+            captions = caption_boxes_from_words(word_boxes_from_ocr(rendered))
+    return read_product_type(rendered, captions)
 
 
 def _pdf_text_lines(document: pdfium.PdfDocument, pages: int) -> list[OcrLine]:
@@ -1149,9 +1418,10 @@ _ABSENCE_NOTES = {
         "Public COLA Registry printout. Enter it yourself."
     ),
     "beverage_type": (
-        "The type of product is item 5 on TTB F 5100.31 (04/2023), three "
-        "checkboxes. A ticked box cannot be read from a document's text, and "
-        "this document did not name one type on its own. Choose it yourself."
+        "The type of product is item 5 on TTB F 5100.31 (04/2023), three check "
+        "boxes. A ticked box is not in a document's text, so the boxes are read "
+        "off the rendered page instead (ADR 0016); on this document that did not "
+        "settle it. Choose it yourself."
     ),
 }
 
@@ -1182,6 +1452,11 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
         for name in APPLICATION_FIELDS
         if parsed.values.get(name) is None and name in _ABSENCE_NOTES
     ]
+    # Notes a step upstream already attached, kept rather than rebuilt over.
+    # The item 5 sampling reason is one of these, and it is the sentence that
+    # says *why* the boxes did not settle it, which is a different thing for an
+    # agent to know from the absence note above (ADR 0016).
+    notes.extend(parsed.notes)
     from_artwork = "embedded_artwork" in parsed.value_sources.values()
     if from_artwork or parsed.label_artwork is not None:
         notes.append(SELF_CONSISTENCY_NOTE)

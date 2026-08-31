@@ -50,11 +50,21 @@ FIELD_LABELS = {
 # `parsed_from_artwork` is a picture inside the document, read by OCR, which is
 # weaker evidence than text and is therefore only used where the text was
 # silent.
-ApplicationSource = Literal["typed", "parsed_from_form", "parsed_from_artwork", "absent"]
+# `read_from_tick` is the fifth, added with ADR 0016: item 5's product type is
+# three check boxes, and a ticked box is in the pixels of the page rather than in
+# its text. It sits beside `parsed_from_artwork` rather than with
+# `parsed_from_form` because both went through a recognition step and a text
+# layer did not, and it is separate from it because a form's own box is not the
+# label artwork.
+ApplicationSource = Literal[
+    "typed", "parsed_from_form", "parsed_from_artwork", "read_from_tick", "absent"
+]
 
-# Where inside the document one value was read (ADR 0010). Finer than
+# Where inside the document one value was read (ADR 0010, ADR 0016). Finer than
 # ApplicationSource, which is about the agent as well as the document.
-DocumentValueSource = Literal["form_fields", "embedded_text", "embedded_artwork", "absent"]
+DocumentValueSource = Literal[
+    "form_fields", "embedded_text", "embedded_artwork", "product_type_box", "absent"
+]
 
 
 class SegmentationDetail(BaseModel):
@@ -740,6 +750,15 @@ class PhaseTimings(BaseModel):
             "those values come from."
         ),
     )
+    item_five_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Recognizing item 5's three check box captions on a rendered page "
+            "(ADR 0016). Zero on every document that carried a text layer, which "
+            "states those captions exactly and for nothing; a scanned or "
+            "photographed form is the only input that pays for this."
+        ),
+    )
     label_ocr_ms: float = Field(
         default=0.0,
         description=(
@@ -755,8 +774,8 @@ class PhaseTimings(BaseModel):
         default=0.0,
         description=(
             "Every Tesseract pass in this request, wherever it ran: the sum of "
-            "classify_ocr_ms, document_ocr_ms, page_ocr_ms, artwork_ocr_ms and "
-            "label_ocr_ms."
+            "classify_ocr_ms, document_ocr_ms, page_ocr_ms, artwork_ocr_ms, "
+            "item_five_ocr_ms and label_ocr_ms."
         ),
     )
     ocr_passes: int = Field(

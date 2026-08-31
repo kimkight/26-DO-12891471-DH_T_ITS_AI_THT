@@ -116,7 +116,8 @@ class TestAnUploadedDocumentSuppliesTheApplicationValues:
         body = post(sample_label_png, registry_pdf()).json()
         assert parsed_field(body, "beverage_type")["found_on_document"] is False
         assert any(
-            "ticked box cannot be read" in note for note in body["application_document"]["notes"]
+            "ticked box is not in a document's text" in note
+            for note in body["application_document"]["notes"]
         )
 
     def test_a_value_the_document_did_not_carry_is_reported_as_not_found(self, sample_label_png):

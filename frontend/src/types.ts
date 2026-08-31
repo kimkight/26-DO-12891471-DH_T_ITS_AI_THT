@@ -22,16 +22,19 @@ export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared' | '
 /**
  * Where an application value came from (FR-11, ADR 0008, ADR 0010).
  *
- * These four are the precedence order, highest first. `parsed_from_form` is the
+ * These are the precedence order, highest first. `parsed_from_form` is the
  * document's own text, whether an AcroForm field or a text layer;
  * `parsed_from_artwork` is a picture of the label embedded in that document,
  * read by OCR, which is weaker evidence and is only used where the text was
- * silent.
+ * silent. `read_from_tick` is item 5's product type, measured off the rendered
+ * page because a ticked box is not in a text layer at all (ADR 0016).
  */
-export type ApplicationSource = 'typed' | 'parsed_from_form' | 'parsed_from_artwork' | 'absent'
+export type ApplicationSource =
+  'typed' | 'parsed_from_form' | 'parsed_from_artwork' | 'read_from_tick' | 'absent'
 
-/** Where inside an uploaded document one value was read (ADR 0010). */
-export type DocumentValueSource = 'form_fields' | 'embedded_text' | 'embedded_artwork' | 'absent'
+/** Where inside an uploaded document one value was read (ADR 0010, ADR 0016). */
+export type DocumentValueSource =
+  'form_fields' | 'embedded_text' | 'embedded_artwork' | 'product_type_box' | 'absent'
 
 /** One field row (FR-3): both values, the score, the outcome, and why. */
 export interface FieldResult {

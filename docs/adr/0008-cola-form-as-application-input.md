@@ -125,11 +125,29 @@ Reading an "X" beside one of three boxes out of a scan was rejected. It is a
 guess of exactly the kind FR-1 forbids, on a value the tool would then present
 as having come off the application.
 
+**Amended 2026-08-31 by [ADR 0016](0016-product-type-from-the-page.md): the tick
+is readable, from the page rather than from the text.** Both paragraphs above are
+still true about a *text layer*, and the conclusion drawn from them was too
+narrow. The tool renders the document's pages already, and on the author's own
+filing the ticked box is 22 luminance points darker than the two empty ones,
+which the two empty ones are not from each other (they differ by 1.9). That is a
+measurement rather than a guess, and it is not the "X" this ADR rejected reading:
+nothing is recognized, three regions are compared, and the darkest is reported
+only when it stands clear of the other two by a defended margin. Where it does
+not, the answer is still not found and the agent still chooses.
+
+What that changes here: the beverage type now has a third source, the form's own
+check boxes, ranked below an AcroForm field and above the "names exactly one
+type" inference this ADR settled for. What it does not change: the beverage type
+is still never compared against the label, and the label artwork still cannot
+supply it, because a label does not print a form answer.
+
 ### Precedence: a typed value always wins
 
 Any explicitly typed field overrides the parsed value for that field, and the
 response says which of the two supplied each value: `typed`, `parsed_from_form`,
-or `absent`. An agent who corrects a field has read the document and disagreed
+`parsed_from_artwork`, `read_from_tick`, or `absent`. An agent who corrects a
+field has read the document and disagreed
 with what was read off it, and the tool defers to the agent everywhere else it
 makes a judgement (FR-3, OOS-8). A blank field is not a correction, so the
 parsed value stands.
