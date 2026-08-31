@@ -56,16 +56,18 @@ from dataclasses import dataclass, field
 #
 # `classify_ocr` and `document_ocr` are OCR of an *image* submitted as one side
 # or the other; `page_ocr` is OCR of PDF pages rendered because the file carried
-# no text layer; `artwork_ocr` is OCR of pictures lifted out of a PDF. They are
-# separate because an operator looking at a slow request needs to know which of
-# those four a given second was spent in, and they are four different documents
-# arriving.
+# no text layer; `artwork_ocr` is OCR of pictures lifted out of a PDF;
+# `item_five_ocr` is recognizing item 5's three captions on a rendered page that
+# carried no text layer to read them out of (ADR 0016). They are separate because
+# an operator looking at a slow request needs to know which of those five a given
+# second was spent in, and they are five different documents arriving.
 PHASES = (
     "classify_ocr",
     "document_pdfium",
     "document_ocr",
     "page_ocr",
     "artwork_ocr",
+    "item_five_ocr",
     "label_ocr",
     "compare",
 )
@@ -73,7 +75,14 @@ PHASES = (
 # Which phases are Tesseract. Summed into the `ocr_ms` the response has always
 # carried, so that field keeps meaning what it says while gaining the passes it
 # used to miss.
-OCR_PHASES = ("classify_ocr", "document_ocr", "page_ocr", "artwork_ocr", "label_ocr")
+OCR_PHASES = (
+    "classify_ocr",
+    "document_ocr",
+    "page_ocr",
+    "artwork_ocr",
+    "item_five_ocr",
+    "label_ocr",
+)
 
 
 @dataclass

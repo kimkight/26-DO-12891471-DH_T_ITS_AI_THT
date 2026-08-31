@@ -74,6 +74,54 @@ application to the picture of the label."
   the same reading the API does. Its accuracy figures are for the code an agent
   runs rather than for a fallback path.
 
+### Added
+
+- **Item 5's product type is read off the rendered page**
+  ([ADR 0016](docs/adr/0016-product-type-from-the-page.md), FR-11, A-17 amended).
+  The author asked whether beverage type is a field on the application. It is:
+  item 5 on TTB F 5100.31 (04/2023), "TYPE OF PRODUCT (Required)", three check
+  boxes. The tool left it blank on every filing that was not an unflattened
+  AcroForm copy, because it read only the text layer, where all three captions
+  print and no tick can be seen. The tick is in the pixels, and the tool renders
+  the pages already. On the author's own filing, at scale 2.0:
+
+  | item 5 option | mean luminance |
+  | --- | --- |
+  | WINE | 239.9 |
+  | **DISTILLED SPIRITS** | **217.5** |
+  | MALT BEVERAGE | 241.8 |
+
+  - **The boxes are located from their own captions, never from a pixel
+    coordinate.** The form has editions and this tool renders at a scale derived
+    from the page size and a setting, so a coordinate would be right once. The
+    captions come out of the text layer exactly where the file has one, and are
+    recognized only on a page that has none.
+  - **The margin is 12.0 luminance points** between the darkest box and the next,
+    and it is set from both ends of the measurement: the signal is 20 to 22 points
+    across the author's filing and three fixtures, and the noise between two boxes
+    that are both empty is 0.5 to 2.8. Two boxes too close to separate, and no box
+    filled, both come back as not determined and the agent chooses.
+  - **The sample window is deliberately loose.** A tight crop gives a bigger
+    number when it lands exactly and a wrong answer when it does not: at twelve
+    pixels of caption height, a one pixel difference in a caption's left edge put
+    fifteen points between two boxes that were both empty.
+  - The value is surfaced for confirmation and stays editable like every other
+    parsed value, with a provenance chip of its own, "Ticked box on the form". It
+    is still never compared against the label; it selects which numeric rule runs
+    (A-12 for spirits, A-13 for wine) and the result already names the rule.
+  - A new `item_five_ocr_ms` phase reports what this costs. It is zero on every
+    document that carries a text layer.
+
+### Fixed
+
+- **A scanned form with nothing ticked stops being answered wrongly.** The
+  "document names exactly one product type" rule is an inference from absence: it
+  is sound on a Registry printout and unsound on a scan whose OCR lost two of the
+  three captions, which looks identical. Sampling the boxes is direct evidence of
+  the thing being inferred, so it now supersedes that inference in both
+  directions, filling the value where a box stands out and clearing it where the
+  boxes were sampled and none did. An AcroForm radio group still wins over both.
+
 ### Unchanged, deliberately
 
 - **FR-5, the government warning.** It already searches the label for a known
@@ -90,6 +138,8 @@ application to the picture of the label."
 - **FR-14 and ADR 0013.** A row whose two sides are one reading of one picture is
   still reported as read from the artwork rather than as a match, and searching
   that picture for a value read off it is circular in exactly the same way.
+- The beverage type is still never compared against the label, and the embedded
+  label artwork still cannot supply it: a label does not print a form answer.
 
 ## [1.1.0] - unreleased until tagged
 

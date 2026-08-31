@@ -13,11 +13,12 @@
  */
 import type { ApplicationSource, DocumentValueSource } from '../types'
 
-/** The short chip text for each source. Four sources, four labels. */
+/** The short chip text for each source. One label per source, no sharing. */
 const SOURCE_LABELS: Record<ApplicationSource, string> = {
   typed: 'You typed this',
   parsed_from_form: 'Application form',
   parsed_from_artwork: 'Label artwork in the application',
+  read_from_tick: 'Ticked box on the form',
   absent: 'Not supplied',
 }
 
@@ -27,12 +28,16 @@ const SOURCE_LABELS: Record<ApplicationSource, string> = {
  * The document distinguishes an AcroForm field from a text layer; an agent has
  * no use for that distinction, because both are text the file itself states and
  * neither went through a recognition step. What an agent does have a use for is
- * text against artwork.
+ * text against a picture, and there are two kinds of picture: the label artwork
+ * inside the application, and item 5's own check boxes on the form's page
+ * (ADR 0016). Those two are kept apart because they are read for different
+ * fields and an agent checking one is not checking the other.
  */
 const DOCUMENT_SOURCES: Record<DocumentValueSource, ApplicationSource> = {
   form_fields: 'parsed_from_form',
   embedded_text: 'parsed_from_form',
   embedded_artwork: 'parsed_from_artwork',
+  product_type_box: 'read_from_tick',
   absent: 'absent',
 }
 
@@ -64,6 +69,7 @@ const FIELD_MARKS: Record<ApplicationSource, string | null> = {
   parsed_from_form: 'Read from the application form. Change it if it is wrong.',
   parsed_from_artwork:
     'Read from the label artwork inside the application. Change it if it is wrong.',
+  read_from_tick: 'Read from the ticked box in item 5. Change it if it is wrong.',
   absent: null,
 }
 

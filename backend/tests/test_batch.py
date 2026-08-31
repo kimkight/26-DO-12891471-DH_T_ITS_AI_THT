@@ -452,7 +452,7 @@ class TestWhatTheDocumentSupplied:
         beverage = next(field for field in document["fields"] if field["name"] == "beverage_type")
         assert beverage["found_on_document"] is False
         assert beverage["value"] is None
-        assert any("ticked box cannot be read" in note for note in document["notes"])
+        assert any("ticked box is not in a document's text" in note for note in document["notes"])
 
     @requires_tesseract
     @requires_fonts

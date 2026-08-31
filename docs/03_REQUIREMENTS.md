@@ -579,9 +579,24 @@ apply to a label image. The note under OOS-1 in
   TTB F 5100.31 (04/2023) the class or type designation and the alcohol content
   are not items at all, and the net contents is item 15 only when it is blown,
   branded or embossed on the container and does not appear on the labels.
-- Given a document that names all three of item 5's product types, then the
-  beverage type is reported as not found, because a ticked box cannot be read
-  from a document's text.
+- Given a document that names all three of item 5's product types in its text,
+  then the text alone does not settle the beverage type, because a text layer
+  prints the caption of an unticked box exactly as it prints the caption of a
+  ticked one.
+- Given item 5's three check boxes on a rendered page, then the darkest is
+  reported as ticked **only when it is clearly separated from the other two by
+  the configured margin**, and the result reports what was measured. See
+  [ADR 0016](adr/0016-product-type-from-the-page.md).
+- Given two boxes too close to separate, or no box filled, then the beverage type
+  is reported as not determined and the agent chooses, and the result says the
+  boxes were sampled rather than that the document did not name a type.
+- Given a document whose form fields state the product type, then that value is
+  used and the boxes are not sampled at all.
+- Given a value read from a ticked box, then it is surfaced for confirmation and
+  stays editable like every other parsed value, and it is marked as read from the
+  box rather than from the form's text.
+- The check boxes are located from their own captions and never from a pixel
+  coordinate, because the form has editions and renders at different scales.
 - Given a field the agent typed and a document that also carries it, then the
   typed value is used and the response says the value was typed. A blank field
   is not a correction and the parsed value stands.

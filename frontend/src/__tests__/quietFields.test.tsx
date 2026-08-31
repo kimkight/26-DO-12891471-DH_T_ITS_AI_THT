@@ -248,8 +248,8 @@ describe('the source of a value that was read', () => {
   })
 })
 
-describe('beverage type keeps its own line (ADR 0008)', () => {
-  it('states why the form could not say, with the selector inline', async () => {
+describe('beverage type keeps its own line (ADR 0008, ADR 0016)', () => {
+  it('states why the boxes did not settle it, with the selector inline', async () => {
     const user = userEvent.setup()
     stub(FROM_ARTWORK)
     render(<SingleLabelTab />)
@@ -258,7 +258,7 @@ describe('beverage type keeps its own line (ADR 0008)', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Beverage type')).toBeVisible())
     expect(screen.getByLabelText('Beverage type')).toHaveAccessibleDescription(
-      /the product-type boxes are check marks, which the text layer cannot report/i,
+      /item 5\u2019s boxes were read from the page and none of them stood out/i,
     )
   })
 
