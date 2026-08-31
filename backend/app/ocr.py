@@ -255,19 +255,24 @@ class OcrLine:
         size.** Tesseract reads a vertical strip in place and reports the
         bounding box in page coordinates, so a word set sideways comes back
         about one cap-height wide and one word long. On the author's mezcal
-        artwork that made ``RFC: MSV031122AD1`` the tallest text on the sheet at
-        81.5 pixels against a 43 pixel display line, which is why the brand name
-        was read off the producer's tax identifier. The box is not lying; it is
-        answering a different question, and any ranking by type size has to know
-        that before it uses the number.
+        artwork that made the producer's tax identifier, printed in the gutter
+        strip, the tallest text on the sheet at 81.5 pixels against a 43 pixel
+        display line, which is how it came to be reported as the brand name. The
+        box is not lying; it is answering a different question, and any ranking
+        by type size has to know that before it uses the number.
 
-        Wider than tall is the whole test, and it needs no threshold because the
-        two cases do not overlap: measured on that artwork, the upright lines run
-        from 0.05 to 0.93 in height over width and the two vertical strips run
-        1.9 and 2.4. A line of one narrow word is the case that could sit near
-        the boundary, and it is the case a mean over the line's words handles:
-        the mean is taken over the box areas, so a single ``I`` in a line of
-        upright words cannot tip it.
+        Wider than tall is the whole test, and it carries no threshold because
+        the two cases are nowhere near each other. Measured on that artwork, over
+        the mean word box of each line: the panels' own lines run from 0.05 to
+        0.85 in height over width, and the four lines of the two vertical strips
+        run 3.30, 3.59, 3.90 and 5.43.
+
+        One line on that sheet lands between them, at 1.17, and it is a
+        two-character misreading of a rule printed under the lot number. It is
+        excluded as sideways and nothing is lost by that: the exclusion decides
+        only which lines may compete on type size, and a garbled fragment is not
+        a candidate for the brand name in either case. That is the shape of this
+        rule's error, and it is the cheap direction to be wrong in.
         """
         return self.width > 0 and self.height > self.width
 
