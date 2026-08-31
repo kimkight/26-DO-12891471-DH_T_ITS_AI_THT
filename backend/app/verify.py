@@ -38,10 +38,11 @@ from app.ocr import (
     Orientation,
     OrientationCheck,
     ReadPath,
+    Segmentation,
     UndecodableImageError,
     extract_text,
 )
-from app.parse import ParsedFields, parse_fields
+from app.parse import ParsedFields, TextRegion, parse_fields
 from app.schemas import (
     FIELD_LABELS,
     ApplicationDocumentResult,
@@ -56,6 +57,8 @@ from app.schemas import (
     ReadPathDetail,
     RejectedImageDetail,
     RotationScoreDetail,
+    SegmentationDetail,
+    TextRegionDetail,
     VerificationResult,
     WarningDiffSegment,
     WarningResult,
@@ -304,6 +307,7 @@ class _Read:
     confidence: float
     ocr_ms: float
     read_path: ReadPath = ReadPath()
+    segmentation: Segmentation = Segmentation()
     error: VerificationError | None = None
 
 
@@ -402,6 +406,7 @@ def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _
             confidence=ocr.mean_confidence,
             ocr_ms=ocr.elapsed_ms,
             read_path=ocr.read_path,
+            segmentation=ocr.segmentation,
             error=VerificationError(code="no_text_found", message=NO_TEXT_MESSAGE),
         )
 
@@ -412,6 +417,7 @@ def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _
         confidence=ocr.mean_confidence,
         ocr_ms=ocr.elapsed_ms,
         read_path=ocr.read_path,
+        segmentation=ocr.segmentation,
     )
 
 
@@ -477,19 +483,36 @@ def _merge(reads: list[_Read]) -> tuple[ParsedFields, dict[str, int]]:
     """
     values: dict[str, str | None] = {}
     sources: dict[str, int] = {}
+    # Where each winning value was read from on its own photograph's sheet
+    # (FR-1, FR-10). Taken from the photograph the value came from rather than
+    # merged, because a region number means nothing outside the sheet it
+    # describes: column 3 of one photograph and column 3 of another are two
+    # different pieces of label.
+    regions: dict[str, TextRegion] = {}
 
+    declined: set[str] = set()
     for name in _MERGED_FIELDS:
         candidates = [read for read in reads if getattr(read.parsed, name) is not None]
         if not candidates:
             values[name] = None
+            # Declined on every photograph that had anything to rank, and found
+            # on none. One photograph declining while another read the field is
+            # not a decline: the value is reported and the reason belongs to the
+            # photograph it came from.
+            if any(name in read.parsed.declined for read in reads):
+                declined.add(name)
             continue
         best = max(candidates, key=_ranker(name))
         values[name] = getattr(best.parsed, name)
         sources[name] = best.index
+        if (region := best.parsed.region.get(name)) is not None:
+            regions[name] = region
 
     warning_read = _pick_warning(reads)
     if warning_read is not None:
         sources["government_warning"] = warning_read.index
+        if (region := warning_read.parsed.region.get("government_warning")) is not None:
+            regions["government_warning"] = region
 
     return (
         ParsedFields(
@@ -499,6 +522,8 @@ def _merge(reads: list[_Read]) -> tuple[ParsedFields, dict[str, int]]:
             net_contents=values["net_contents"],
             warning=warning_read.parsed.warning if warning_read else reads[0].parsed.warning,
             warning_text=warning_read.parsed.warning_text if warning_read else None,
+            region=regions,
+            declined=frozenset(declined),
         ),
         sources,
     )
@@ -586,6 +611,11 @@ def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs
             colour_confidence=read.read_path.colour_confidence,
             decided_by=read.read_path.decided_by,
         ),
+        segmentation=SegmentationDetail(
+            columns=read.segmentation.columns,
+            blocks=read.segmentation.blocks,
+            column_bounds=[tuple(bound) for bound in read.segmentation.column_bounds],
+        ),
         text_found=read.parsed is not None,
         error=None
         if read.error is None
@@ -622,6 +652,34 @@ def _is_circular(
     """
     return (
         label_source == "application_artwork" and value_sources.get(name) == "parsed_from_artwork"
+    )
+
+
+def _declined(comparison: Comparison) -> Comparison:
+    """Say that the label carried candidates and none of them stood out.
+
+    The brand name and the class or type designation are located by type size,
+    which is a ranking and can decline: where the largest text on the label is
+    not clear of the next largest, type size has not identified anything and
+    FR-1 requires not found rather than the winner of a photo finish. That is a
+    different finding from a label with nothing on it, and an agent looking at
+    artwork whose brand name is plainly visible needs to be told which one they
+    have.
+
+    The outcome is left exactly as the comparison found it. A mandatory element
+    the tool could not identify is still a mandatory element it could not
+    confirm, and softening that would be the tool grading its own homework.
+    """
+    return Comparison(
+        outcome=comparison.outcome,
+        score=comparison.score,
+        reason=(
+            "This field was not found on the label. It is located by type size, "
+            "and on this label the largest text was not clear enough of the "
+            "next largest for type size to identify it, so it is reported as "
+            "not found rather than as a guess (FR-1). Read the value off the "
+            "artwork yourself and type it in if the label carries one."
+        ),
     )
 
 
@@ -725,6 +783,17 @@ def build_result(
             for name, comparison in comparisons.items()
         }
 
+        # And the same shape again for the other thing a row can be wrong about
+        # without the comparison layer knowing: a field the type-size ranking
+        # declined rather than failed to see. The outcome is untouched, because
+        # a mandatory element the tool could not identify on the label is still
+        # a finding; what changes is that the reason says which of the two
+        # happened. See ParsedFields.declined.
+        comparisons = {
+            name: (_declined(comparison) if name in parsed.declined else comparison)
+            for name, comparison in comparisons.items()
+        }
+
         fields = [
             FieldResult(
                 name=name,
@@ -735,6 +804,7 @@ def build_result(
                 score=comparison.score,
                 outcome=comparison.outcome,
                 reason=comparison.reason,
+                label_region=_region_detail(parsed.region.get(name)),
                 source_photo=attribution.get(name),
                 application_value_source=value_sources.get(
                     name, "typed" if application.get(name) else "absent"
@@ -744,7 +814,10 @@ def build_result(
         ]
         fields.append(
             _warning_field(
-                parsed.warning, parsed.warning_text, attribution.get("government_warning")
+                parsed.warning,
+                parsed.warning_text,
+                attribution.get("government_warning"),
+                parsed.region.get("government_warning"),
             )
         )
 
@@ -838,8 +911,18 @@ def _timings(recorded: timing.Recording | None) -> PhaseTimings | None:
     )
 
 
+def _region_detail(region: TextRegion | None) -> TextRegionDetail | None:
+    """One field's region as the response reports it, or null if not found."""
+    if region is None:
+        return None
+    return TextRegionDetail(column=region.column, block=region.block)
+
+
 def _warning_field(
-    warning: WarningCheck, warning_text: str | None, source_photo: int | None = None
+    warning: WarningCheck,
+    warning_text: str | None,
+    source_photo: int | None = None,
+    region: TextRegion | None = None,
 ) -> FieldResult:
     """The warning as one field row (FR-5, FR-6, ADR 0012).
 
@@ -849,7 +932,7 @@ def _warning_field(
 
     **There is still no review band, and this is not one.** FR-5 excludes fuzzy
     tolerance and the comparison is unchanged: a statement passes only when it is
-    identical to the regulation after whitespace normalization. What the third
+    identical to the regulation after whitespace and case normalization. What the third
     outcome carries is a difference too small for the tool to attribute. The
     author's own COLA artwork reads the statement with one character wrong, and
     reporting that as a mismatch tells an agent the label is defective when the
@@ -876,5 +959,6 @@ def _warning_field(
         score=None,
         outcome=outcome,
         reason=f"{warning.reason} {warning.bold_type_note}",
+        label_region=_region_detail(region),
         source_photo=source_photo,
     )

@@ -286,3 +286,85 @@ def render_colour_png_bytes(spec: ColourLabelSpec, *, turned_degrees: int = 0) -
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# --------------------------------------------------------------------------
+# Multi-panel artwork (v1.1.0).
+# --------------------------------------------------------------------------
+
+# The geometry of a filed label sheet: several panels printed side by side with
+# a narrow strip of type set at 90 degrees in the gutter between them, which is
+# how the author's own mezcal COLA is laid out and what the reader was assembling
+# lines across.
+#
+# The gutters are 60 pixels on a 1750 pixel sheet, which survives the scaling
+# every image goes through before it is read: at the 1600 pixel working width
+# that is 55 pixels against body type of 24, so both of app.ocr's conditions for
+# a gutter are cleared with margin rather than by a pixel. The point of a
+# fixture is to fail for the reason it was written for.
+PANEL_CANVAS = (1750, 1150)
+PANEL_COLUMNS = ((60, 520), (680, 1120), (1280, 1690))
+PANEL_STRIPS = (580, 1180)
+
+
+@dataclass
+class PanelLabelSpec:
+    """One flat sheet of three text panels and two strips set at 90 degrees.
+
+    ``panels`` is one block of prose per panel and ``strips`` one line per
+    vertical strip. Each is written so that no word appears in more than one of
+    them, which is what lets a test say that a line crossed a panel boundary
+    rather than merely that it looks odd.
+    """
+
+    panels: tuple[str, ...]
+    strips: tuple[str, ...] = ()
+    warning_panel: int | None = None
+    warning: str = ""
+
+
+def render_panels(spec: PanelLabelSpec) -> Image.Image:
+    """Draw one multi-panel sheet, black on white, with no other structure.
+
+    Deliberately plain. The subject of the fixture is where the words are, not
+    how they are inked, and the colour arm has its own fixture for that.
+    """
+    fonts = available_fonts()
+    if fonts is None:
+        raise RuntimeError("No usable TrueType font was found on this machine.")
+    _, regular_path = fonts
+
+    image = Image.new("RGB", PANEL_CANVAS, (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    body_font = ImageFont.truetype(regular_path, 26)
+
+    for index, (left, right) in enumerate(PANEL_COLUMNS):
+        y = 80
+        if spec.warning_panel == index and spec.warning:
+            for line in _wrap(draw, spec.warning, body_font, right - left):
+                draw.text((left, y), line, font=body_font, fill=(0, 0, 0))
+                y += 34
+            y += 34
+        if index < len(spec.panels):
+            for line in _wrap(draw, spec.panels[index], body_font, right - left):
+                draw.text((left, y), line, font=body_font, fill=(0, 0, 0))
+                y += 34
+
+    for left, text in zip(PANEL_STRIPS, spec.strips, strict=False):
+        # Drawn flat on its own canvas and turned, because Pillow draws text
+        # along the x axis and nowhere else. The strip is placed in the gutter,
+        # which is where a filed sheet prints it.
+        strip = Image.new("RGB", (PANEL_CANVAS[1] - 160, 40), (255, 255, 255))
+        ImageDraw.Draw(strip).text((0, 4), text, font=body_font, fill=(0, 0, 0))
+        image.paste(strip.rotate(90, expand=True), (left, 80))
+
+    return image
+
+
+def render_panels_png_bytes(spec: PanelLabelSpec) -> bytes:
+    """Render a multi-panel sheet to PNG bytes, so no image reaches the disk."""
+    import io
+
+    buffer = io.BytesIO()
+    render_panels(spec).save(buffer, format="PNG")
+    return buffer.getvalue()
