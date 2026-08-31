@@ -118,10 +118,21 @@ class FieldResult(BaseModel):
     name: str = Field(description="Machine name of the field, for example brand_name.")
     display_name: str = Field(description="How the field is named to an agent.")
     found_on_label: bool = Field(
-        description="False means the field could not be located on the label (FR-1)."
+        description=(
+            "False means the field was not found on the label (FR-1). Where the "
+            "application declared a value, this reports whether that value was "
+            "found by searching the label for it (ADR 0015); where it declared "
+            "none, it reports whether the extractor could locate one."
+        )
     )
     label_value: str | None = Field(
-        default=None, description="The value read off the label, or null if not found."
+        default=None,
+        description=(
+            "What the label carries for this field, or null if not found. Where "
+            "the field was decided by searching, this is the label's own printing "
+            "of the matched run, so an agent can see the label's casing beside "
+            "the application's (FR-4)."
+        ),
     )
     application_value: str | None = Field(
         default=None, description="The value supplied with the application."
@@ -149,9 +160,11 @@ class FieldResult(BaseModel):
     label_region: TextRegionDetail | None = Field(
         default=None,
         description=(
-            "Which panel of the label the value was read from, or null where "
+            "Which panel of the label the value was found in, or null where "
             "the field was not found on the label. See SegmentationDetail for "
-            "what the numbers mean."
+            "what the numbers mean. This is what replaces an extracted value as "
+            "the useful half of the row: an agent can see that the brand was "
+            "found on the front panel rather than in the small print (ADR 0015)."
         ),
     )
     source_photo: int | None = Field(

@@ -70,7 +70,8 @@ from samples.generate_samples import main as generate  # noqa: E402
 from app.compare import Outcome  # noqa: E402
 from app.ocr import extract_text  # noqa: E402
 from app.parse import lines_from_text, parse_fields  # noqa: E402
-from app.verify import build_result  # noqa: E402
+from app.search import label_units  # noqa: E402
+from app.verify import Sheet, build_result  # noqa: E402
 from app.warning import check_warning  # noqa: E402
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
@@ -133,6 +134,9 @@ def truth_for(expected: dict[str, str], application: dict[str, str]) -> dict[str
         application={field: application.get(field, "") for field in COMPARED_FIELDS},
         ocr_confidence=100.0,
         ocr_ms=0.0,
+        # The ground truth is searched too, so that the two runs differ only in
+        # what OCR read off the pixels and not in which comparison ran.
+        sheets=[Sheet(index=1, units=label_units(truth_lines))],
     )
     outcomes = {field.name: field.outcome for field in result.fields}
     warning = check_warning(expected["government_warning"])
@@ -167,6 +171,10 @@ def measure() -> tuple[dict[str, FieldTally], list[float], list[float], int]:
             application={field: row["application"].get(field, "") for field in COMPARED_FIELDS},
             ocr_confidence=ocr.mean_confidence,
             ocr_ms=ocr.elapsed_ms,
+            # The reading, so this measures the path the API takes (ADR 0015).
+            # Without it every field would fall back to the extractor and the
+            # accuracy reported here would be for code an agent never runs.
+            sheets=[Sheet(index=1, units=label_units(ocr.lines))],
         )
         latencies.append(ocr.elapsed_ms)
         confidences.append(ocr.mean_confidence)

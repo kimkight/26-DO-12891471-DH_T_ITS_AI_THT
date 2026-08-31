@@ -98,6 +98,7 @@ import type { SingleOutcome } from '../lib/api'
 import { typedValues } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
+import { PRESENCE_LIMIT, anySearched } from '../lib/labelSearch'
 import { announcement, summary } from '../lib/outcomes'
 import { readingNote, spans, timingSummary } from '../lib/timing'
 import { EMPTY_APPLICATION } from '../types'
@@ -413,6 +414,15 @@ export function SingleLabelTab() {
               how many were only read.
             */}
             <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
+            {/*
+              The limit of what a search establishes, said once (ADR 0015). Each
+              row that was decided by searching says where on the label the
+              declared value was found; this says what that does and does not
+              prove. Once, above the rows, rather than on each of them.
+            */}
+            {anySearched(result.fields.map((field) => field.reason)) ? (
+              <p className="footnote footnote--search">{PRESENCE_LIMIT}</p>
+            ) : null}
             {result.label_source === 'application_artwork' ? (
               <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
             ) : null}
