@@ -49,7 +49,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytesseract
 import pytest
+from pytesseract import Output
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -64,7 +66,7 @@ from samples.specs import SAMPLE_LABEL  # noqa: E402
 from samples.warning_text import WARNING_STATEMENT  # noqa: E402
 
 from app import timing  # noqa: E402
-from app.ocr import _assemble_lines, _columns, extract_text  # noqa: E402
+from app.ocr import _assemble_lines, _columns, decode, extract_text, preprocess  # noqa: E402
 from app.parse import parse_fields  # noqa: E402
 from tests.conftest import requires_fonts, requires_tesseract  # noqa: E402
 
@@ -267,11 +269,6 @@ class TestASinglePanelLabelIsUnaffected:
         that the output had not changed since somebody wrote the expectation
         down.
         """
-        import pytesseract
-        from pytesseract import Output
-
-        from app.ocr import decode, preprocess
-
         prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
         image = prepared.colour if prepared.colour is not None else prepared.binary
         data = pytesseract.image_to_data(image, lang="eng", output_type=Output.DICT)
