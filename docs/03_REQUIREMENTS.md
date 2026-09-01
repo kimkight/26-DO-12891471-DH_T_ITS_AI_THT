@@ -62,22 +62,59 @@ supplies none and inventing them is prohibited by the ground rules. See OOS-7.
 
 ## 3. Functional requirements
 
-### FR-1 Field extraction from label artwork
+### FR-1 Verification by search: is the declared value on the label?
 
 **Priority:** Must
-**Source:** Technical Requirements, Sample Label section
+**Source:** Technical Requirements, Sample Label section; author's session on the
+deployed build, 2026-08-30
 
-Extract brand name, class/type designation, alcohol content, net contents, and
-the government warning statement from uploaded label artwork. One label may be
-submitted as more than one photograph of itself, because a label wraps a round
-bottle and no single photograph shows all of it flat. See
+Read uploaded label artwork, and for each value the application declares, report
+whether that value appears on the label and where. One label may be submitted as
+more than one photograph of itself, because a label wraps a round bottle and no
+single photograph shows all of it flat. See
 [ADR 0007](adr/0007-multi-photo-single-label.md).
+
+**This requirement was inverted on 2026-08-31, and the inversion is the point of
+it.** It used to require extracting a value from the label and then comparing two
+strings. Locating a value is a ranking over candidates, and every field-level
+defect reported against a deployed build has been a failure of that ranking
+rather than of the comparison or of the reading: the brand name reported as the
+producer's tax identifier, and then the brand name and the class or type
+designation both reported as "not found" on a document whose label text contained
+`DEL MAGUEY` and `MEZCAL` exactly. The application already declares the answer, so
+the tool searches for it. See [ADR 0015](adr/0015-verify-by-search.md) for the
+measurements and the alternatives rejected.
+
+**What a hit establishes, and what it does not.** A hit establishes that the
+declared value appears on the label. It does **not** establish that it appears as
+the brand, in the type size 27 CFR requires, or on the panel it is required on.
+Type size and prominence are OOS-5 and are not checked at all. That limit is
+stated on the screen, once, above the rows, and it is a weaker claim than the old
+design implied and a far stronger one than "not found" about text the tool has
+read.
 
 **Acceptance criteria**
 - Given the sample distilled spirits label, when it is submitted, then the
-  system returns a value or an explicit "not found" for each of the five fields.
-- Given a field that cannot be located, then the field is reported as not found
-  rather than reported as empty or silently omitted.
+  system returns an outcome and its evidence for each of the five fields.
+- Given a declared value that appears on the label, then the outcome is a match
+  and the result names the column and the block it was found in, and shows the
+  label's own printing of it.
+- Given a declared value that does not appear on the label, then the field is
+  reported as not found rather than reported as empty or silently omitted, and
+  the closest text on the label is reported with its score so the call can be
+  judged.
+- Given a declared value that appears only inside a longer word, then it is not
+  reported as a match: the search matches whole words.
+- Given a class or type designation carrying a registry code the label does not
+  print, for example `MEZCAL FB`, then the full value is searched for first and
+  the code is left off only if that fails, and the result says the code was left
+  off.
+- Given a field the application did not supply, then there is nothing to search
+  for and the existing extractor runs as the fallback, reporting not found rather
+  than a guess where its heuristic cannot identify a value.
+- Given a value on the screen, then the result states that a hit shows the value
+  is on the label and not that it is on the label as the brand, in the required
+  type size, or on the required panel.
 - Extraction adds no outbound network call on the default path (see NFR-6).
 - Given a photograph taken sideways, or one whose orientation is recorded only
   in its EXIF tag, then it is turned upright before it is read, and the result
@@ -104,8 +141,14 @@ bottle and no single photograph shows all of it flat. See
 **Priority:** Must
 **Source:** Sarah Chen interview; Technical Requirements
 
-Accept application data for the same five fields and compare it against what was
-extracted from the label.
+Accept application data for the same five fields and check it against the label.
+
+**The application side is the question, not the answer** (FR-1,
+[ADR 0015](adr/0015-verify-by-search.md)). What the applicant declared is what the
+label is searched for; the label no longer has to volunteer a value first. That
+makes an application value load-bearing in a way it was not: a field left blank is
+a field with nothing to search for, and it falls back to the extractor and to the
+not-compared outcome below.
 
 **How the data arrives is FR-11's question, not this one.** The API takes the
 five values and does not care whether they were read off an uploaded COLA
@@ -117,6 +160,8 @@ is about what happens to the five values once they are here.
 **Acceptance criteria**
 - Given a label and its application data, when verification runs, then each of
   the five fields carries exactly one outcome.
+- Given a declared value for a field, then that value is what the label is
+  searched for, and the result reports whether it was found (FR-1).
 - Given application data missing a field, then that field is reported as not
   compared, and this is distinguished from a mismatch. A field the agent never
   opened is such a field, so a collapsed disclosure is a legitimate submission
@@ -133,14 +178,26 @@ Check. ABV is correct? Check. Government warning is there? Check."
 
 Each field returns one of: **match**, **needs human review**, or **mismatch**.
 
+**The thresholds are unchanged by the FR-1 inversion, and that is deliberate.**
+The score a search produces is a similarity between a declared value and a run of
+label text, which is the same kind of quantity this requirement has always
+classified. A second scale for it would leave two definitions of "close". See
+[ADR 0015](adr/0015-verify-by-search.md), decision 1.
+
 **Acceptance criteria**
 - Given a field whose normalized similarity is at or above the match threshold,
   then the outcome is match.
 - Given a field whose similarity falls between the review and match thresholds,
   then the outcome is needs human review.
 - Given a field below the review threshold, then the outcome is mismatch.
-- The result includes the extracted value, the application value, and the score,
-  so that an agent can judge the call rather than trust it.
+- The result includes what was read off the label, the application value, and the
+  score, so that an agent can judge the call rather than trust it. Where the
+  field was decided by searching, what was read off the label is the label's own
+  printing of the matched run, and the result also names where on the sheet it
+  was found (FR-1, FR-10).
+- Given a declared value not found on the label, then the closest text the label
+  does carry is reported with its score, rather than the row saying only that
+  nothing was found.
 
 Dave's requirement in his own words: "Technically a mismatch? Sure. But it's
 obviously the same thing. You need judgment." The middle outcome is how the tool
@@ -152,14 +209,23 @@ defers to that judgment instead of overriding it.
 **Priority:** Must
 **Source:** Dave Morrison interview; Decision D-5
 
-Text comparison normalizes case, surrounding whitespace, and punctuation before
-scoring, so that presentational differences do not read as substantive ones.
+Both sides are normalized for case, surrounding whitespace, and punctuation
+before scoring, so that presentational differences do not read as substantive
+ones. This governs the search FR-1 requires as well as any comparison of two
+strings: the same `normalize_text` runs on the declared value and on every word
+of the label reading.
 
 **Acceptance criteria**
-- Given label `STONE'S THROW` and application `Stone's Throw`, then the outcome
-  is match or needs human review, and never mismatch.
+- Given label `STONE'S THROW` and application `Stone's Throw`, then the value is
+  found on the label and the outcome is match or needs human review, and never
+  mismatch.
+- Given a match found this way, then the result shows the label's own casing
+  beside the declared value, so an agent can see that the difference is
+  presentational rather than being told that it is.
 - Given a straight apostrophe against a typographic apostrophe in otherwise
   identical text, then the outcome is match.
+- Given punctuation the reading invented, for example a comma inside a brand
+  name, then the outcome is still match.
 - Given two genuinely different brand names, then normalization does not cause
   them to be reported as a match.
 
@@ -173,6 +239,13 @@ warning is governed by FR-5 and FR-6, which are deliberately stricter.
 
 The government warning is compared for exact text after whitespace and letter
 case normalization, against the text quoted in section 1.
+
+**Unchanged by the FR-1 inversion of 2026-08-31.** This requirement already
+searches the label for a known string; the string is fixed by 27 CFR 16.21 rather
+than declared by the applicant, and the comparison is exact rather than fuzzy by
+requirement. Nothing in [ADR 0015](adr/0015-verify-by-search.md) touches it, the
+warning row carries no similarity score, and the near-miss routing below stands
+exactly as it was.
 
 **Acceptance criteria**
 - Given a warning matching 27 CFR 16.21 exactly except for line breaks, runs of
@@ -506,9 +579,24 @@ apply to a label image. The note under OOS-1 in
   TTB F 5100.31 (04/2023) the class or type designation and the alcohol content
   are not items at all, and the net contents is item 15 only when it is blown,
   branded or embossed on the container and does not appear on the labels.
-- Given a document that names all three of item 5's product types, then the
-  beverage type is reported as not found, because a ticked box cannot be read
-  from a document's text.
+- Given a document that names all three of item 5's product types in its text,
+  then the text alone does not settle the beverage type, because a text layer
+  prints the caption of an unticked box exactly as it prints the caption of a
+  ticked one.
+- Given item 5's three check boxes on a rendered page, then the darkest is
+  reported as ticked **only when it is clearly separated from the other two by
+  the configured margin**, and the result reports what was measured. See
+  [ADR 0016](adr/0016-product-type-from-the-page.md).
+- Given two boxes too close to separate, or no box filled, then the beverage type
+  is reported as not determined and the agent chooses, and the result says the
+  boxes were sampled rather than that the document did not name a type.
+- Given a document whose form fields state the product type, then that value is
+  used and the boxes are not sampled at all.
+- Given a value read from a ticked box, then it is surfaced for confirmation and
+  stays editable like every other parsed value, and it is marked as read from the
+  box rather than from the form's text.
+- The check boxes are located from their own captions and never from a pixel
+  coordinate, because the form has editions and renders at different scales.
 - Given a field the agent typed and a document that also carries it, then the
   typed value is used and the response says the value was typed. A blank field
   is not a correction and the parsed value stands.
@@ -703,6 +791,27 @@ Single-label verification returns in about 5 seconds.
   target, with the hardware and sample set stated.
 - The measurement is published in the README. It is measured, not asserted.
 - If the target is not met, the shortfall is reported rather than omitted.
+- The phase breakdown is in the API response, where an operator and the
+  deployment runbook can read it.
+- **It is not on the screen.** Amended 2026-08-31 on the author's instruction:
+  "I don't need the time listed on the screen think about what a regular
+  application looks like do not put all these extra words on the screen that
+  should not be there." An agent checking a label is not measuring the tool, and
+  a latency figure above their results is the tool talking about itself in the
+  middle of their work (NFR-4). Nothing about the measurement changes; only
+  where it is read.
+- **What is measured is what the agent waits for, across every request one
+  submission makes.** Added 2026-09-01 from the author's measurement of the
+  deployed build: a COLA document submitted alone cost `POST /api/classify` at
+  5492 and 5410 ms and then `POST /api/verify` at 5331 to 5498 ms, about eleven
+  seconds for one document, while each request on its own was inside the target.
+  A target met per request and missed per submission is a target reported
+  wrongly. So no picture is read in more than one request for one submission
+  ([ADR 0017](adr/0017-read-the-artwork-once.md)).
+- **The saving is never bought with a store.** A cache of parsed documents would
+  breach NFR-6, which is an acceptance criterion of this system and a promise
+  printed on every screen of the interface. Recorded on FR-1 and NFR-1 alike so
+  that it is not rediscovered as a good idea.
 
 This is the requirement that killed the previous pilot: "The system would take
 30, 40 seconds sometimes to process a single label... If we can't get results
@@ -768,23 +877,114 @@ screen on load. What moved behind the disclosure is a fallback for the case
 where the agent does not have the document, and NFR-4 is better served by five
 fewer boxes in front of the primary path than it was by having them there.
 
-### NFR-5 Accessibility
+**A word budget, asserted (2026-08-31).** The panel accumulated wordiness one
+honest sentence at a time: every paragraph added over four sessions was true and
+was added for a reason, and the sum of them was 584 words on the author's own
+submission and 159 on a single row of it. A rule saying "keep it short" is obeyed
+by whoever reads it and by nobody who does not, so the ceiling is a number in a
+test. `frontend/src/__tests__/quietScreen.test.tsx` holds it, and
+`frontend/tests/a11y.spec.ts` holds the author's own target: the single-label
+result for a clean document fits one screen at 1280 by 800 without scrolling.
+
+- One sentence per row, at most. Where a chip or a value's own label already says
+  something, the row does not say it again in prose.
+- One notice per screen, said once where it is first relevant, rather than in the
+  upload card and the results header and every affected row.
+- Cutting words is not licence to drop the assessment-prototype banner, the
+  author attribution, an FR-9 message that names a real problem, or the sentence
+  that says who decides. Those are asserted separately and stay.
+
+**A sentence rule, and a place for the sentences to go (2026-09-01, US-28).** The
+author, on the build that word budget produced: "this has way too many words on
+the screen. create a help me tab and put all of the text you are removing plus
+some FAQs on that tab." A word budget stops the panel growing back in bulk; it
+does not stop one long paragraph replacing three short ones, and the budget was
+being met by a screen that still explained itself at every control.
+
+- From the top of the upload card to the last result row, no explanatory
+  paragraph runs to more than one sentence.
+  `frontend/src/__tests__/helpTab.test.tsx` asserts it on the empty screen and
+  on a completed check, and names its exemptions: FR-9's messages, the
+  government warning card's own detail, and "This tool recommends. You decide."
+- A third segment of the tab strip, **Help**, carries what came off. It is a
+  reading page: headings, short paragraphs, no controls except links, and no
+  requirement identifier anywhere on it. A caveat printed on every check is read
+  on none of them; the same sentence, answered as a question on a page a reader
+  came to read, is worth more than it ever was in the middle of somebody's work.
+- A control that is inert says why in a few words rather than in a paragraph or
+  in silence. An agent still has to know that the button is off because there is
+  no file.
+- The banner, the footer and FR-9's messages do not move to Help. See the
+  criterion above; a quieter screen that achieved itself by hiding a failure
+  would be worse than the wordy one.
+
+**A way back to the empty state (2026-09-01, US-29).** The author: "add a reset
+option that clears the information so another application can be uploaded." An
+agent working through a stack of applications had no way to start the next one
+but to reload the page.
+
+- One clearly labelled control on each view that holds state, beside the results
+  rather than at the top of the form, offered only when there is something to
+  clear. It empties the uploaded files, the parsed values, every typed field and
+  the results together.
+- No confirmation dialog. Nothing is stored (NFR-6), so nothing is lost that
+  cannot be re-uploaded, and a dialog is one more thing in the way.
+- Focus moves to the file picker and a live region says the form was cleared and
+  is ready for the next label. That is NFR-5's obligation rather than a
+  refinement: the control removes the element that had focus, and a control that
+  leaves focus on the document body has failed for the agent who most needs it
+  to work.
+
+### NFR-5 Accessibility: Section 508, evaluated against WCAG
 
 **Priority:** Must
-**Source:** Sarah Chen interview; Decision D-3
+**Source:** Sarah Chen interview; Decision D-3; the author's instruction of
+2026-09-01, "this entire project needs to be 508 compliant; ensure that it is";
+36 CFR Part 1194, Appendix A, E205.4
 
-The interface targets WCAG 2.1 Level AA.
+**The standard is Section 508 of the Rehabilitation Act as revised in 2017.**
+For web content, 36 CFR Part 1194, Appendix A adopts WCAG 2.0 Levels A and AA at
+E205.4, so that is what conformance is evaluated against.
+
+**The interface is built and verified to WCAG 2.1 Level AA**, which is a
+superset: every WCAG 2.0 AA criterion is a WCAG 2.1 AA criterion, and 2.1 adds
+twelve more. Naming both is the honest statement, because the two answer
+different questions: the first is what is required, the second is what was done.
 
 **Acceptance criteria**
-- Outcomes are conveyed by text and shape, not by colour alone.
-- All interactive controls are keyboard reachable and have visible focus.
+- Outcomes are conveyed by text and shape, not by colour alone. Where two
+  outcomes deliberately share a colour, as Contains and Match do (FR-15), the
+  word and the shape carry the whole of the distinction and are verified under a
+  greyscale check of the rendered page.
+- All interactive controls are keyboard reachable and have visible focus, with
+  the focus indicator computed from the rendered style rather than asserted from
+  the stylesheet.
 - Form inputs have programmatically associated labels.
-- Text contrast meets 4.5:1 for body text.
+- Text contrast meets 4.5:1 for body text and 3:1 for non-text UI, computed
+  against the tokens as rendered, on every surface each is used on. The list of
+  outcome colours is derived from the outcome definitions, so an outcome added
+  with an unchecked colour fails rather than shipping.
 - Results appearing after submission are announced to assistive technology.
+- Every custom control reports its name, its role and its state. The pill
+  control is a real tab set, not buttons that swap content.
+- The criteria no automated tool evaluates are walked and recorded, not assumed:
+  meaningful sequence, focus order, error identification and suggestion, labels
+  and instructions, status messages, reflow, text spacing, and use of colour.
+- **A conformance report exists, is criterion by criterion, and states its
+  exceptions.** [docs/ACCESSIBILITY_CONFORMANCE.md](ACCESSIBILITY_CONFORMANCE.md).
+  A claim with two stated exceptions is worth more to a reviewer than a blanket
+  one, and a report that omits that no screen reader was used is a report that
+  implies coverage the tests do not give.
 
 Sarah states "half our team is over 50" and describes a wide range of technology
-comfort. [Source: Sarah Chen interview] The applicability of Section 508 to this
-prototype is not stated in the assignment and must be confirmed; see OQ-7.
+comfort. [Source: Sarah Chen interview]
+
+**What is still open, and what was done about it.** Whether Section 508 formally
+applies to a prototype of this kind, and whether the agency holds a standard
+beyond it, is a question for the agency and is OQ-7. The work was done as though
+it applies, which is the only useful way to hold an open question of that shape:
+the cost of being wrong that way is a report nobody needed, and the cost of being
+wrong the other way is a system an agent cannot use.
 
 ### NFR-6 No persistence of uploaded content
 
@@ -921,6 +1121,69 @@ information.
 - Given a batch row, then every rule above applies to it unchanged. A batch row
   pairs a document with a label image (ADR 0009), so its label side is always an
   independent photograph and no batch row is artwork-derived.
+
+**Amended 2026-09-01 by FR-15 and [ADR 0018](adr/0018-presence-checks.md).** The
+alcohol content and the net contents are no longer compared at all where the
+application declares neither, so they no longer reach the `artwork_derived`
+state and the summary line no longer holds them out of its count. Two criteria
+above are superseded by FR-15's, and they are the two the amendment is about:
+the second, which made such a row `artwork_derived`, and the third, which
+counted the rest. Everything else stands, including the state itself, its word
+and silhouette, its exclusion from the count, and the absence finding.
+
+The state narrows to what it was built for: a value read off the artwork,
+compared against that same artwork, on a field FR-15 does not cover. It should
+be rare, and on the author's own filing it does not arise.
+
+### FR-15 A required element found on the label is a passing presence check
+
+**Priority:** Must
+**Source:** The author, using the deployed build, 2026-09-01: "Alcohol content
+and net content needs to also say 'match' or 'Contains' in green when these
+items are found on the artwork (that is the requirement right? to have the
+volume and alcohol content listed?)"; 27 CFR 5.63, 4.32 and 7.63 as quoted in
+FR-14 and in `backend/app/compare.py`. See
+[ADR 0018](adr/0018-presence-checks.md).
+
+Where the application declares no value for alcohol content or net contents, the
+row is a **presence check**: a one-sided finding about the label alone, reported
+as passing when the label carries the element 27 CFR requires.
+
+**Why this is not the circular thing FR-14 forbids.** FR-14 was right that
+comparing a value against the picture it was read from establishes nothing. It
+was wrong to conclude that nothing had been established. The label carries an
+element the regulation requires; that is a real, positive finding, answerable
+from a picture alone, and it is the question the agent is checking. What was
+circular was presenting it as a comparison and printing the same string in two
+columns.
+
+**Acceptance criteria**
+- Given a label that carries alcohol content or net contents and an application
+  that declares no value for it, then the row reports the outcome `present`, it
+  carries the label's value, and it carries no score.
+- Given such a row, then it has no application side at all: not the value, not a
+  "not supplied" placeholder, and no source chip. There is nothing on that side.
+- Given such a row, then its reason cites the section of 27 CFR the finding
+  answers.
+- Given the `present` outcome, then it is presented as a pass, in the same
+  colour as a match, and is distinguished from a match by its word and by a
+  silhouette no other outcome uses. Colour is never the only carrier (NFR-5).
+- Given a result containing presence checks, then the summary line counts them
+  alongside comparisons, in the shape "5 of 5 checks passed".
+- Given an application that does declare the value, by typing or from a form
+  edition that carries it, then the row is a two-sided comparison reporting
+  match, needs human review or does not match exactly as FR-3 and FR-7 require.
+  FR-11's precedence is unchanged.
+- Given a label that does not carry the element, then the absence is reported as
+  a finding naming the regulation, as FR-14 already requires. Presence and
+  absence are the two answers to one question, and the same section is cited
+  either way.
+- Given a label for a spirit whose stated percentage and proof do not agree,
+  then the FR-7 cross-check reports it as needs human review, and the presence
+  check does not overrule it. A contradiction on the label is the more specific
+  finding.
+- Given a batch row whose paired document declares neither value, then the same
+  rules apply to it unchanged.
 
 ## 5. Requirements deliberately not written
 

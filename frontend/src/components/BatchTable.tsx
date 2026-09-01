@@ -39,7 +39,11 @@ const SEVERITY: Record<string, number> = {
   // evidence that could not have disagreed rather than no evidence at all, and
   // it is still not a row an agent can wave through (FR-14, ADR 0013).
   artwork_derived: 4,
-  match: 5,
+  // The two passes sort together at the bottom, which is where a row an agent
+  // does not have to look at belongs. Contains before Match only so the order
+  // is deterministic (FR-15, ADR 0018).
+  present: 5,
+  match: 6,
 }
 
 export function BatchTable({ lines }: { lines: BatchLine[] }) {

@@ -355,14 +355,27 @@ run the check the agent then asked for. `POST /api/verify` still accepts an
 `application_document` part for a caller that wants one request, and applies the
 same precedence rule: a typed value overrides a parsed one, field by field.
 
-**Brand name and class or type are located by type size, and that is a
-heuristic.** Alcohol content, net contents and the warning carry patterns to
-match. The other two do not, and no source states a layout rule for them, so
-`parse.py` ranks the remaining text by the glyph height Tesseract reports and
-takes the largest as the brand name. Adjacent lines of similar size are grouped
-first, so a brand name set across two lines stays one brand name. Where the
-heuristic fails, the field reports not found rather than a guess (FR-1). How
-often it fails is measured by `scripts/measure.py` rather than asserted here.
+**A declared value is searched for on the label rather than extracted from it**
+(`app/search.py`, [ADR 0015](adr/0015-verify-by-search.md)). The application
+already states the answer, so the question is not "what is the brand name on this
+label" but "does `DEL MAGUEY` appear on this label". The reading is grouped one
+searchable unit per region of the sheet, both sides are normalized as FR-4
+requires, whole-word containment scores 100, and otherwise the best window of
+words is scored with the same `fuzz.ratio` the comparison uses. The score is
+classified at FR-3's own thresholds, and the row reports the column and block the
+value was found in and the label's own printing of it.
+
+**Type size is still the fallback, and it is still a heuristic.** Alcohol content,
+net contents and the warning carry patterns to match. The brand name and the class
+or type designation do not, and no source states a layout rule for them, so where
+the application supplied no value to search for, `parse.py` ranks the remaining
+text by the glyph height Tesseract reports and takes the largest as the brand
+name. Adjacent lines of similar size are grouped first, so a brand name set across
+two lines stays one brand name. Where the heuristic fails, the field reports not
+found rather than a guess (FR-1). Its failure rate is why the search exists: on
+the author's own filing the largest text is the fanciful name, so the ranking is
+not merely inconclusive there, it is wrong there. How often it fails is measured
+by `scripts/measure.py` rather than asserted here.
 
 #### Frontend modules
 

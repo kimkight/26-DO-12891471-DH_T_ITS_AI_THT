@@ -78,6 +78,17 @@
  * Uploading is not the COLA integration OOS-1 excludes: the document is read
  * locally and nothing reaches TTB.
  *
+ * **The screen says what happened and stops (2026-08-31).** The author, on the
+ * released build: "I don't need the time listed on the screen think about what a
+ * regular application looks like do not put all these extra words on the screen
+ * that should not be there." So the timing line and the phase disclosure are
+ * gone from the panel. The phases are still measured and still in the API
+ * response, where the deployment runbook reads them; what has gone is the tool
+ * talking about itself in the middle of somebody's work. Every notice is said
+ * once, where it is first relevant, rather than in the upload card and the
+ * results header and every affected row. `quietScreen.test.tsx` holds the
+ * budget.
+ *
  * **Beverage type is demoted rather than removed.** It is never compared, and
  * no per-field comparison reads it: A-12's proof cross-check keys off a proof
  * statement the label itself carries and A-13's range handling keys off a range
@@ -86,7 +97,7 @@
  * the disclosure otherwise, and the rule that ran is named in the result's own
  * reason line rather than inferred from this control.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApplicationFields } from './ApplicationFields'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
@@ -99,14 +110,9 @@ import { typedValues } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { announcement, summary } from '../lib/outcomes'
-import { readingNote, spans, timingSummary } from '../lib/timing'
+import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { EMPTY_APPLICATION } from '../types'
-import type {
-  ApplicationData,
-  ApplicationDocumentResult,
-  ClassificationResult,
-  PhaseTimings,
-} from '../types'
+import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
 /**
  * Keep only the values the agent typed themselves.
@@ -166,12 +172,73 @@ export function SingleLabelTab() {
    * two sections mid-edit would remount under them and drop focus.
    */
   const [gaps, setGaps] = useState<(keyof ApplicationData)[]>([])
+  /*
+   * The values the check will read off the artwork (ADR 0017). Neither read nor
+   * missing: the prefill pass counted the pictures and left them, so there is
+   * nothing to summarise and nothing to ask for.
+   */
+  const [pending, setPending] = useState<(keyof ApplicationData)[]>([])
   // The disclosure. Collapsed on load; opened by the agent, or by a document
   // that failed to parse, and never closed by anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
+  /*
+   * The reset (US-29). The author: "add a reset option that clears the
+   * information so another application can be uploaded."
+   *
+   * `generation` is a remount key for the upload panel, not a counter anyone
+   * reads. That panel holds the classification, its own error and its own
+   * announcement, and the file input holds a value of its own that React does
+   * not control: an agent who clears the form and then chooses the same file
+   * again has to get an event, and a `<input type="file">` whose value is
+   * unchanged does not fire one. Remounting settles all of that in one move,
+   * where clearing each piece by hand would settle most of it and leave the
+   * input.
+   */
+  const [generation, setGeneration] = useState(0)
+  const [cleared, setCleared] = useState('')
+  const pickerRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Clear everything and go back to the empty state (US-29, NFR-4, NFR-5).
+   *
+   * **No confirmation dialog.** Nothing is stored, so nothing is lost that
+   * cannot be re-uploaded, and a dialog is one more thing between an agent who
+   * has finished one label and the next one. That is a decision rather than an
+   * omission; it is written down in the story and asserted in the test.
+   *
+   * Focus moves to the file picker, because that is what the agent does next
+   * and because a control that removes the thing it was inside has to say where
+   * focus went. The announcement is the other half of the same obligation: a
+   * screen reader user who presses this gets no visual confirmation that five
+   * result cards have gone.
+   */
+  function reset() {
+    setFiles([])
+    setApplication(EMPTY_APPLICATION)
+    setSources({})
+    setProcessed(false)
+    setGaps([])
+    setPending([])
+    setFieldsOpen(false)
+    setFieldsNews('')
+    setOutcome(null)
+    setChecking(false)
+    setCleared('The form was cleared. Upload the next label.')
+    setGeneration((previous) => previous + 1)
+  }
+
+  /*
+   * Focus lands after the remount, not before it: the input the ref points at
+   * during the click is about to be replaced, and focusing it would leave focus
+   * on a detached node and the page's focus on <body>.
+   */
+  useEffect(() => {
+    if (generation === 0) return
+    pickerRef.current?.focus()
+  }, [generation])
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
@@ -195,6 +262,7 @@ export function SingleLabelTab() {
       // because nothing supplied it.
       setSources((previous) => onlyTyped(previous, application))
       setGaps(APPLICATION_FIELDS.filter((name) => !application[name].trim()))
+      setPending([])
       return
     }
     fillFromDocument(result.application_document)
@@ -232,10 +300,24 @@ export function SingleLabelTab() {
 
     // A gap is a compared value neither the document nor the agent supplied.
     // Something already typed is not a gap: the agent answered it.
+    //
+    // Nor is a value the artwork is about to supply (ADR 0017). The prefill
+    // pass reads the document's text layer and leaves the pictures to the
+    // check, so alcohol content and net contents are commonly still to come
+    // rather than absent. Opening a box and moving focus into it for a value
+    // the next click fills in would be the tool asking the agent to do its own
+    // work, one second before doing it.
     const supplied = new Set(
       filled.map((entry) => entry.name).filter((name) => name in EMPTY_APPLICATION),
     )
-    setGaps(APPLICATION_FIELDS.filter((name) => !supplied.has(name) && !application[name].trim()))
+    const owed = pendingFromArtwork(document)
+    const stillComing = new Set(owed)
+    setPending(owed.filter((name) => !application[name].trim()))
+    setGaps(
+      APPLICATION_FIELDS.filter(
+        (name) => !supplied.has(name) && !stillComing.has(name) && !application[name].trim(),
+      ),
+    )
   }
 
   /** Taking every file back off returns the view to its unprocessed state. */
@@ -243,6 +325,7 @@ export function SingleLabelTab() {
     setSources((previous) => onlyTyped(previous, application))
     setProcessed(false)
     setGaps([])
+    setPending([])
   }
 
   /**
@@ -257,6 +340,7 @@ export function SingleLabelTab() {
     setSources((previous) => onlyTyped(previous, application))
     setProcessed(false)
     setGaps([])
+    setPending([])
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
@@ -286,6 +370,9 @@ export function SingleLabelTab() {
     if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
+    // The clearing announcement is spent. Leaving it would have the region say
+    // the form is empty at the moment it fills with results.
+    setCleared('')
     // What the agent typed, and nothing the interface filled in from the
     // document (FR-14). See `typedValues` for what posting the rest back does
     // to a document-only submission.
@@ -293,15 +380,21 @@ export function SingleLabelTab() {
     setChecking(false)
   }
 
+  /*
+   * Whether there is anything a reset would clear. Derived rather than tracked,
+   * because every part of it is already state and a second copy of the answer
+   * would be a second thing to keep in step.
+   */
+  const clearable =
+    files.length > 0 ||
+    outcome !== null ||
+    processed ||
+    APPLICATION_FIELDS.some((name) => application[name].trim())
+
   const result = outcome?.result ?? null
   // The live region text. Empty while checking so that the "Checking" line and
   // the result are not both announced as one run-on sentence.
-  const spoken = result
-    ? announcement(
-        result.fields.map((field) => field.outcome),
-        outcome?.seconds ?? 0,
-      )
-    : ''
+  const spoken = result ? announcement(result.fields.map((field) => field.outcome)) : ''
 
   return (
     <div className="layout">
@@ -318,6 +411,8 @@ export function SingleLabelTab() {
 
         <form onSubmit={submit} noValidate>
           <UploadPanel
+            key={generation}
+            pickerRef={pickerRef}
             files={files}
             onFilesChange={setFiles}
             onClassified={fillFromClassification}
@@ -330,6 +425,7 @@ export function SingleLabelTab() {
             sources={sources}
             processed={processed}
             gaps={gaps}
+            pending={pending}
             open={fieldsOpen}
             onToggle={toggleFields}
             onChange={update}
@@ -354,12 +450,14 @@ export function SingleLabelTab() {
           <button className="button button--primary" type="submit" disabled={!canCheck}>
             {checking ? 'Checking...' : 'Check this label'}
           </button>
-          {!canCheck ? (
-            <p className="field__hint">
-              Upload something to turn on the check: the label application, an image of the label,
-              or both.
-            </p>
-          ) : null}
+          {/*
+            A short label, not nothing (US-28). The agent still has to know why
+            the button is inert, and the reason it is inert is one word long:
+            there is no file. What the button takes, and why either kind of file
+            is enough on its own, is a question, and questions are answered on
+            the Help tab.
+          */}
+          {!canCheck ? <p className="field__hint">Upload a file to check.</p> : null}
         </form>
       </section>
 
@@ -377,33 +475,13 @@ export function SingleLabelTab() {
           at the same moment as its text is not reliably announced.
         */}
         <div className="visually-hidden" role="status" aria-live="polite" aria-label="Check result">
-          {checking ? 'Checking this label.' : spoken}
+          {checking ? 'Checking this label.' : cleared || spoken}
         </div>
 
         {outcome?.error ? <ErrorMessage error={outcome.error} /> : null}
 
         {result ? (
           <>
-            {/*
-              Two measured numbers and one honestly named difference (NFR-1).
-              This used to attribute the gap between them to "sending the image
-              and receiving the answer", which was an explanation nobody had
-              measured and which a control run showed was wrong by about three
-              and a half seconds. See src/lib/timing.ts.
-            */}
-            <p className="timing">
-              Checked in {outcome!.seconds.toFixed(1)} seconds.{' '}
-              <span className="timing__detail">
-                {timingSummary(outcome!.seconds, result.elapsed_ms)}
-              </span>
-            </p>
-            {result.timings ? <TimingBreakdown timings={result.timings} /> : null}
-            {/*
-              One short line, once, when the label being checked came out of the
-              application document rather than off a bottle (ADR 0010). It is
-              the honest limitation, stated where the agent is reading the
-              result rather than left to a document.
-            */}
             {/*
               The summary line, and the reason it is not "5 of 5 fields match"
               (FR-14, ADR 0013). Where some of the five rows compared a value
@@ -413,6 +491,19 @@ export function SingleLabelTab() {
               how many were only read.
             */}
             <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
+            {/*
+              The limit of what a search establishes is on the Help tab now
+              (US-28), under "Why is the brand name found but not judged for
+              type size or placement?". It is a true and important sentence and
+              it is not a sentence an agent needs in the middle of reading five
+              results; it is the same sentence every time, on every check, and a
+              caveat printed on every check is read on none of them.
+
+              `reasonWithoutLimit` still runs on each row. The API appends the
+              limit to every searched reason because a caller with no interface
+              has nowhere else to read it (OOS-4), and stripping it here is what
+              keeps it from arriving on the row by the back door.
+            */}
             {result.label_source === 'application_artwork' ? (
               <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
             ) : null}
@@ -427,61 +518,38 @@ export function SingleLabelTab() {
                 />
               ))}
             </div>
-            <p className="footnote">
-              This tool recommends. You decide. Every value it read off the label is shown beside
-              the value on the application so you can check the call rather than take it.
-            </p>
+            <p className="footnote">This tool recommends. You decide.</p>
           </>
+        ) : null}
+
+        {/*
+          The reset (US-29), beside the results rather than at the top of the
+          form. An agent who has finished one label is looking here, at the last
+          row of what they just read, and that is where the control to go on to
+          the next one belongs.
+
+          It is shown whenever there is anything to clear, not only after a
+          check: an agent who chose the wrong file has the same thing to undo as
+          one who read a whole result.
+
+          A button, not a link. It performs an action on this page rather than
+          going anywhere, which is what the element means, and it is what makes
+          it operable by Space as well as Enter and reachable in the tab order
+          with a focus ring, none of which a styled anchor gets for free
+          (NFR-5).
+        */}
+        {clearable ? (
+          <button className="button button--quiet reset" type="button" onClick={reset}>
+            Clear and start another label
+          </button>
         ) : null}
 
         {!result && !outcome?.error && !checking ? (
           <p className="placeholder">
-            Upload the label application, an image of the label, or both, then select
-            <strong> Check this label</strong>. The five results appear here. Nothing to upload for
-            the application side? Open <strong>Or type the application values</strong> and type them
-            instead.
+            Upload a file and select <strong>Check this label</strong>; the results appear here.
           </p>
         ) : null}
       </section>
     </div>
-  )
-}
-
-/**
- * Where the server's time actually went, behind a disclosure (NFR-1).
- *
- * **Behind a disclosure because an agent checking a label does not need it, and
- * on the page at all because the person who does need it has nowhere else to
- * look.** NFR-4's benchmark is an agent who should not have to read past
- * anything, so a phase table above the results would be the tool talking about
- * itself in the middle of somebody's work. But a prototype that takes longer
- * than Sarah Chen's five seconds should be able to say where the time went
- * without anyone attaching a profiler, and until 2026-08-30 it could not: the
- * only figure it published was measuring the wrong span.
- *
- * Every row is a timer around the work it names. The last row, where there is
- * one, is what no timer covered, and it says so.
- */
-function TimingBreakdown({ timings }: { timings: PhaseTimings }) {
-  const rows = spans(timings)
-  if (!rows.length) return null
-
-  return (
-    <details className="timing-detail">
-      <summary>Where the time went</summary>
-      <p className="field__hint">{readingNote(timings)}</p>
-      <dl className="timing-detail__list">
-        {rows.map((span) => (
-          <div className="timing-detail__row" key={span.label}>
-            <dt>{span.label}</dt>
-            <dd>{span.ms.toFixed(0)} ms</dd>
-          </div>
-        ))}
-      </dl>
-      <p className="field__hint">
-        These are measured, not estimated. They cover the server only; time in your browser and on
-        the network is not something the server can see.
-      </p>
-    </details>
   )
 }

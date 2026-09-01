@@ -35,6 +35,7 @@ import { FilePreview, TileHeading } from './Ui'
 import { SIDES, announce } from '../lib/uploadAnnouncement'
 import { classifyUploads } from '../lib/api'
 import type { UiError } from '../lib/api'
+import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { plainMessage } from '../lib/plainLanguage'
 import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
@@ -59,6 +60,25 @@ interface Props {
   onUnreadable: () => void
   /** Called when the last file is taken back off. */
   onCleared: () => void
+  /** Passed through to the picker, so the reset control can focus it (US-29). */
+  pickerRef?: React.RefObject<HTMLInputElement | null>
+}
+
+/**
+ * One value the form states that the check does not use, as a line.
+ *
+ * The chip is the whole of the explanation on this screen. Why it is not
+ * compared is a question, and questions are answered on the Help tab; here an
+ * agent only has to see that we read it and are not using it.
+ */
+function ValueNote({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="value-line">
+      <span className="value-line__label">{label}</span>
+      <span className="value-line__value">{value}</span>
+      <span className="chip">Not compared</span>
+    </div>
+  )
 }
 
 /** Two files are the same file when their name, size and modified time agree. */
@@ -74,6 +94,7 @@ export function UploadPanel({
   onClassified,
   onUnreadable,
   onCleared,
+  pickerRef,
 }: Props) {
   const headingId = useId()
   const [reading, setReading] = useState(false)
@@ -122,8 +143,13 @@ export function UploadPanel({
 
   const document = result?.application_document ?? null
   const found = document?.fields.filter((entry) => entry.found_on_document) ?? []
-  const missing = document?.fields.filter((entry) => !entry.found_on_document) ?? []
-  const fromArtwork = found.filter((entry) => entry.source === 'embedded_artwork')
+
+  // A value the artwork is about to supply is not a value the agent has to
+  // enter (ADR 0017), so it is not listed as one. The check reads the pictures
+  // and fills it in.
+  const pending = new Set<string>(pendingFromArtwork(document))
+  const missing =
+    document?.fields.filter((entry) => !entry.found_on_document && !pending.has(entry.name)) ?? []
 
   return (
     <section className="upload-panel" aria-labelledby={headingId}>
@@ -132,20 +158,14 @@ export function UploadPanel({
           Upload the label application, an image of the label, or both
         </h3>
       </TileHeading>
-      <p className="field__hint" id={`${headingId}-hint`}>
-        One place for everything. PDFs and images, one file or several. We work out what each one
-        is: an application tells us what the label should say, an image of the label shows us what
-        it does say. An application that carries its own label artwork is enough on its own. Files
-        are read here and are not sent to TTB or kept.
-      </p>
-
       <DropZone
         label="Files for this label"
-        hint="Drag files here, or choose them. PDF, JPEG, PNG, WebP or TIFF."
+        hint="Drag files here, or choose them: PDF, JPEG, PNG, WebP or TIFF."
         accept={ACCEPTED_UPLOADS}
         multiple
         files={[]}
         onFiles={add}
+        inputRef={pickerRef}
       />
 
       {files.length ? (
@@ -216,32 +236,24 @@ export function UploadPanel({
             {PATHS[document.extraction_path]}
             {document.pages_read > 1 ? ` over ${document.pages_read} pages` : ''}.
           </p>
-          {fromArtwork.length ? (
-            <p className="field__hint">
-              {fromArtwork.map((entry) => entry.display_name).join(', ')}{' '}
-              {fromArtwork.length === 1 ? 'was' : 'were'} read from the label artwork inside this
-              application, not from its text. Those went through the same reading we use on a label
-              image, so check them.
-            </p>
-          ) : null}
-          {document.label_artwork_available && !result?.label_images ? (
-            <p className="field__hint">
-              This application carries its own label artwork, so you do not have to add an image. We
-              will check that artwork. Checking the physical bottle still needs a photo of the
-              bottle.
-            </p>
-          ) : null}
+          {/*
+            Two values the form states and the check does not use, as lines
+            rather than as sentences (US-28). Each is one row: the name, the
+            value, and a chip saying it is not compared. The paragraphs they
+            replace explained the same thing in two sentences each, on a screen
+            the author said had too many words on it.
+
+            The fanciful name is kept rather than moved to Help entirely, and
+            this is the quieter of the two options the brief offered: it is a
+            real value the parser read off the document in front of the agent,
+            and an agent who wants to know why it is not compared has one place
+            to look. The explanation is the Help entry; this is the datum.
+          */}
           {document.class_type_code ? (
-            <p className="field__hint">
-              The form gives the class or type code as {document.class_type_code}. The description
-              is what gets compared.
-            </p>
+            <ValueNote label="Class or type code" value={document.class_type_code} />
           ) : null}
           {document.fanciful_name ? (
-            <p className="field__hint">
-              Fanciful name on the application: {document.fanciful_name}. It is not one of the
-              fields we compare.
-            </p>
+            <ValueNote label="Fanciful name" value={document.fanciful_name} />
           ) : null}
           {missing.length ? (
             <>

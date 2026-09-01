@@ -39,6 +39,15 @@ class Outcome(StrEnum):
     application data missing a field, then that field is reported as not
     compared, and this is distinguished from a mismatch."
 
+    ``PRESENT`` is the outcome of a **presence check**, which is a one-sided
+    finding and a passing one (FR-15, [ADR 0018](../../docs/adr/0018-presence-checks.md)).
+    27 CFR requires alcohol content and net contents to appear on the label. Where
+    the application declares neither, that requirement is still answerable, and
+    the answer is about the label alone: either it carries the element or it does
+    not. A label that carries it has been shown to satisfy a real regulatory
+    requirement, and reporting that as "not compared" throws away a true positive
+    finding because the form happened to be silent.
+
     ``ARTWORK_DERIVED`` is the fifth, and it is not a verdict about agreement at
     all (FR-14, ADR 0013). It marks a row whose application value was read off
     the same label artwork that supplied the label side, so the two strings
@@ -46,12 +55,19 @@ class Outcome(StrEnum):
     ever agree, and a match chip on it would be structurally incapable of saying
     anything else. It is decided in ``app.verify`` rather than here, because
     this module compares two strings and has no idea where either came from.
+
+    **The two are not alternatives, and ADR 0018 narrows the second.** A
+    presence check is not a comparison at all, so it has nothing to be circular
+    about; the artwork-derived state stays for what it was built for, a value
+    read off the artwork and then compared against that same artwork, which
+    after ADR 0018 is a case the presence fields never reach.
     """
 
     MATCH = "match"
     NEEDS_REVIEW = "needs_review"
     MISMATCH = "mismatch"
     NOT_COMPARED = "not_compared"
+    PRESENT = "present"
     ARTWORK_DERIVED = "artwork_derived"
 
 
@@ -251,6 +267,61 @@ _PRESENCE_RULES = {
 }
 
 
+# What a presence check says when it passes (FR-15, ADR 0018).
+#
+# **This is a positive finding, not a consolation prize.** The row establishes
+# something real: the label carries an element 27 CFR requires it to carry. That
+# is exactly what an agent checking a filing has to establish, and it is
+# established whether or not the application form repeats the value, because the
+# requirement is on the label rather than on the form.
+#
+# The wording says which of the two it is, so the row cannot be misread as a
+# comparison that happened to agree. The citations are the same ones
+# ``_PRESENCE_RULES`` names for absence, because presence and absence are the
+# two answers to one question and an agent should see the same rule cited either
+# way.
+_PRESENCE_PASSES = {
+    "alcohol_content": (
+        "Alcohol content is on the label: {value}. 27 CFR 5.63(a)(3) requires it "
+        "on a distilled spirits label and 27 CFR 4.32(b)(3) on a wine label, and "
+        "the label carries it. The application declared no value, so this is a "
+        "check that the required element is present rather than a comparison of "
+        "two values."
+    ),
+    "net_contents": (
+        "Net contents is on the label: {value}. 27 CFR 5.63(b)(2) and "
+        "27 CFR 7.63(a)(5) require it on distilled spirits and malt beverage "
+        "containers and 27 CFR 4.32(b)(2) on a wine label, and the label carries "
+        "it. The application declared no value, so this is a check that the "
+        "required element is present rather than a comparison of two values."
+    ),
+}
+
+
+def present_on_label(name: str, label_value: str) -> Comparison | None:
+    """The passing presence finding, where the application declared nothing.
+
+    **The row this replaces printed "not compared", and that was the design
+    mistake** (FR-15, ADR 0018). A label carrying ``42% ALC BY VOL`` has been
+    shown to satisfy 27 CFR 5.63(a)(3). Reporting nothing because the form was
+    silent discards a true finding about the label, which is the thing the agent
+    is checking.
+
+    It carries no score. A score is a similarity between two strings and there
+    is only one string here; printing 100 beside a one-sided finding would be
+    inventing an agreement that was never tested.
+
+    Returns None for a field with no presence rule, which is every field whose
+    presence on the label is not something this tool can assert from 27 CFR.
+    """
+    template = _PRESENCE_PASSES.get(name)
+    if template is None:
+        return None
+    return Comparison(
+        outcome=Outcome.PRESENT, score=None, reason=template.format(value=label_value.strip())
+    )
+
+
 def missing_from_label(name: str, label_value: str | None) -> Comparison | None:
     """The regulatory presence finding, or None where the label carries it.
 
@@ -325,12 +396,21 @@ def compare_abv(label_value: str | None, application_value: str | None) -> Compa
     when the two declared percentages agree, because the label contradicts
     itself and that is a person's call.
 
-    **The two label-only checks run first** (FR-14, ADR 0013). Whether the label
-    carries alcohol content at all, and whether the percentage and the proof it
-    prints agree with each other, are both questions about the label. Running
-    them before the application side is considered is what keeps them answerable
-    when the application supplied nothing, and what keeps the contradiction from
-    being swallowed by a row that reports "not compared".
+    **The label-only checks run first** (FR-14, FR-15, ADR 0013, ADR 0018).
+    Whether the label carries alcohol content at all, whether the percentage and
+    the proof it prints agree with each other, and, where the application
+    declared nothing, whether the required element is present, are all questions
+    about the label. Running them before the application side is considered is
+    what keeps them answerable when the application supplied nothing, and what
+    keeps the contradiction from being swallowed by a row that reports "not
+    compared".
+
+    **Order within them matters.** A label that contradicts itself is reported as
+    the review A-12 makes it, even where the application is silent and the
+    presence check below would otherwise pass the row. A contradiction is a
+    defect on the label, and a presence check that reported "the element is
+    there" over the top of it would be answering a narrower question than the one
+    the tool had already answered.
     """
     absent = missing_from_label("alcohol_content", label_value)
     if absent is not None:
@@ -339,6 +419,14 @@ def compare_abv(label_value: str | None, application_value: str | None) -> Compa
     contradiction = label_contradicts_itself(label_value)
     if contradiction is not None:
         return contradiction
+
+    # The label carries it and the application declared nothing, so there is a
+    # real finding to report and it is not a comparison (FR-15, ADR 0018).
+    # ``label_value`` is non-empty by the guard above.
+    if not (application_value and application_value.strip()):
+        present = present_on_label("alcohol_content", label_value or "")
+        if present is not None:
+            return present
 
     missing = _missing(label_value, application_value)
     if missing is not None:
@@ -474,14 +562,24 @@ def parse_net_contents(value: str | None) -> NetContentsReading:
 def compare_net_contents(label_value: str | None, application_value: str | None) -> Comparison:
     """Compare net contents values (FR-7, A-13).
 
-    The presence rule runs first, for the reason it does in ``compare_abv``:
-    27 CFR requires net contents on the label whatever the form says, so a label
-    that does not carry it is a finding rather than a field with nothing to
-    compare (FR-14, ADR 0013).
+    The presence rules run first, for the reason they do in ``compare_abv``:
+    27 CFR requires net contents on the label whatever the form says, so both
+    answers to that question are real findings. A label that does not carry it
+    is a mismatch (FR-14, ADR 0013); a label that carries it against a silent
+    application is a passing presence check (FR-15, ADR 0018). Only where the
+    application declares a value is there a comparison to make.
     """
     absent = missing_from_label("net_contents", label_value)
     if absent is not None:
         return absent
+
+    # As in ``compare_abv``: the label carries it, the application declared
+    # nothing, and that is a passing presence check rather than nothing to
+    # report (FR-15, ADR 0018).
+    if not (application_value and application_value.strip()):
+        present = present_on_label("net_contents", label_value or "")
+        if present is not None:
+            return present
 
     missing = _missing(label_value, application_value)
     if missing is not None:

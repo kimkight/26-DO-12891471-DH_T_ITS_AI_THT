@@ -52,7 +52,7 @@ import {
   gapAnnouncement,
 } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
-import { fieldSourceMark, sourceCaveat, sourceChipLabel } from '../lib/applicationSources'
+import { fieldSourceMark, sourceChipLabel } from '../lib/applicationSources'
 import type { ApplicationData, ApplicationSource } from '../types'
 
 interface Props {
@@ -71,6 +71,19 @@ interface Props {
    * not change because someone is editing.
    */
   gaps: (keyof ApplicationData)[]
+  /**
+   * The values the upload has not supplied *yet*, because the artwork they are
+   * printed on is read by the check rather than by the prefill pass (ADR 0017).
+   *
+   * A third state, and it has to be a third state. These are not gaps: nothing
+   * is being asked of the agent, so no box opens inline and nothing takes
+   * focus. Nor are they read: there is no value to summarise, and a summary
+   * line with an empty value beside a chip saying where it came from would be
+   * the interface reporting a reading that has not happened. They stay
+   * editable behind the disclosure, because an agent who wants to type one
+   * before the check still may, and FR-11's precedence still makes theirs win.
+   */
+  pending?: (keyof ApplicationData)[]
   /** The disclosure's state, held by the parent because it is set from outside. */
   open: boolean
   onToggle: () => void
@@ -89,7 +102,9 @@ function SummaryLine({
   value: string
   source: ApplicationSource
 }) {
-  const caveat = sourceCaveat(source)
+  // No caveat line under the chip. The chip is the caveat: it names the source
+  // in four words, and a sentence repeating it was the third telling of
+  // something the upload card says once above (2026-08-31).
   return (
     <div className="value-line">
       <span className="value-line__label">{label}</span>
@@ -97,7 +112,6 @@ function SummaryLine({
       <span className={`chip chip--${source === 'typed' ? 'navy' : 'gold'}`}>
         {sourceChipLabel(source)}
       </span>
-      {caveat ? <span className="value-line__caveat">{caveat}</span> : null}
     </div>
   )
 }
@@ -107,13 +121,17 @@ export function ApplicationFields({
   sources,
   processed,
   gaps: missing,
+  pending = [],
   open,
   onToggle,
   onChange,
   onGapNews,
 }: Props) {
   const gaps = TEXT_FIELDS.filter((field) => missing.includes(field.name))
-  const read = TEXT_FIELDS.filter((field) => !missing.includes(field.name))
+  // Everything that is not a gap stays editable behind the disclosure, pending
+  // values included. Only the ones with something in them are summarised.
+  const editable = TEXT_FIELDS.filter((field) => !missing.includes(field.name))
+  const read = editable.filter((field) => !pending.includes(field.name))
   const firstGapRef = useRef<HTMLInputElement>(null)
 
   /*
@@ -188,27 +206,33 @@ export function ApplicationFields({
    *
    * Its hint changes with the situation, and the change is the ADR 0008 truth
    * rather than a rewording: before anything is processed it says what the
-   * field is for, and after a document has been read without stating a type it
-   * says why the document could not say. Item 5 is three check marks, and a
-   * text layer prints the caption of an unticked box exactly as it prints the
-   * caption of a ticked one.
+   * field is for, and after a document has been read without settling the type
+   * it says why. Item 5 is three check boxes; a text layer prints the caption of
+   * an unticked box exactly as it prints the caption of a ticked one, so the
+   * boxes are sampled off the rendered page instead (ADR 0016). Where that did
+   * not separate one box from the other two, the agent chooses.
    */
   function beverageField() {
     return (
       <div className="field">
         <label htmlFor="beverage_type">Beverage type</label>
-        <p className="field__hint" id="beverage_type-hint">
-          {processed && !beverageRead
-            ? 'Not read from the form: the product-type boxes are check marks, which the text layer cannot report. '
-            : ''}
-          Not compared against the label. It says which numeric rule to expect: the proof
-          cross-check for spirits, range handling for wine.
-        </p>
+        {/*
+          What the beverage type is for went to Help (US-28), under "Where does
+          beverage type come from?". The sentence that stays is the one that is
+          about *this* document rather than about the field: item 5's boxes were
+          looked at and did not settle it, so the agent chooses. On a document
+          that did settle it there is nothing to say and nothing is said.
+        */}
+        {processed && !beverageRead ? (
+          <p className="field__hint" id="beverage_type-hint">
+            Item 5&rsquo;s boxes were read from the page and none of them stood out.
+          </p>
+        ) : null}
         <select
           id="beverage_type"
           name="beverage_type"
           value={application.beverage_type}
-          aria-describedby="beverage_type-hint"
+          aria-describedby={processed && !beverageRead ? 'beverage_type-hint' : undefined}
           onChange={(event) => onChange('beverage_type', event.target.value)}
         >
           {BEVERAGE_TYPES.map((option) => (
@@ -248,8 +272,8 @@ export function ApplicationFields({
             {gaps.length === 1 ? 'One value was not read' : `${gaps.length} values were not read`}
           </h3>
           <p className="field__hint">
-            Enter it here, or upload a clearer file and we will try again. Leave it empty and that
-            field is reported as not compared rather than as a mismatch.
+            Enter it here, or upload a clearer file; an empty box is reported as not compared rather
+            than as a mismatch.
           </p>
           {gaps.map((field, index) => textField(field, index === 0))}
         </div>
@@ -302,11 +326,11 @@ export function ApplicationFields({
 
         <div className="disclosure__panel" id={TYPED_FIELDS_PANEL} hidden={!open}>
           <p className="field__hint">
-            The check runs on whatever is in these boxes. A value you type here is used instead of
-            the one read off the application. Leave a box empty and that field is not compared.
+            The check runs on whatever is in these boxes; a value you type wins, and an empty box is
+            not compared.
           </p>
 
-          {(processed ? read : TEXT_FIELDS).map((field) => textField(field))}
+          {(processed ? editable : TEXT_FIELDS).map((field) => textField(field))}
 
           {/*
             The beverage type control lives here when it was read, and inline

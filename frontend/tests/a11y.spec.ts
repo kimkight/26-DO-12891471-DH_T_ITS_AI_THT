@@ -55,6 +55,62 @@ async function violations(page: import('@playwright/test').Page): Promise<AxeVio
   }, TAGS)
 }
 
+/**
+ * Stub both endpoints with a five-row result carrying four different outcomes.
+ *
+ * Four rather than one, because the criteria below are about telling outcomes
+ * apart: a page with five matches on it cannot fail a greyscale check.
+ */
+async function stubResult(page: import('@playwright/test').Page) {
+  await page.route('**/api/classify', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(CLASSIFIED_PHOTO),
+    })
+  })
+  await page.route('**/api/verify', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(RESULT),
+    })
+  })
+}
+
+/**
+ * The same, for the document-only submission, whose result carries the two
+ * outcomes that share a colour (FR-15, ADR 0018) plus the artwork-derived one.
+ */
+async function stubDocumentOnlyResult(page: import('@playwright/test').Page) {
+  await page.route('**/api/classify', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(CLASSIFIED_PHOTO),
+    })
+  })
+  await page.route('**/api/verify', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(ARTWORK_DERIVED_RESULT),
+    })
+  })
+}
+
+/** Upload a label image and run the check, leaving the result on the page. */
+async function runCheck(page: import('@playwright/test').Page) {
+  await page.goto('/')
+  await page.getByLabel('Files for this label').setInputFiles({
+    name: 'label.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from([137, 80, 78, 71]),
+  })
+  await page.getByRole('button', { name: 'Check this label' }).click()
+  await expect(page.locator('p.summary-line')).toBeVisible()
+}
+
 function report(found: AxeViolation[]): string {
   return found
     .map(
@@ -81,6 +137,91 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     await expect(page.getByLabel('Label images')).toBeVisible()
     await expect(page.getByLabel('COLA documents')).toBeVisible()
     await expect(page.getByText(/They are matched by name/)).toBeVisible()
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
+  /*
+   * The Help tab (US-28). A whole page of prose is where heading structure and
+   * reading order either hold or do not, and neither is visible in a unit test.
+   */
+  test('the help tab', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('tab', { name: 'Help' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Help', level: 2 })).toBeVisible()
+    // The moved copy is on the page, in the shape of answers to questions.
+    await expect(page.getByRole('heading', { name: 'What do I upload?' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'What happens to my files?' })).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
+  test('the help tab is reached by keyboard and reads as one level of headings', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    // Arrow keys move along the strip, which is the ARIA tabs pattern, and the
+    // third segment is reachable that way like the second (WCAG 2.1.1).
+    await page.getByRole('tab', { name: 'Check one label' }).focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('tab', { name: 'Help' })).toBeFocused()
+    await expect(page.getByRole('tab', { name: 'Help' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#panel-help')).toBeVisible()
+
+    /*
+     * Info and relationships (WCAG 1.3.1): the panel's own h2, then section
+     * headings and question headings at h3, and nothing skipped. Asserted as
+     * the sequence of levels rather than as a count, because a page whose
+     * headings jump from h2 to h4 is exactly what a screen reader user cannot
+     * see and a colour test cannot catch.
+     */
+    const levels = await page
+      .locator('#panel-help :is(h1, h2, h3, h4, h5, h6)')
+      .evaluateAll((nodes) => nodes.map((node) => Number(node.tagName.slice(1))))
+    expect(levels[0]).toBe(2)
+    expect(new Set(levels.slice(1))).toEqual(new Set([3]))
+  })
+
+  /*
+   * The reset (US-29). Its keyboard behaviour is the half a unit test cannot
+   * see: a real focus ring, operability by Space as well as Enter, and where
+   * focus actually lands in a browser once the element that had it is gone.
+   */
+  test('the reset control is keyboard operable and leaves focus somewhere', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'cola.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })
+
+    const reset = page.getByRole('button', { name: 'Clear and start another label' })
+    await expect(reset).toBeVisible()
+
+    // A visible focus ring, computed rather than assumed (WCAG 2.4.7).
+    await reset.focus()
+    const outline = await reset.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return `${style.outlineStyle} ${style.outlineWidth}`
+    })
+    expect(outline).not.toContain('none')
+
+    // Space, which is what a button does and an anchor does not (WCAG 2.1.1).
+    await page.keyboard.press('Space')
+
+    await expect(page.getByLabel('Files for this label')).toBeFocused()
+    await expect(reset).toHaveCount(0)
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
@@ -138,27 +279,62 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       buffer: Buffer.from([137, 80, 78, 71]),
     })
     await page.getByRole('button', { name: 'Check this label' }).click()
-    await expect(page.getByText(/Checked in/).first()).toBeVisible()
+    await expect(page.locator('p.summary-line')).toBeVisible()
 
-    // The panel names the difference between the two clocks as a location, and
-    // no longer as a mechanism nobody measured (NFR-1).
-    await expect(page.locator('.timing__detail')).toContainText(
-      'in your browser and on the network',
-    )
-    await expect(page.getByText(/sending the image/)).toHaveCount(0)
-
-    // The breakdown is on the page and closed, and axe checks it open too,
-    // because a disclosure nobody opens is not a disclosure that was checked.
-    await expect(page.getByText('Where the time went')).toBeVisible()
-    const before = await violations(page)
-    expect(report(before)).toBe('')
-
-    await page.getByText('Where the time went').click()
-    await expect(page.getByText('Reading the label')).toBeVisible()
-    await expect(page.getByText(/These are measured, not estimated/)).toBeVisible()
+    // **The timing came off the panel on 2026-08-31.** The author: "I don't need
+    // the time listed on the screen ... do not put all these extra words on the
+    // screen that should not be there." The phases are still measured and still
+    // in the API response, where the deployment runbook reads them; what has
+    // gone is the tool talking about itself in the middle of somebody's work
+    // (NFR-4). Asserted on the built page, because that is what an agent loads.
+    await expect(page.locator('p.timing')).toHaveCount(0)
+    await expect(page.getByText(/Checked in/)).toHaveCount(0)
+    await expect(page.getByText('Where the time went')).toHaveCount(0)
 
     const found = await violations(page)
     expect(report(found)).toBe('')
+  })
+
+  /*
+   * The author's target, in her words: the single-label result for a clean
+   * document fits one screen without scrolling at 1280x800.
+   *
+   * A word count is a proxy; this is the thing itself. It is here rather than in
+   * vitest because jsdom has no layout engine and cannot answer it, which is the
+   * same reason the contrast rule lives in this file.
+   */
+  test('a clean result fits one screen at 1280 by 800', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.route('**/api/verify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLEAN_RESULT),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'label.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from([137, 80, 78, 71]),
+    })
+    await page.getByRole('button', { name: 'Check this label' }).click()
+    await expect(page.locator('p.summary-line')).toBeVisible()
+
+    // The last thing in the panel, on screen without scrolling. Measured against
+    // the viewport rather than against the document, because a two-column layout
+    // means the page can be taller than the panel and still show all of it.
+    const footnote = page.locator('section[aria-labelledby="results-heading"] p.footnote')
+    const box = await footnote.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.y + box!.height).toBeLessThanOrEqual(800)
   })
 
   /*
@@ -172,7 +348,9 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
    * real layout engine can prove it clears 4.5:1 as actually rendered, which
    * is why the chip is put on the page rather than only in a unit test.
    */
-  test('the artwork-derived state, on a document-only submission', async ({ page }) => {
+  test('the presence and artwork-derived states, on a document-only submission', async ({
+    page,
+  }) => {
     await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -199,15 +377,223 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     // the live region alike. Both are asserted: the sentence an agent reads and
     // the sentence an agent hears have to be one sentence, and a locator that
     // matched either would not prove it.
-    const line = '2 of 2 verifiable fields match; 3 read from the artwork only'
+    const line = '4 of 4 checks passed; 1 read from the artwork only'
     await expect(page.locator('.summary-line')).toHaveText(line)
     await expect(page.getByRole('status', { name: 'Check result' })).toContainText(line)
     // And the row says why it is different, on the row.
     await expect(page.getByText('Label artwork (same source as the label)').first()).toBeVisible()
     await expect(page.getByText('Read from the artwork').first()).toBeVisible()
 
+    // The presence rows: the word, and no application side to read as a
+    // comparison (FR-15, ADR 0018).
+    const contains = page.locator('[data-outcome="present"]')
+    await expect(contains).toHaveCount(2)
+    await expect(contains.first()).toContainText('Contains')
+    const alcohol = page.locator('article', { has: page.getByText('Alcohol content') }).first()
+    await expect(alcohol.getByText(/On the application/)).toHaveCount(0)
+
+    /*
+     * Contains and Match share a colour, so the greyscale rule is where the
+     * separation has to survive. Checked here rather than only in a unit test
+     * because it is a property of the rendered page: the two chips have to
+     * differ by word and by silhouette with every colour removed.
+     */
+    await page.evaluate(() => {
+      document.documentElement.style.filter = 'grayscale(1)'
+    })
+    await expect(contains.first()).toContainText('Contains')
+    await expect(page.locator('[data-outcome="match"]').first()).toContainText('Match')
+    const shapes = await page.evaluate(() =>
+      ['present', 'match'].map(
+        (outcome) =>
+          document.querySelector(`[data-outcome="${outcome}"] svg path`)?.getAttribute('d') ?? '',
+      ),
+    )
+    expect(shapes[0]).not.toBe(shapes[1])
+    expect(shapes.every((shape) => shape.length > 0)).toBe(true)
+    await page.evaluate(() => {
+      document.documentElement.style.filter = ''
+    })
+
     const found = await violations(page)
     expect(report(found)).toBe('')
+  })
+})
+
+/*
+ * The Success Criteria no automated tool evaluates, checked as behaviour of the
+ * rendered page (Section 508 via WCAG 2.0 AA, verified to 2.1 AA).
+ *
+ * axe reports "incomplete" or nothing at all for each of these. They are the
+ * ones a conformance report has to be able to point at, and
+ * `docs/ACCESSIBILITY_CONFORMANCE.md` points at them by name.
+ */
+test.describe('the criteria a tool reports as incomplete', () => {
+  /**
+   * WCAG 1.4.10 Reflow: usable at 320 CSS pixels wide with no horizontal
+   * scrolling. 320 by 256 is what the criterion names, being 1280 by 1024 at
+   * 400 percent zoom.
+   */
+  const NARROW = { width: 320, height: 256 }
+
+  async function horizontalOverflow(page: import('@playwright/test').Page) {
+    return page.evaluate(() => {
+      const root = document.documentElement
+      return root.scrollWidth - root.clientWidth
+    })
+  }
+
+  test('reflows at 320 pixels on every tab, with nothing scrolling sideways', async ({ page }) => {
+    await page.setViewportSize(NARROW)
+    await page.goto('/')
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+
+    await page.getByRole('tab', { name: 'Check many labels' }).click()
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+
+    await page.getByRole('tab', { name: 'Help' }).click()
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+  })
+
+  test('reflows at 320 pixels with five result cards on the page', async ({ page }) => {
+    await page.setViewportSize(NARROW)
+    await stubResult(page)
+    await runCheck(page)
+
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+  })
+
+  /**
+   * WCAG 1.4.12 Text Spacing: no content is lost when a reader overrides line
+   * height, letter spacing, word spacing and paragraph spacing to the values
+   * the criterion names.
+   */
+  test('survives the text spacing a reader may impose', async ({ page }) => {
+    await stubResult(page)
+    await runCheck(page)
+    await page.addStyleTag({
+      content: `* { line-height: 1.5 !important; letter-spacing: 0.12em !important;
+        word-spacing: 0.16em !important; }
+        p, li { margin-bottom: 2em !important; }`,
+    })
+
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+    // And the result is still readable rather than clipped away.
+    await expect(page.locator('.summary-line')).toBeVisible()
+    await expect(page.getByText('Does not match').first()).toBeVisible()
+  })
+
+  /**
+   * WCAG 1.4.4 Resize Text: readable at 200 percent, which for a page with no
+   * fixed pixel layout is the same viewport at half the width.
+   */
+  test('is usable at 200 percent zoom', async ({ page }) => {
+    await page.setViewportSize({ width: 640, height: 512 })
+    await stubResult(page)
+    await runCheck(page)
+
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+    await expect(page.locator('.summary-line')).toBeVisible()
+  })
+
+  /**
+   * WCAG 1.4.1 Use of Colour, across the whole result rather than one chip.
+   *
+   * Every outcome on the page is read with all colour removed, and the claim is
+   * that each is still identifiable: a distinct word, and a distinct shape. Two
+   * of them share a colour by design (FR-15, ADR 0018), which is what makes
+   * this the check that matters rather than a formality.
+   */
+  const FIXTURES = [
+    { name: 'a photograph checked against typed values', stub: stubResult },
+    { name: 'a document checked against its own artwork', stub: stubDocumentOnlyResult },
+  ]
+
+  for (const fixture of FIXTURES) {
+    test(`every outcome is distinguishable in greyscale: ${fixture.name}`, async ({ page }) => {
+      await fixture.stub(page)
+      await runCheck(page)
+      await page.evaluate(() => {
+        document.documentElement.style.filter = 'grayscale(1)'
+      })
+
+      const chips = await page.locator('[data-outcome]').evaluateAll((nodes) =>
+        nodes.map((node) => ({
+          outcome: node.getAttribute('data-outcome'),
+          word: node.textContent?.trim() ?? '',
+          shape: node.querySelector('svg path')?.getAttribute('d') ?? '',
+        })),
+      )
+
+      expect(chips.length).toBe(5)
+      for (const chip of chips) {
+        expect(chip.word, `${chip.outcome} has no word`).not.toBe('')
+        expect(chip.shape, `${chip.outcome} has no shape`).not.toBe('')
+      }
+      // One word and one shape per outcome, across every outcome on the page.
+      const byOutcome = new Map(chips.map((chip) => [chip.outcome, chip]))
+      expect(byOutcome.size).toBeGreaterThanOrEqual(3)
+      const words = [...byOutcome.values()].map((chip) => chip.word)
+      const shapes = [...byOutcome.values()].map((chip) => chip.shape)
+      expect(new Set(words).size).toBe(byOutcome.size)
+      expect(new Set(shapes).size).toBe(byOutcome.size)
+    })
+  }
+
+  /**
+   * WCAG 4.1.2 Name, Role, Value on the custom controls. The pill tabs, the
+   * disclosure and the reset are the three things on this page that are built
+   * rather than borrowed from HTML, and each is asserted as what it claims to
+   * be rather than as what it looks like.
+   */
+  test('every custom control reports its name, its role and its state', async ({ page }) => {
+    await page.goto('/')
+
+    // The pill control is a tab set, not three buttons that swap content.
+    const tabs = page.getByRole('tab')
+    await expect(tabs).toHaveCount(3)
+    await expect(page.getByRole('tab', { name: 'Check one label' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await expect(page.getByRole('tab', { name: 'Help' })).toHaveAttribute('aria-selected', 'false')
+    // The panel is associated with its tab in both directions.
+    await expect(page.getByRole('tabpanel', { name: 'Check one label' })).toBeVisible()
+
+    // The disclosure reports its own state rather than relying on a caret.
+    const disclosure = page.getByRole('button', { name: 'Or type the application values' })
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    await disclosure.click()
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
+
+    // And the outcome chips, which are text and not controls, are not
+    // announced as buttons by accident.
+    await expect(page.locator('[data-outcome][role="button"]')).toHaveCount(0)
+  })
+
+  /**
+   * WCAG 4.1.3 Status Messages: what changes without a focus move is announced.
+   * Each region is checked for its role and its label rather than for its text,
+   * because the text is asserted where it is produced.
+   */
+  test('every status region is a labelled live region', async ({ page }) => {
+    await page.goto('/')
+
+    const regions = page.locator('[role="status"]')
+    await expect(regions.first()).toBeAttached()
+    const described = await regions.evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        live: node.getAttribute('aria-live'),
+        label: node.getAttribute('aria-label'),
+      })),
+    )
+    for (const region of described) {
+      expect(region.live).toBe('polite')
+    }
+    // The three on the single-label view are labelled apart, so a screen reader
+    // says which one spoke.
+    const labels = described.map((region) => region.label).filter(Boolean)
+    expect(new Set(labels).size).toBe(labels.length)
   })
 })
 
@@ -525,7 +911,7 @@ test.describe('what axe cannot check', () => {
     await panel.getByRole('button', { name: 'Review the values' }).click()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
     await expect(
-      panel.getByText('Read from the application form. Change it if it is wrong.').first(),
+      panel.getByText('Read from the application form; change it if it is wrong.').first(),
     ).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
 
@@ -566,9 +952,18 @@ const WARNING_NOTE =
   'Bold type was not checked. 27 CFR 16.22(a)(2) also requires the prefix to be in bold, and this prototype does not check typeface.'
 
 /**
- * The author's own submission, as the API returns it (FR-14, ADR 0013): a COLA
- * document uploaded alone, its embedded artwork standing in as the label side,
- * and three of the five rows therefore comparing a value with itself.
+ * The author's own submission, as the API returns it: a COLA document uploaded
+ * alone, with its embedded artwork standing in as the label side.
+ *
+ * Two of the five rows are presence checks (FR-15, ADR 0018): 27 CFR requires
+ * alcohol content and net contents on the label, the label carries both, and
+ * the application declared neither, so each row is a one-sided finding with no
+ * application value at all.
+ *
+ * The class or type designation is the row that remains artwork-derived
+ * (FR-14, ADR 0013). ADR 0018 narrows that state rather than removing it, and
+ * this fixture is where both states are on the page at once, which is the case
+ * a greyscale check and an axe scan both have to cover.
  */
 const ARTWORK_DERIVED_RESULT = {
   fields: [
@@ -602,26 +997,26 @@ const ARTWORK_DERIVED_RESULT = {
       display_name: 'Alcohol content',
       found_on_label: true,
       label_value: '45% Alc./Vol. (90 Proof)',
-      application_value: '45% Alc./Vol. (90 Proof)',
+      application_value: null,
       score: null,
-      outcome: 'artwork_derived',
+      outcome: 'present',
       reason:
-        'Alcohol content was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+        'Alcohol content is on the label: 45% Alc./Vol. (90 Proof). 27 CFR 5.63(a)(3) requires it on a distilled spirits label and 27 CFR 4.32(b)(3) on a wine label, and the label carries it. The application declared no value, so this is a check that the required element is present rather than a comparison of two values.',
       source_photo: 1,
-      application_value_source: 'parsed_from_artwork',
+      application_value_source: 'absent',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       found_on_label: true,
       label_value: '750 mL',
-      application_value: '750 mL',
+      application_value: null,
       score: null,
-      outcome: 'artwork_derived',
+      outcome: 'present',
       reason:
-        'Net contents was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+        'Net contents is on the label: 750 mL. 27 CFR 5.63(b)(2) and 27 CFR 7.63(a)(5) require it on distilled spirits and malt beverage containers and 27 CFR 4.32(b)(2) on a wine label, and the label carries it. The application declared no value, so this is a check that the required element is present rather than a comparison of two values.',
       source_photo: 1,
-      application_value_source: 'parsed_from_artwork',
+      application_value_source: 'absent',
     },
     {
       name: 'government_warning',
@@ -807,6 +1202,63 @@ const RESULT = {
   },
   external_call_made: false,
   application_document: null,
+}
+
+/**
+ * A clean single-label result: five rows, everything matching, one photograph.
+ *
+ * The panel an agent sees most often, and the one the author's target names:
+ * it has to fit one screen at 1280 by 800 without scrolling. Its reasons are
+ * the API's real ones for that submission rather than placeholders, because the
+ * thing being measured is how tall the real copy renders.
+ */
+const CLEAN_RESULT = {
+  ...RESULT,
+  fields: [
+    {
+      ...RESULT.fields[0],
+      reason:
+        "'Stone's Throw' was found on the label, in column 0, block 1, printed as \"STONE'S THROW\".",
+    },
+    {
+      ...RESULT.fields[1],
+      application_value: 'Kentucky Straight Bourbon Whiskey',
+      score: 100,
+      outcome: 'match',
+      reason: 'Found on the label, in column 0, block 2.',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[2],
+      application_value: '45',
+      score: 100,
+      outcome: 'match',
+      reason: 'Label 45 percent and application 45 percent are numerically equal.',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[3],
+      found_on_label: true,
+      label_value: '750 mL',
+      score: 100,
+      outcome: 'match',
+      reason: '750 mL on both sides. Standards of fill are not validated (A-13).',
+      source_photo: 1,
+    },
+    {
+      ...RESULT.fields[4],
+      label_value: 'GOVERNMENT WARNING: (1) According to the Surgeon General...',
+      outcome: 'match',
+      reason: `The statement matches 27 CFR 16.21 word for word. ${WARNING_NOTE}`,
+      source_photo: 1,
+    },
+  ],
+  warning_detail: {
+    ...RESULT.warning_detail,
+    prefix_as_printed: 'GOVERNMENT WARNING:',
+    prefix_is_capitalized: true,
+  },
+  photos: [RESULT.photos[0]],
 }
 
 /** What the application read looks like for a registry printout (FR-11). */

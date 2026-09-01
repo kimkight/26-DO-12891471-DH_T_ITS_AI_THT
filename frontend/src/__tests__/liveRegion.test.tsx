@@ -65,52 +65,58 @@ describe('the live region', () => {
     expect(region).toHaveTextContent('')
   })
 
-  it('announces the outcome counts and the time once results arrive', async () => {
+  it('announces the outcome counts once results arrive', async () => {
     const user = userEvent.setup()
     render(<SingleLabelTab />)
     await submitOneLabel(user)
 
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(
-        /Checked in .* seconds/,
+        '5 of 5 checks passed',
       )
     })
-    expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(
-      '5 of 5 fields match',
-    )
   })
 
   it('names what needs attention and stays silent about counts that are zero', () => {
-    const spoken = announcement(['match', 'match', 'needs_review', 'mismatch', 'match'], 1.8)
-    expect(spoken).toContain('Checked in 1.8 seconds.')
-    expect(spoken).toContain('3 of 5 fields match.')
+    const spoken = announcement(['match', 'match', 'needs_review', 'mismatch', 'match'])
+    expect(spoken).toContain('3 of 5 checks passed.')
     expect(spoken).toContain('1 needs your review.')
     expect(spoken).toContain('1 does not match.')
     expect(spoken).not.toContain('was not compared')
   })
 })
 
-describe('the timing line', () => {
+describe('the timing is off the screen (2026-08-31)', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
 
-  it('reports the round trip the agent waited for, not just the server figure', async () => {
+  /*
+   * The author, on the released build: "I don't need the time listed on the
+   * screen think about what a regular application looks like do not put all
+   * these extra words on the screen that should not be there."
+   *
+   * The phases are still measured and still in the API response, where the
+   * deployment runbook's step 8.3a reads them. What has gone is the tool talking
+   * about itself in the middle of somebody's work (NFR-4). These two assert that
+   * it has gone from both places it was said, the line and the announcement, so
+   * a screen reader is not told a number nobody can see.
+   */
+  it('shows no elapsed time on the panel', async () => {
     vi.stubGlobal('fetch', respondWith(verification()))
     const user = userEvent.setup()
     render(<SingleLabelTab />)
     await submitOneLabel(user)
 
-    // Scoped to the visible line: the live region carries the same sentence,
-    // which is the point of it, so an unscoped query matches both.
-    await waitFor(() => {
-      expect(
-        screen.getByText(/Checked in \d+\.\d seconds\./, { selector: 'p.timing' }),
-      ).toBeInTheDocument()
-    })
-    // The server's own elapsed_ms is shown as the detail, so the two are
-    // distinguishable rather than conflated (NFR-1).
-    expect(screen.getByText(/540 ms of that was inside the checker/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('5 of 5 checks passed')).toBeVisible())
+    expect(document.querySelector('p.timing')).toBeNull()
+    expect(screen.queryByText(/Checked in/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Where the time went/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/inside the checker/)).not.toBeInTheDocument()
+  })
+
+  it('announces no elapsed time either', () => {
+    expect(announcement(['match', 'match'])).not.toMatch(/second/)
   })
 })
 
@@ -188,12 +194,12 @@ describe('the form', () => {
     // server's judgement, made on files it has read, and comes back as an FR-9
     // message naming the missing piece; guessing at it here would mean the
     // interface classifying files it has not read.
+    //
+    // Shorter since US-28, and still a label rather than nothing: the agent has
+    // to know why the button is inert, and the reason is one word long. What the
+    // control takes is a Help entry.
     render(<SingleLabelTab />)
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
-    expect(
-      screen.getByText(
-        /Upload something to turn on the check: the label application, an image of the label, or both/i,
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Upload a file to check.')).toBeInTheDocument()
   })
 })

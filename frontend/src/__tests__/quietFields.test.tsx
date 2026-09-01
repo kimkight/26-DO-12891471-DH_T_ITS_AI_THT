@@ -243,13 +243,22 @@ describe('the source of a value that was read', () => {
     await waitFor(() => expect(screen.getByText('DEL MAGUEY')).toBeVisible())
     expect(screen.getByText('Application form')).toBeVisible()
     expect(screen.getAllByText('Label artwork in the application')).toHaveLength(3)
-    // The artwork case carries the one caveat worth a line: it went through OCR.
-    expect(screen.getAllByText(/not from its text\. Check it\./i).length).toBeGreaterThan(0)
+    /*
+     * The chip is the whole of it, and since US-28 it is the whole of it on the
+     * screen rather than the shorter of two tellings. The sentence that used to
+     * sit under each value went first (2026-08-31), and the one line in the
+     * upload card that survived it went to Help, under "Why does it sometimes
+     * say a value came from the label artwork inside the application?".
+     *
+     * See quietScreen.test.tsx for the word budget and helpTab.test.tsx for the
+     * sentence rule that between them keep either from coming back.
+     */
+    expect(screen.queryAllByText(/not from its text/i)).toHaveLength(0)
   })
 })
 
-describe('beverage type keeps its own line (ADR 0008)', () => {
-  it('states why the form could not say, with the selector inline', async () => {
+describe('beverage type keeps its own line (ADR 0008, ADR 0016)', () => {
+  it('states why the boxes did not settle it, with the selector inline', async () => {
     const user = userEvent.setup()
     stub(FROM_ARTWORK)
     render(<SingleLabelTab />)
@@ -258,7 +267,7 @@ describe('beverage type keeps its own line (ADR 0008)', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Beverage type')).toBeVisible())
     expect(screen.getByLabelText('Beverage type')).toHaveAccessibleDescription(
-      /the product-type boxes are check marks, which the text layer cannot report/i,
+      /item 5\u2019s boxes were read from the page and none of them stood out/i,
     )
   })
 

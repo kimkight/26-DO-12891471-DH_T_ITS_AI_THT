@@ -27,7 +27,12 @@ seconds, or agents go back to doing it manually.
 > under it**. The extra second and a half over the 3.5 s the same document
 > measured against deploy #11 is the 180-degree orientation check, and it is
 > the reason the readings are right at all: it is a real trade and the section
-> below states it rather than smoothing it over. What those runs did not
+> below states it rather than smoothing it over. v1.2.0 buys margin back on
+> that path in two measured steps: the artwork is read once rather than in both
+> requests one submission makes
+> ([ADR 0017](docs/adr/0017-read-the-artwork-once.md)), and the orientation
+> check scores its candidates at half resolution, right in 48 of 48 measured
+> cases ([OQ-27](docs/OPEN_QUESTIONS.md#oq-27)). What those runs did not
 > settle is accuracy on real label artwork: three phone photographs of a round
 > bottle still leave the brand and the class unreadable on curved glass, which is
 > the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
@@ -42,6 +47,7 @@ seconds, or agents go back to doing it manually.
 | `frontend/` | React and TypeScript, built with Vite. The agent-facing interface. |
 | `docs/` | Charter, scope, requirements, stories, architecture, security, test strategy, SDLC process, deployment outline. |
 | `docs/adr/` | Architecture decision records. |
+| `docs/ACCESSIBILITY_CONFORMANCE.md` | Section 508 conformance, criterion by criterion, with its exceptions stated. |
 | `samples/` | Twelve label specifications, the renderer that draws them, and the ground truth CSVs. Images are generated locally and git-ignored. |
 | `scripts/` | `measure.py`, which runs the engine over the sample set and reports per-field accuracy and latency. |
 | `infra/terraform/` | Terraform for the deployed stack: ECR, ECS on Fargate, ALB, CloudWatch Logs, IAM, and the GitHub OIDC deploy role. |
@@ -218,7 +224,7 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, and the government warning near miss |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, the government warning near miss, verification by search, and item 5's product type read off the rendered page |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -235,10 +241,11 @@ and the first figures measured on the deployed target are below.**
 | `POST /api/classify` (sort an upload, read the application side, compare nothing) | Works: what each uploaded file was taken to be and why, plus the application values, so the interface can show both before a check runs. |
 | `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
 | `POST /api/read-application` (read one COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, including the label artwork embedded in it ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)), so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
-| Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
-| Comparison against application data | Works: `backend/app/compare.py` |
+| Verification by search: is the declared value on the label? | Works: `backend/app/search.py`. The label is searched for the value the application declares, rather than a value being extracted from the label and compared. The row says where on the sheet it was found and shows the label's own printing of it. A hit shows the value is on the label; it does not show it is there as the brand, in the required type size, or on the required panel (OOS-5). See [ADR 0015](docs/adr/0015-verify-by-search.md) |
+| Field extraction from label artwork, as the fallback | Works: `backend/app/ocr.py`, `backend/app/parse.py`. Runs where the application supplied no value to search for |
+| Comparison against application data | Works: `backend/app/compare.py`. The numeric rules of FR-7, A-12 and A-13 are unchanged |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py`. The comparison is exact; a difference of one or two characters is routed to human review with the character-level difference shown rather than reported as a mismatch, and is never a pass ([ADR 0012](docs/adr/0012-warning-near-miss.md)). |
-| Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and a note saying what was read and how |
+| Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and no elapsed time on the panel: the phase figures stay in the API response, where the deployment runbook reads them, and the panel carries an asserted word budget (NFR-4) |
 | Verification interface, values that were read | Works: each is a read-only line with where it came from, typed or the application form or the label artwork inside it. If every value was read, no editable field is shown at all; one collapsed disclosure holds them. A gap takes focus and is announced |
 | Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
@@ -250,10 +257,13 @@ and the first figures measured on the deployed target are below.**
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
-| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). |
+| Alcohol content and net contents where the application is silent | Works: reported as a **presence check** rather than as a comparison. 27 CFR requires both on the label, so whether the label carries them is answerable from the label alone; the row shows the value found, cites the section, and passes as **Contains** in the same green as a match with its own silhouette. There is no application side on the row, because there is nothing on that side. Where the application does declare the value the row is an ordinary two-sided comparison. See [ADR 0018](docs/adr/0018-presence-checks.md) |
+| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). It is read **once**, by the check: the prefill pass takes the document's text layer alone, and there is no cache ([ADR 0017](docs/adr/0017-read-the-artwork-once.md)). |
 | Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** Real photographs have been submitted; what they found is A-15, OQ-21, and the scope line in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6. A label wrapped on a round bottle is not a supported input. |
+| Beverage type from item 5 | Works: `backend/app/product_type.py`. Item 5's three check boxes are located from their own captions on the rendered page and compared by luminance; the darkest is reported only when it clears a defended margin, and two close or none filled is not determined. Never compared against the label; it selects which numeric rule runs. See [ADR 0016](docs/adr/0016-product-type-from-the-page.md) |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
+| Accessibility | **Section 508 conformance is claimed and evidenced**, evaluated against WCAG 2.0 A and AA as 36 CFR Part 1194, Appendix A, E205.4 adopts it, and verified to WCAG 2.1 AA above that. Criterion by criterion in [docs/ACCESSIBILITY_CONFORMANCE.md](docs/ACCESSIBILITY_CONFORMANCE.md), gated in CI by axe, a computed-contrast test, a keyboard walk and the criteria no tool evaluates. **No screen reader was used**, which is stated there as an exception rather than implied away. |
 
 Numbers are deliberately absent from this table and are in their own section
 below, because a figure without the hardware, the date and the sample it came
@@ -353,12 +363,45 @@ not run at all. It is the reason the OCR confidence on this artwork went from
 
 Paying a second and a half of a five-second budget to stop reading a label
 upside down is worth it. What it is not is free, and the honest statement is
-that this path now sits at the bar rather than comfortably inside it. There is
-a costed optimisation in [OQ-27](docs/OPEN_QUESTIONS.md#oq-27): the two
-rotation candidates are read at full resolution, and reading them at half
-resolution separated 62.2 from 25.0 on this artwork against 91.8 from 32.1 at
-full, for about a third less time. It is measured on one image, so it is
-recorded rather than built.
+that this path sat at the bar rather than comfortably inside it. Two changes in
+v1.2.0 buy the margin back, and both are measured.
+
+**The document was being read twice, in two requests.** The author measured the
+deployed build on 2026-09-01 with the same 382 KB filing: `POST /api/classify`,
+which runs the moment a file is picked, took 5492 and 5410 ms, and
+`POST /api/verify` took 5331 to 5498 ms after that. About eleven seconds of
+waiting for one document. The prefill request returned `artwork_images_read: 1`,
+which is the whole of the cost in it: it ran the artwork pass to fill two boxes,
+and the check then read the same picture again for the label side. The document's
+own text layer takes 277 ms. So the prefill pass stops reading the artwork; the
+check reads it once, where it is needed anyway, and what it yields fills alcohol
+content and net contents in the result. See
+[ADR 0017](docs/adr/0017-read-the-artwork-once.md), which also records why this
+is not solved with a cache: NFR-6 is an acceptance criterion and a promise
+printed on every screen.
+
+Measured on a session container, which is not production hardware and is
+reported only as a before-and-after on one machine, with a synthetic 155 KB
+filing carrying one embedded label image, three runs each:
+
+| Request | Before | After |
+| --- | --- | --- |
+| `POST /api/classify` | 1463 / 1518 / 1594 ms, median **1518** | 160 / 216 / 245 ms, median **216** |
+| `POST /api/verify` | 1459 / 1472 / 1606 ms, median **1472** | 1370 / 1394 / 1425 ms, median **1394** |
+| What an agent waits, both together | **2990 ms** | **1610 ms** |
+
+**And the 180-degree check now scores its two candidates at half resolution**,
+which closes [OQ-27](docs/OPEN_QUESTIONS.md#oq-27). That question was costed on
+one image and deliberately not built on it. The measurement that answered it is
+the one ADR 0003 was decided on: the twelve sample labels at all four cardinal
+rotations, forty-eight cases, with the check forced to run on every one, over the
+set degraded into something shaped like a phone photograph. Half resolution is
+right in 48 of 48, as full resolution is, for 781 ms per case against 1504 ms.
+The first failure is one step below at 0.30, 44 of 48. The scale sits above it
+rather than at the last passing value, and the reasoning is in OQ-27 and in
+`ORIENTATION_CHECK_SCALE`. Scoring is not reading: the winning rotation is
+applied to the full-resolution image, which is what the pipeline goes on to
+read.
 
 **The panel segmentation in this release does not move the figure**, because it
 adds no Tesseract read: both the column split and the block grouping are
@@ -452,9 +495,14 @@ five fields did not come back at all.
   a degraded read. And the real COLA for that product gives Brand `DEL MAGUEY`
   and Fanciful `VIDA` while the largest text on the label is "Vida Clasico", so
   even a perfect transcription could not attribute the brand under the type-size
-  heuristic. Since v1.1.0 that heuristic declines rather than guessing on such a
-  label and the field reports not found (FR-1), which turns a confident wrong
-  answer into an honest absence and solves nothing about the attribution. **Bottle photography stays in the prototype as a
+  heuristic. v1.1.0 made that heuristic decline rather than guess, which turned a
+  confident wrong answer into an honest absence and solved nothing about the
+  attribution. **v1.2.0 stops needing the attribution**: the application declares
+  the brand, so the label is searched for it and found
+  ([ADR 0015](docs/adr/0015-verify-by-search.md)). What that establishes is that
+  the declared text is on the label, and not that it is on it as the brand, in the
+  required type size, or on the required panel; type size and prominence are
+  OOS-5 and are still not checked. **Bottle photography stays in the prototype as a
   best-effort path with honest failure reporting and is not claimed as a
   capability**; the input that works, and that every measured figure came from,
   is flat label artwork. The full statement, and what each of the four possible

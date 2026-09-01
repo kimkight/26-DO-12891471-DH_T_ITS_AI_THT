@@ -18,14 +18,20 @@
  * the start of the line rather than at the end of it. The two values under it
  * are key-value rows: the label muted on the left, the value in bold on the
  * right, which is the shape a reader compares two things in.
+ *
+ * **One sentence per row, and no note under it (2026-08-31).** The card used to
+ * carry a paragraph about provenance above the reason as well as the reason
+ * itself, and on an artwork-derived row the two said the same thing twice at
+ * length. Everything that paragraph said is already on the row in fewer words:
+ * the outcome chip reads "Read from the artwork", the application value is
+ * labelled with the source it came from, and the artwork-derived row carries
+ * "Label artwork (same source as the label)" in its own key-value pair. The
+ * paragraph was the third telling, and `quietScreen.test.tsx` holds the budget
+ * that keeps a fourth from arriving.
  */
 import { OutcomeBadge } from './OutcomeBadge'
-import {
-  ARTWORK_DERIVED_CAVEAT,
-  ARTWORK_DERIVED_SOURCE,
-  sourceCaveat,
-  sourceChipLabel,
-} from '../lib/applicationSources'
+import { ARTWORK_DERIVED_SOURCE, sourceChipLabel } from '../lib/applicationSources'
+import { reasonWithoutLimit } from '../lib/labelSearch'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
@@ -81,6 +87,18 @@ export function ResultCard({
   // It says so on the row, in its own key-value pair, because that is where an
   // agent is already looking when they wonder why this chip is not a match.
   const isArtworkDerived = field.outcome === 'artwork_derived'
+  /*
+   * A one-sided finding: the label carries an element 27 CFR requires and the
+   * application declared nothing (FR-15, ADR 0018).
+   *
+   * **It has no application row at all**, and that is the presentation half of
+   * the decision rather than tidying. The row used to print the same string in
+   * both columns, because the value had been read off the artwork and written
+   * into the application side, and an agent reading two identical values reads a
+   * comparison. There was none. One value, one column, and the chip says what
+   * kind of finding it is.
+   */
+  const isPresence = field.outcome === 'present'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
   const source = sourceLabel(field.source_photo, photoCount)
@@ -106,34 +124,31 @@ export function ResultCard({
                 : 'Not found on the label'
           }
         />
-        <Value
-          label={
-            isWarning
-              ? 'Required by 27 CFR 16.21'
-              : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
-          }
-          value={field.application_value}
-          missing="Not supplied"
-        />
+        {isPresence ? null : (
+          <Value
+            label={
+              isWarning
+                ? 'Required by 27 CFR 16.21'
+                : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
+            }
+            value={field.application_value}
+            missing="Not supplied"
+          />
+        )}
         {isArtworkDerived ? (
           <Value label="Source" value={ARTWORK_DERIVED_SOURCE} missing="" />
         ) : null}
       </dl>
 
       {/*
-        The one caveat that is worth a line of its own: this application value
-        was recognized off a picture of the label inside the document rather
-        than read out of the document's text, so it can be misread in a way the
-        others cannot (ADR 0010). Text, not colour, so it survives greyscale
-        (NFR-5).
+        The limit of a search hit comes off here for the same reason the
+        bold-type note does: the API appends it to every searched row because a
+        caller with no interface has nowhere else to read it (OOS-4), and this
+        interface says it once above the rows instead of five times inside them.
       */}
-      {isArtworkDerived ? (
-        <p className="card__detail--note">{ARTWORK_DERIVED_CAVEAT}</p>
-      ) : !isWarning && sourceCaveat(field.application_value_source) ? (
-        <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
-      ) : null}
-
-      <p className="card__reason">{reasonWithout(field.reason, warning?.bold_type_note)}</p>
+      <p className="card__reason">
+        {reasonWithoutLimit(reasonWithout(field.reason, warning?.bold_type_note))}
+      </p>
 
       {isWarning && warning ? <WarningDetail warning={warning} /> : null}
     </article>

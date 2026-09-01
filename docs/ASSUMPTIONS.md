@@ -27,7 +27,7 @@ Assumptions are marked `(Assumption)` where they appear in other documents.
 | [A-14](#a-14) | ~~Batch application data arrives as one CSV keyed by image filename~~ **Superseded** by [ADR 0009](adr/0009-batch-cola-documents.md) | FR-8, US-9 | Was medium; it was wrong |
 | [A-15](#a-15) | A printer's hyphen across a line break is presentation, not altered warning wording | FR-5, FR-1 | Low |
 | [A-16](#a-16) | Three photographs of one label is enough, and no source states a number | FR-1, US-22 | Low |
-| [A-17](#a-17) | The COLA form field map; three of the five compared values are not items on the form, and two of those three are recoverable from the label artwork embedded in a filing (ADR 0010) | FR-11, US-23 | Medium |
+| [A-17](#a-17) | The COLA form field map; three of the five compared values are not items on the form, two of those three are recoverable from the label artwork embedded in a filing (ADR 0010), and item 5's product type is recoverable from the rendered page (ADR 0016) | FR-11, US-23 | Medium |
 
 ---
 
@@ -669,12 +669,50 @@ embedded artwork, then absent. Artwork never overrides text, because a value the
 file states is read and a value off a picture is recognized, and the two are not
 equal evidence.
 
-Two things this correction does **not** change. The beverage type is still item
-5's three check boxes and is still not readable: a label does not print a form
-answer, so the artwork cannot supply it either. And a label lifted out of an
+One thing this correction does **not** change. A label lifted out of an
 application and compared against that same application is a self-consistency
 check rather than an independent verification of a bottle; ADR 0010 states that
 in the response and on screen, not only here.
+
+**And what the evidence corrected a third time, 2026-08-31: item 5 is readable
+after all, from the page rather than from the text.**
+
+The paragraph that stood here said the beverage type was still not readable
+because a label does not print a form answer. Half of that is still true and the
+conclusion was wrong. The artwork cannot supply it, and the artwork was never the
+place to look: **the tick is on the form's own page**, and the tool renders that
+page already.
+
+Sampling the three item 5 check box regions of the author's own filing, rendered
+at scale 2.0:
+
+| item 5 option | mean luminance |
+| --- | --- |
+| WINE | 239.9 |
+| **DISTILLED SPIRITS** | **217.5** |
+| MALT BEVERAGE | 241.8 |
+
+A 22.4 point separation; the two boxes that are the same differ by 1.9. Item 3,
+SOURCE OF PRODUCT, shows the same pattern with "Imported" ticked.
+
+So assumption 4 above, "that a document naming exactly one of the three product
+types is stating it", is **superseded wherever the boxes can be sampled**. It was
+an inference from absence, it is sound on a Registry printout, and it is unsound
+on a scan whose OCR lost two of the three captions, which is a document offering
+a choice that looks exactly like a document stating one. The boxes are direct
+evidence of the thing it was inferring, so the sampling decides item 5 in both
+directions: it fills the value where one box stands clear of the other two, and it
+clears the value where the boxes were sampled and none did.
+
+The boxes are located from their own captions and never from a pixel coordinate,
+because the edition caveat in assumption 5 above applies to geometry as much as to
+item numbers. [ADR 0016](adr/0016-product-type-from-the-page.md) records the
+margin, the measurements it was set from, and the failure modes.
+
+The map above stands as a map of the form's items, with this added: **the form is
+a picture as well as a text layer, and both have to be read.** That is the same
+lesson as the embedded artwork, in a second place, and it is the through-line of
+the last three defect sessions rather than a one-off.
 
 What is now assumed rather than read is which filings embed their artwork at
 all, and how large those images typically are. One document establishes that the

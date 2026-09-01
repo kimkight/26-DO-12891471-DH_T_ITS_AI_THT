@@ -199,7 +199,9 @@ describe('what the result says about the photos', () => {
     await upload(user, pngFile('only.png'))
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
-    await screen.findByText(/Checked in/, { selector: 'p.timing' })
+    // Waits on the summary line rather than on a timing line, which came off
+    // the panel on 2026-08-31.
+    await screen.findByText(/checks passed/, { selector: 'p.summary-line' })
     expect(screen.queryByText(/read from photo/i)).not.toBeInTheDocument()
   })
 

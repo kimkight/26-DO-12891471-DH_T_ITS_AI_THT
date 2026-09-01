@@ -572,6 +572,13 @@ async def classify_uploads(
     to `POST /api/verify` in one request instead, which classifies the same way
     and reads each image once.
 
+    **It reads the document's text layer and not the pictures inside it**
+    ([ADR 0017](../../docs/adr/0017-read-the-artwork-once.md)). The response
+    says so in `application_document.artwork_read`, and the values the artwork
+    would have supplied arrive with the check that reads it. A caller that wants
+    the artwork values without verifying has `POST /api/read-application`, which
+    still reads everything.
+
     Nothing is compared, nothing is persisted (NFR-6), and no outbound call is
     made (NFR-3).
     """
@@ -595,6 +602,15 @@ async def classify_uploads(
                 documents[0].file.content,
                 documents[0].file.content_type,
                 pre_read=documents[0].read,
+                # **The artwork is not read here (ADR 0017).** This route runs
+                # the moment an agent picks a file, and its job is to fill the
+                # boxes. Reading every picture inside the document to fill two
+                # of them cost about five seconds, and then `POST /api/verify`
+                # read the same pictures again a moment later, because the check
+                # needs them for the label side. One submission, one document,
+                # two full Tesseract passes over the same artwork, in two
+                # requests the agent waits through one after the other.
+                read_artwork=False,
             )
         except UnreadableDocumentError as exc:
             # The classification stands and is reported; what failed is reading

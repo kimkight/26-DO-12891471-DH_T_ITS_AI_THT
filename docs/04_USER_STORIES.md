@@ -1300,3 +1300,260 @@ the subject here and the device will capture it. By the time that panel renders,
 the file has been chosen, uploaded and read. The preview itself stays, because
 the reason it exists is good and unrelated: before it, an agent who chose the
 wrong file could not tell until the results came back.
+
+### US-28 Take the words off the check screen and give me a place to look them up
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, FR-9 (unchanged and protected) |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author, using the deployed build, 2026-09-01: "this has way too many words on the screen. create a help me tab and put all of the text you are removing plus some FAQs on that tab." |
+
+**As a** compliance agent checking a label,
+**I want** the screen I work on to carry the work and nothing else,
+**So that** I can read a result at a glance, and still find out what any of it
+means when I want to.
+
+**Acceptance criteria**
+
+```
+Given the single-label view
+When  I look at anything between the top of the upload card and the last result row
+Then  no explanatory paragraph on it runs to more than one sentence
+```
+
+```
+Given the six paragraphs named in the source
+When  the single-label view renders, before and after a check
+Then  none of them appears on it
+```
+
+```
+Given the Help tab
+When  I open it
+Then  it carries what those paragraphs said, rewritten for a reader
+And   it answers the questions an agent asks rather than listing caveats
+And   no requirement identifier appears anywhere on it
+```
+
+```
+Given the Help tab
+When  I look for something to operate
+Then  there is nothing on it but text and links
+```
+
+```
+Given the submit control with nothing uploaded
+When  it renders
+Then  it carries a short label saying why it is inert
+And   the label is not absent
+```
+
+```
+Given the prototype banner, the footer, and any FR-9 error message
+When  anything above is applied
+Then  they are unchanged and they have not moved to Help
+```
+
+```
+Given the Help tab
+When  the accessibility gates run
+Then  axe reports no violation on it
+And   it is reachable from the tab strip by arrow key
+And   its headings are one level deep under the panel's own heading
+```
+
+**Why this is a story rather than a copy tweak.** Every sentence taken off the
+check screen was true, and each was added for a reason that is written down in
+the file it came from. The problem is not any one of them; it is that they are
+all on at once, on every check, forever. A caveat printed on every check is read
+on none of them, and an agent reading five results does not need to be told for
+the fifth hundred time what a search hit does and does not prove.
+
+The split is between a working screen and a reading page. On a working screen a
+sentence has to earn its place against the thing the agent came to do; on a
+reading page the reader came to read, so the same sentence is worth more there
+than it ever was in the middle of somebody's work.
+
+**What does not move, and why it is stated as an acceptance criterion.** The
+persistent prototype banner, the footer, and FR-9's error messages. Cutting
+words is not licence to drop a message that names a real problem: an agent whose
+file could not be read has to be told where they are, and the banner is the
+standing statement of what this tool is and is not. A quieter screen that
+achieved itself by hiding a failure would be worse than the wordy one.
+
+### US-29 Clear the form so I can check the next label
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, NFR-6 (the reason no confirmation is needed) |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author, using the deployed build, 2026-09-01: "add a reset option that clears the information so another application can be uploaded." |
+
+**As a** compliance agent working through a stack of applications,
+**I want** one control that empties the form,
+**So that** I can start the next label without reloading the page or picking
+values out of the last one.
+
+**Acceptance criteria**
+
+```
+Given a completed check
+When  I select the reset control
+Then  the uploaded files, the parsed values, every typed field and the results are gone
+And   the view is in the state it was in when the page loaded
+```
+
+```
+Given files chosen and no check run
+When  I select the reset control
+Then  the same thing happens
+```
+
+```
+Given the reset control
+When  I look for it
+Then  it is beside the results rather than at the top of the form
+And   it is offered only when there is something to clear
+```
+
+```
+Given the reset control
+When  I reach it with the keyboard
+Then  it is a button, it is in the tab order, its focus is visible,
+And   it is operable by Space as well as by Enter
+```
+
+```
+Given I have selected it
+When  it has run
+Then  focus is on the file picker
+And   the live region says the form was cleared and is ready for the next label
+```
+
+```
+Given I have selected it
+When  it runs
+Then  nothing asks me to confirm
+```
+
+```
+Given the batch view, which holds state of its own
+When  I select its reset control
+Then  both pickers, the rows and any error are cleared, and a running stream is stopped first
+```
+
+**Where it is, and why.** Beside the results. An agent who has finished one label
+is looking at the last row of what they just read, and that is where the control
+to go on to the next one belongs; at the top of the form it would be a thing to
+scroll back to, and next to the check button it would be a thing to press by
+mistake.
+
+**Why there is no confirmation dialog.** Nothing is stored (NFR-6), so nothing is
+lost that cannot be re-uploaded, and the files are still on the agent's own
+machine. A dialog would be one more thing between an agent who has finished one
+label and the next one, which is the opposite of what this story is for. The
+batch view's results are the one thing that cannot be re-derived without
+re-running the check, and the CSV download beside the reset is how they leave the
+page; the footnote above both already says so.
+
+**Why focus and the announcement are acceptance criteria rather than polish.**
+This control removes everything on the screen, including the element that had
+focus, which is itself. A sighted agent sees an empty form. An agent using a
+screen reader gets silence and focus on the document body, which is the worst
+place focus can be and is a failure of WCAG 2.4.3 rather than a rough edge. So
+focus lands on the thing they do next, and the live region says what happened.
+
+### US-30 Tell me, honestly, whether this is 508 conformant
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Must |
+| Requirements | NFR-5 |
+| Points | |
+| Issue | [#13](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/13) |
+| Source | The author, 2026-09-01: "this entire project needs to be 508 compliant; ensure that it is." |
+
+**As a** reviewer deciding whether this could be used by agency staff,
+**I want** a conformance claim I can check rather than a badge,
+**So that** I know what was tested, how, and what is still open.
+
+**Acceptance criteria**
+
+```
+Given the accessibility requirement
+When  I read it
+Then  it names Section 508 and the standard Section 508 adopts for web content
+And   it says which WCAG version was actually verified, which is not the same thing
+```
+
+```
+Given the conformance report
+When  I read it
+Then  every applicable Success Criterion has a result and a line of evidence
+And   the criteria no automated tool evaluates are among them
+```
+
+```
+Given a criterion the product does not meet, or does not cover
+When  I look for it
+Then  it is in the report, said plainly, with what it does and does not leave open
+```
+
+```
+Given that no screen reader was used
+When  I read the report
+Then  it says so, in those words, as a limitation rather than as an omission
+```
+
+```
+Given the pill control
+When  assistive technology reads it
+Then  it is a tab set: correct roles, arrow-key navigation, the selected tab
+      reported, and each panel associated with its tab
+```
+
+```
+Given two outcomes that share a colour
+When  every colour is removed
+Then  they still differ by word and by shape
+```
+
+```
+Given a colour token introduced by a later change
+When  the contrast test runs
+Then  it is checked, because the list is derived from the outcome definitions
+      rather than kept beside them
+```
+
+**Why the standard has to be named precisely.** Section 508 of the
+Rehabilitation Act, as revised in 2017, adopts WCAG 2.0 Levels A and AA for web
+content at 36 CFR Part 1194, Appendix A, E205.4. NFR-5 targeted WCAG 2.1 AA,
+which is a superset and therefore satisfies it, but a requirement that never
+names Section 508 is a requirement a federal reviewer cannot check against the
+thing they are actually asking about. Naming both is the honest statement: the
+first is what is required, the second is what was done.
+
+**Why "ensure that it is" is mostly verification rather than building.** The
+gap between WCAG 2.1 AA, which was already the target and already gated in CI,
+and WCAG 2.0 AA, which is what 508 requires, is nothing: 2.1 contains all of
+2.0. What was missing was not conformance; it was the evidence that conformance
+had been checked rather than assumed, especially for the criteria no automated
+tool evaluates. Automated tools catch a minority of accessibility failures, and
+a green axe run presented as a conformance claim is the same kind of false
+assurance as a match chip on a comparison that could not have failed.
+
+**Why the report states its exceptions.** A blanket claim is worth nothing to a
+reviewer who has read one before. The report says that no screen reader was
+used, what that does and does not leave open, and what should be run before any
+use beyond this assessment. That is more useful than a claim of full support,
+and it is the same posture the tool itself takes: it recommends, and the person
+decides.
+

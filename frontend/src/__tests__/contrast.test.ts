@@ -15,6 +15,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { presentation } from '../lib/outcomes'
+import type { Outcome } from '../types'
 
 // Resolved from the project root rather than from `import.meta.url`: under the
 // jsdom environment that is an http URL, and `fileURLToPath` rejects it.
@@ -100,6 +102,82 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
     for (const surface of surfaces) {
       expect(ratio(token('focus'), token(surface))).toBeGreaterThanOrEqual(AA_NON_TEXT)
     }
+  })
+
+  /*
+   * Every other ground the ring actually lands on (WCAG 1.4.11, Section 508 via
+   * WCAG 2.0 AA). The tab buttons sit in the pale navy pill track, the reset
+   * and the disclosure toggle sit on the page, and the file picker's ring is
+   * drawn on the tinted drop zone. A ring checked only against white is a ring
+   * checked in one of the four places it appears.
+   */
+  it('the focus ring is visible on every ground it lands on', () => {
+    for (const ground of ['accent-wash', 'shell', 'notice']) {
+      expect(ratio(token('focus'), token(ground))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+    }
+  })
+
+  /*
+   * **Every outcome's colour pair is checked, derived from the outcome list
+   * rather than from a list kept beside it** (NFR-5, Section 508 via WCAG 2.0
+   * AA 1.4.3).
+   *
+   * The `it.each` above names its tokens, which is readable and which is a
+   * second source of truth: a sixth outcome introduced with a tone nobody added
+   * to that array would render on the page unchecked, and nothing would say so.
+   * ADR 0018 added exactly such an outcome, and the reason it needed no new
+   * token is that Contains deliberately reuses the match pair.
+   *
+   * So this walks `PRESENTATIONS` itself. A tone is checked when the token
+   * named by it, and the tint named by it, both clear 4.5:1.
+   */
+  it('every outcome the interface can present has a checked colour pair', () => {
+    const outcomes: Outcome[] = [
+      'match',
+      'needs_review',
+      'mismatch',
+      'not_compared',
+      'present',
+      'artwork_derived',
+    ]
+    const tones = new Set(outcomes.map((outcome) => presentation(outcome).tone))
+
+    for (const tone of tones) {
+      for (const surface of [...surfaces, `${tone}-tint`]) {
+        expect(
+          ratio(token(tone), token(surface)),
+          `--${tone} on --${surface}`,
+        ).toBeGreaterThanOrEqual(AA_BODY)
+      }
+      expect(ratio(token('text'), token(`${tone}-tint`))).toBeGreaterThanOrEqual(AA_BODY)
+    }
+  })
+
+  /*
+   * Two outcomes share a colour on purpose (FR-15, ADR 0018): Contains is a
+   * pass and is styled like one. That makes the word and the shape the only
+   * things separating them, so this asserts they are separate. The rendered
+   * check is in `a11y.spec.ts`, which puts both chips on a page under a
+   * greyscale filter; this is the same claim at the level of the definitions,
+   * where a change would be made.
+   */
+  it('outcomes that share a colour do not share a word or a shape', () => {
+    const outcomes: Outcome[] = [
+      'match',
+      'needs_review',
+      'mismatch',
+      'not_compared',
+      'present',
+      'artwork_derived',
+    ]
+    const shown = outcomes.map((outcome) => presentation(outcome))
+
+    expect(new Set(shown.map((entry) => entry.label)).size).toBe(outcomes.length)
+    expect(new Set(shown.map((entry) => entry.glyph)).size).toBe(outcomes.length)
+    // And the pair that makes it matter: same tone, different word and shape.
+    expect(presentation('present').tone).toBe(presentation('match').tone)
+    expect(presentation('present').label).not.toBe(presentation('match').label)
+    expect(presentation('present').glyph).not.toBe(presentation('match').glyph)
   })
 
   /*

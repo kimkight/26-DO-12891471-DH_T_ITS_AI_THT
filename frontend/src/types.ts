@@ -17,21 +17,36 @@
  * label side, so the two values compared are one reading of one picture. It is
  * excluded from every count of fields that match, and it never carries a score.
  */
-export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared' | 'artwork_derived'
+export type Outcome =
+  | 'match'
+  | 'needs_review'
+  | 'mismatch'
+  | 'not_compared'
+  /**
+   * A passing one-sided finding (FR-15, ADR 0018): 27 CFR requires this element
+   * on the label and the label carries it. The row has a label value and no
+   * application value, because the application declared none, and no score,
+   * because a score is a similarity between two strings.
+   */
+  | 'present'
+  | 'artwork_derived'
 
 /**
  * Where an application value came from (FR-11, ADR 0008, ADR 0010).
  *
- * These four are the precedence order, highest first. `parsed_from_form` is the
+ * These are the precedence order, highest first. `parsed_from_form` is the
  * document's own text, whether an AcroForm field or a text layer;
  * `parsed_from_artwork` is a picture of the label embedded in that document,
  * read by OCR, which is weaker evidence and is only used where the text was
- * silent.
+ * silent. `read_from_tick` is item 5's product type, measured off the rendered
+ * page because a ticked box is not in a text layer at all (ADR 0016).
  */
-export type ApplicationSource = 'typed' | 'parsed_from_form' | 'parsed_from_artwork' | 'absent'
+export type ApplicationSource =
+  'typed' | 'parsed_from_form' | 'parsed_from_artwork' | 'read_from_tick' | 'absent'
 
-/** Where inside an uploaded document one value was read (ADR 0010). */
-export type DocumentValueSource = 'form_fields' | 'embedded_text' | 'embedded_artwork' | 'absent'
+/** Where inside an uploaded document one value was read (ADR 0010, ADR 0016). */
+export type DocumentValueSource =
+  'form_fields' | 'embedded_text' | 'embedded_artwork' | 'product_type_box' | 'absent'
 
 /** One field row (FR-3): both values, the score, the outcome, and why. */
 export interface FieldResult {
@@ -94,6 +109,18 @@ export interface ApplicationDocumentResult {
    */
   artwork_images_found: number
   artwork_images_read: number
+  /**
+   * Whether the pictures were put through OCR on this reading (ADR 0017).
+   *
+   * False on the prefill pass, which takes the document's text layer alone so
+   * that the boxes fill as fast as the file uploads. It is not the same as
+   * "there was no artwork": `artwork_images_read` is zero in both cases, and
+   * only one of them is a gap the agent has to fill by typing.
+   *
+   * Optional so that a response from a server that predates ADR 0017 reads as
+   * what it was, a reading that did include the artwork.
+   */
+  artwork_read?: boolean
   /**
    * Every embedded picture that was not big enough, or was the wrong shape, to
    * be label artwork, with the reason (v1.1.0). The commonest one on a filed

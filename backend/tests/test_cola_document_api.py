@@ -78,10 +78,18 @@ class TestNothingChangesWhenNoDocumentIsSent:
         assert response.status_code == 200
         body = response.json()
         assert body["application_document"] is None
-        for name in ("brand_name", "class_type", "alcohol_content", "net_contents"):
+        for name in ("brand_name", "class_type"):
             entry = field(body, name)
             assert entry["outcome"] == "not_compared"
             assert entry["application_value_source"] == "absent"
+        # **Amended by ADR 0018.** The other two are not "nothing to compare":
+        # 27 CFR requires them on the label, this label carries them, and that
+        # is a real finding whether or not the application repeats the value.
+        for name in ("alcohol_content", "net_contents"):
+            entry = field(body, name)
+            assert entry["outcome"] == "present"
+            assert entry["application_value_source"] == "absent"
+            assert entry["label_value"]
 
 
 class TestAnUploadedDocumentSuppliesTheApplicationValues:
@@ -116,17 +124,25 @@ class TestAnUploadedDocumentSuppliesTheApplicationValues:
         body = post(sample_label_png, registry_pdf()).json()
         assert parsed_field(body, "beverage_type")["found_on_document"] is False
         assert any(
-            "ticked box cannot be read" in note for note in body["application_document"]["notes"]
+            "ticked box is not in a document's text" in note
+            for note in body["application_document"]["notes"]
         )
 
-    def test_a_value_the_document_did_not_carry_is_reported_as_not_found(self, sample_label_png):
+    def test_a_value_the_document_did_not_carry_is_a_presence_check(self, sample_label_png):
+        """**Amended by ADR 0018.** The row used to report "not compared".
+
+        The parsed block is unchanged: the document did not carry the alcohol
+        content, and it says so. What changed is the row, which now reports the
+        question that remained answerable, namely whether the label carries the
+        element 27 CFR requires.
+        """
         spec = ApplicationSpec(brand_name="STONE'S THROW", class_type="", alcohol_content="")
         body = post(sample_label_png, registry_pdf(spec)).json()
         entry = parsed_field(body, "alcohol_content")
         assert entry["found_on_document"] is False
         assert entry["value"] is None
         assert field(body, "alcohol_content")["application_value_source"] == "absent"
-        assert field(body, "alcohol_content")["outcome"] == "not_compared"
+        assert field(body, "alcohol_content")["outcome"] == "present"
 
 
 class TestTypedValuesOverrideParsedOnes:

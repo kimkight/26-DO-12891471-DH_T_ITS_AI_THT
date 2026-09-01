@@ -131,6 +131,49 @@ LOW_ORIENTATION_CONFIDENCE = 1.0
 # differently here.
 EQUAL_CONFIDENCE_BAND = 1.0
 
+# The share of the working resolution the 180-degree check scores its two
+# candidates at (OQ-27, closed 2026-09-01).
+#
+# **The check does not read the label; it picks which way up to read it.** Its
+# two Tesseract passes exist to separate one number from another, and on the
+# author's mezcal artwork those numbers were 91.8 upright against 32.1 upside
+# down. Fifty points and more does not need every pixel, and the passes were
+# costing the most expensive thing this pipeline does, twice, at full size.
+#
+# The scale is measured rather than chosen, over the set ADR 0003 was decided
+# on: the twelve sample labels at all four cardinal rotations, forty-eight
+# cases, with the check forced to run on every one of them. Run twice, on the
+# clean renderings and on the same set degraded into something shaped like a
+# phone photograph, which is the input the check exists for. The degraded run:
+#
+# ======  ==========  =========  ================
+# scale   long edge   right      both candidates
+# ======  ==========  =========  ================
+#  1.00      1600 px  48 of 48           1504 ms
+#  0.60       960 px  48 of 48            957 ms
+#  0.50       800 px  48 of 48            781 ms
+#  0.40       640 px  48 of 48            649 ms
+#  0.30       480 px  44 of 48            381 ms
+#  0.25       400 px  48 of 48            312 ms
+# ======  ==========  =========  ================
+#
+# The clean run is 48 of 48 at every scale, which is why the degraded set is the
+# one that decides: an easy input cannot separate a good scale from a bad one.
+#
+# Half, and not lower, for two reasons. It is right in as many cases as full
+# resolution is, on both sets, and on the one real filing measured it keeps the
+# candidates 37 points apart. And the first failure is one step below it, at
+# 0.30, where the score puts the four beer-label cases 1.9 points the wrong way
+# round. That 0.25 is right in 48 of 48 again is not a reason to go lower: a
+# rule whose accuracy is not monotone in its own parameter is a rule that has
+# started reading noise, and OQ-27's single-image table has 0.25 answering
+# backwards on the author's own artwork. So the scale sits one measured step
+# above the first failure rather than at the last passing value.
+#
+# Nothing about the text an agent reads changes. The winning rotation is applied
+# to the full-resolution image and the pipeline reads that, exactly as before.
+ORIENTATION_CHECK_SCALE = 0.5
+
 # What counts as colour a grayscale conversion would discard. Both figures are
 # measured; the table is in ``has_colour``.
 _COLOUR_CHROMA = 32
@@ -791,11 +834,21 @@ def _second_opinion_on_180(
 
     Costs two Tesseract reads, and only on an image where OSD's own confidence
     fell under the floor. On the twelve-label sample set that is no image at all.
+
+    **Both are read at ``ORIENTATION_CHECK_SCALE``, and the winner is applied to
+    the full-resolution image** (OQ-27). Scoring is not reading: what these two
+    passes have to do is separate two numbers that the measurement above puts
+    fifty points and more apart, and doing that at half the working resolution
+    is right in as many of the forty-eight measured cases as doing it at full
+    resolution, for about half the time. The text an agent reads is unchanged,
+    because it is read afterwards, from the full-size image, by the pipeline
+    that always read it.
     """
     opposite = (osd_degrees + 180) % 360
     scored: list[RotationScore] = []
+    scoring_edge = max(1, round(max(gray.shape[:2]) * ORIENTATION_CHECK_SCALE))
     for degrees in (osd_degrees, opposite):
-        lines, confidence, _ = _read(rotate_cardinal(gray, degrees))
+        lines, confidence, _ = _read(resize_long_edge(rotate_cardinal(gray, degrees), scoring_edge))
         scored.append(
             RotationScore(
                 rotation_degrees=degrees,

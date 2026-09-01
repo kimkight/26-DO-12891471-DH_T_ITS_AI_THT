@@ -7,6 +7,475 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - unreleased until tagged
+
+The author's use of the released v1.1.0 build on 2026-08-30, with the same real
+mezcal COLA document uploaded alone. Everything upstream worked, two of the four
+compared fields still came back as defects, item 5 was still blank, and the
+screen said far too much about all of it.
+
+### The evidence
+
+The application side filled correctly, `DEL MAGUEY` for the brand name and
+`MEZCAL FB` for the class or type, both out of the document's own text layer.
+The label artwork was found, lifted out, turned the right way up and read. And
+then:
+
+> Does not match. Brand name. On the label: **Not found on the label**. On the
+> application: DEL MAGUEY.
+
+Measured against the segmented label text that same pipeline produced:
+
+| declared by the application | present in the label text | best fuzzy score |
+| --- | --- | --- |
+| `DEL MAGUEY` | **yes, exact** | 100.0 |
+| `MEZCAL` | **yes, exact** | 100.0 |
+| `42% ALC BY VOL` | **yes, exact** | 100.0 |
+| `750 ML` | **yes, exact** | 100.0 |
+
+Four of four declared values were on the label, exactly, in text the tool was
+already holding. It reported two of them as not found. The author's summary of
+what the tool is for: "basically the whole goal is to match what's in the
+application to the picture of the label."
+
+### Changed
+
+- **The comparison is inverted: the label is searched for the value the
+  application declares** ([ADR 0015](docs/adr/0015-verify-by-search.md), FR-1
+  through FR-4 rewritten). The tool no longer extracts a value from the label and
+  then compares two strings. Extraction is the fragile half, and every field-level
+  defect reported against a deployed build has been an extraction failure rather
+  than a matching failure or an OCR failure: the brand name read as the producer's
+  tax identifier, and then the brand name and the class or type both declined by a
+  type-size ranking on a label whose largest text is the fanciful name.
+  - Both sides are normalized as FR-4 already required. The label reading is
+    searched one unit per region of the sheet, with the lines joined, so a brand
+    set across two lines is found. Whole-word containment scores 100; otherwise
+    the best window of words is scored with the same `fuzz.ratio` as before.
+  - **The thresholds are the ones already configured.** A search score is
+    classified by the same `classify` at the same A-4 numbers, 95 and 80. No new
+    scale is introduced.
+  - **The row reports where the value was found**, by column and block, and shows
+    the label's own printing of it. That replaces the extracted value and is more
+    useful than one: an agent can see the brand was found on the front panel
+    rather than in the small print. Dave Morrison's `STONE'S THROW` against
+    `Stone's Throw` now shows both casings side by side.
+  - **The limit is stated, once, on the screen and in FR-1**: a hit shows the
+    declared value appears on the label; it does not show it appears as the brand,
+    in the required type size, or on the required panel. Type size and placement
+    are OOS-5 and unchanged.
+  - **The class or type is searched for its description, not its registry code.**
+    The application states `MEZCAL FB` and no label prints `FB`. The full value is
+    searched for first, so stripping can never lose a match, and the row says the
+    code was left off.
+  - **Extraction does not disappear.** Where the application supplied no value
+    there is nothing to search for, and the existing extractor is the fallback
+    with its existing honest not-found behaviour.
+- **`scripts/measure.py` now measures the search**, because it hands the pipeline
+  the same reading the API does. Its accuracy figures are for the code an agent
+  runs rather than for a fallback path.
+
+### Added
+
+- **Item 5's product type is read off the rendered page**
+  ([ADR 0016](docs/adr/0016-product-type-from-the-page.md), FR-11, A-17 amended).
+  The author asked whether beverage type is a field on the application. It is:
+  item 5 on TTB F 5100.31 (04/2023), "TYPE OF PRODUCT (Required)", three check
+  boxes. The tool left it blank on every filing that was not an unflattened
+  AcroForm copy, because it read only the text layer, where all three captions
+  print and no tick can be seen. The tick is in the pixels, and the tool renders
+  the pages already. On the author's own filing, at scale 2.0:
+
+  | item 5 option | mean luminance |
+  | --- | --- |
+  | WINE | 239.9 |
+  | **DISTILLED SPIRITS** | **217.5** |
+  | MALT BEVERAGE | 241.8 |
+
+  - **The boxes are located from their own captions, never from a pixel
+    coordinate.** The form has editions and this tool renders at a scale derived
+    from the page size and a setting, so a coordinate would be right once. The
+    captions come out of the text layer exactly where the file has one, and are
+    recognized only on a page that has none.
+  - **The margin is 12.0 luminance points** between the darkest box and the next,
+    and it is set from both ends of the measurement: the signal is 20 to 22 points
+    across the author's filing and three fixtures, and the noise between two boxes
+    that are both empty is 0.5 to 2.8. Two boxes too close to separate, and no box
+    filled, both come back as not determined and the agent chooses.
+  - **The sample window is deliberately loose.** A tight crop gives a bigger
+    number when it lands exactly and a wrong answer when it does not: at twelve
+    pixels of caption height, a one pixel difference in a caption's left edge put
+    fifteen points between two boxes that were both empty.
+  - The value is surfaced for confirmation and stays editable like every other
+    parsed value, with a provenance chip of its own, "Ticked box on the form". It
+    is still never compared against the label; it selects which numeric rule runs
+    (A-12 for spirits, A-13 for wine) and the result already names the rule.
+  - A new `item_five_ocr_ms` phase reports what this costs. It is zero on every
+    document that carries a text layer.
+
+### Fixed
+
+- **A scanned form with nothing ticked stops being answered wrongly.** The
+  "document names exactly one product type" rule is an inference from absence: it
+  is sound on a Registry printout and unsound on a scan whose OCR lost two of the
+  three captions, which looks identical. Sampling the boxes is direct evidence of
+  the thing being inferred, so it now supersedes that inference in both
+  directions, filling the value where a box stands out and clearing it where the
+  boxes were sampled and none did. An AcroForm radio group still wins over both.
+
+### Removed
+
+- **The timing line and the "Where the time went" disclosure are off the screen**
+  (NFR-1 amended, NFR-4). The author: "I don't need the time listed on the screen
+  think about what a regular application looks like do not put all these extra
+  words on the screen that should not be there." An agent checking a label is not
+  measuring the tool. The number was also not measuring what she experienced: her
+  run showed 7.8 seconds of which 2334 ms was her own browser and network.
+  - **Nothing about the measurement changes.** Every phase is still timed by a
+    timer around the work it names and every figure is still in the API response,
+    where `docs/09_DEPLOYMENT.md` section 8.3a reads them. This is a presentation
+    change.
+  - The live region drops the seconds with it, so a screen reader is not read a
+    number nobody can see. It says no less about what changed.
+  - `frontend/src/lib/timing.ts` and `honestTiming.test.tsx` go with the panel
+    they existed for.
+
+### Changed, on the screen
+
+- **One sentence per row, at most.** The artwork-derived rows carried a paragraph
+  above the reason and a ninety-word reason under it, saying the same thing
+  twice. The outcome chip already reads "Read from the artwork" and the row
+  already carries "Label artwork (same source as the label)"; what is left is the
+  one sentence neither of those states.
+- **One notice per screen, not four.** The self-consistency explanation appeared
+  in the upload card, in the results header and on every affected row, and the
+  "this came off a picture" caveat appeared under every read value and again
+  under every result row. Each is now said once, where it is first relevant.
+- **A word budget, asserted.** Measured on the same fixtures before and after:
+
+  | measurement | before | after |
+  | --- | --- | --- |
+  | clean five-row panel | 246 | 157 |
+  | one row that matched | 26 | 26 |
+  | the author's own submission, whole panel | 584 | 253 |
+  | one artwork-derived row on it | 159 | 51 |
+
+  159 words on one row is the "about 150 words explaining a single row" the
+  author was looking at. `quietScreen.test.tsx` holds the ceilings, and
+  `a11y.spec.ts` holds her own target: a clean single-label result fits one
+  screen at 1280 by 800, its last element ending at 412 px against 535 px before.
+
+### Unchanged, deliberately
+
+- **The prototype banner, the author attribution, the FR-9 error messages, and
+  the sentence that says who decides.** Cutting words is not licence to drop a
+  message that names a real problem, and each of those is asserted separately.
+- **Accessibility.** axe green on the built page, the contrast test green, the
+  keyboard walk unchanged, outcomes still carrying text and shape before colour,
+  and every live-region announcement still saying what changed. Shorter copy did
+  not become vaguer copy.
+- **FR-5, the government warning.** It already searches the label for a known
+  statutory string, it is exact rather than fuzzy by requirement, and it returns
+  an exact match on the author's own document. Nothing here touches it and it
+  still carries no similarity score.
+- **FR-7, A-12 and A-13, the numeric comparisons.** The alcohol content and the
+  net contents are located by pattern, which is deterministic and which read both
+  correctly on the author's document. A similarity score cannot express "different
+  units, no conversion, needs human review", or the 27 CFR 5.65 proof cross-check,
+  or a wine range under 27 CFR 4.36. So those rules stand, and the search supplies
+  the label side for them only where the pattern found nothing and the declared
+  value is on the label at or above the match threshold.
+- **FR-14 and ADR 0013.** A row whose two sides are one reading of one picture is
+  still reported as read from the artwork rather than as a match, and searching
+  that picture for a value read off it is circular in exactly the same way.
+- The beverage type is still never compared against the label, and the embedded
+  label artwork still cannot supply it: a label does not print a form answer.
+
+### Added
+
+- **Item 5's product type is read off the rendered page**
+  ([ADR 0016](docs/adr/0016-product-type-from-the-page.md), FR-11, A-17 amended).
+  The author asked whether beverage type is a field on the application. It is:
+  item 5 on TTB F 5100.31 (04/2023), "TYPE OF PRODUCT (Required)", three check
+  boxes. The tool left it blank on every filing that was not an unflattened
+  AcroForm copy, because it read only the text layer, where all three captions
+  print and no tick can be seen. The tick is in the pixels, and the tool renders
+  the pages already. On the author's own filing, at scale 2.0:
+
+  | item 5 option | mean luminance |
+  | --- | --- |
+  | WINE | 239.9 |
+  | **DISTILLED SPIRITS** | **217.5** |
+  | MALT BEVERAGE | 241.8 |
+
+  - **The boxes are located from their own captions, never from a pixel
+    coordinate.** The form has editions and this tool renders at a scale derived
+    from the page size and a setting, so a coordinate would be right once. The
+    captions come out of the text layer exactly where the file has one, and are
+    recognized only on a page that has none.
+  - **The margin is 12.0 luminance points** between the darkest box and the next,
+    and it is set from both ends of the measurement: the signal is 20 to 22 points
+    across the author's filing and three fixtures, and the noise between two boxes
+    that are both empty is 0.5 to 2.8. Two boxes too close to separate, and no box
+    filled, both come back as not determined and the agent chooses.
+  - **The sample window is deliberately loose.** A tight crop gives a bigger
+    number when it lands exactly and a wrong answer when it does not: at twelve
+    pixels of caption height, a one pixel difference in a caption's left edge put
+    fifteen points between two boxes that were both empty.
+  - The value is surfaced for confirmation and stays editable like every other
+    parsed value, with a provenance chip of its own, "Ticked box on the form". It
+    is still never compared against the label; it selects which numeric rule runs
+    (A-12 for spirits, A-13 for wine) and the result already names the rule.
+  - A new `item_five_ocr_ms` phase reports what this costs. It is zero on every
+    document that carries a text layer.
+
+### Fixed
+
+- **A scanned form with nothing ticked stops being answered wrongly.** The
+  "document names exactly one product type" rule is an inference from absence: it
+  is sound on a Registry printout and unsound on a scan whose OCR lost two of the
+  three captions, which looks identical. Sampling the boxes is direct evidence of
+  the thing being inferred, so it now supersedes that inference in both
+  directions, filling the value where a box stands out and clearing it where the
+  boxes were sampled and none did. An AcroForm radio group still wins over both.
+
+### Unchanged, deliberately
+
+- The beverage type is still never compared against the label, and the embedded
+  label artwork still cannot supply it: a label does not print a form answer.
+
+### Added: a Section 508 conformance report, with its exceptions
+
+The author: "this entire project needs to be 508 compliant; ensure that it is."
+
+Section 508 of the Rehabilitation Act, as revised in 2017, adopts WCAG 2.0
+Levels A and AA for web content at 36 CFR Part 1194, Appendix A, E205.4. NFR-5
+targeted WCAG 2.1 AA, which is a superset and therefore satisfies it, so the gap
+was not conformance; it was that the requirement never named the standard a
+federal reviewer would ask about, and that the criteria no automated tool
+evaluates had not been walked and recorded.
+
+- **[docs/ACCESSIBILITY_CONFORMANCE.md](docs/ACCESSIBILITY_CONFORMANCE.md)**
+  (US-30). Criterion by criterion across all four principles, with a result and
+  a line of evidence for each, five named test methods, and three stated
+  exceptions.
+- **NFR-5 rewritten** to name Section 508 and the WCAG 2.0 AA standard it
+  adopts, and to say separately that the interface is verified to WCAG 2.1 AA.
+  Those answer different questions: what is required, and what was done.
+- **The criteria axe reports as incomplete are now tested**, in
+  `a11y.spec.ts::the criteria a tool reports as incomplete`: reflow at 320 by
+  256 pixels on all three tabs and with a five-row result, text spacing
+  overridden to the values 1.4.12 names, 200 percent zoom, use of colour under a
+  real greyscale filter on two different results, name-role-value on the tab
+  set, the disclosure and the outcome chips, and the status-message regions.
+- **The contrast test derives its outcome list from the outcome definitions**
+  rather than from a list kept beside them, so an outcome added with an
+  unchecked colour fails rather than shipping. It also checks the focus ring
+  against every ground it actually lands on rather than only the two surfaces.
+  No new token was introduced by the presence checks or the Help tab: Contains
+  reuses the match pair deliberately, and Help uses only tokens already covered.
+- **The pill control was already a real tab set** and is now asserted as one,
+  with `aria-selected` and the panel association checked rather than assumed.
+- **No screen reader was used, and the report says so** as exception 5.1, with
+  what that does and does not leave open and what should be run before any use
+  beyond this assessment. A truthful report with exceptions is worth more to a
+  reviewer than a blanket claim.
+- **OQ-7 is answered in practice and left open as a question.** Whether Section
+  508 formally applies to a prototype of this kind is for the agency; the work
+  was done as though it does.
+
+### Added: a reset, on both views that hold state
+
+The author: "add a reset option that clears the information so another
+application can be uploaded." An agent working through a stack of applications
+had no way back to the empty state but to reload the page.
+
+- **One control on the single-label view** (US-29), labelled "Clear and start
+  another label", beside the results rather than at the top of the form. It
+  clears the uploaded files, the parsed values, every typed field and the results
+  together, closes the disclosure if it was open, and is offered only when there
+  is something to clear.
+- **Focus moves to the file picker and the live region says the form was
+  cleared.** Not polish: this control removes the element that had focus, which
+  is itself, and one that left focus on the document body would fail exactly the
+  agent who could not see that the screen had emptied.
+- **No confirmation dialog.** Nothing is stored, so nothing is lost that cannot
+  be re-uploaded, and a dialog is one more thing in the way.
+- **The batch view got one too**, because it holds state: both pickers, the rows
+  and any error, with a running stream stopped first so that a reset cannot leave
+  a table filling itself back up.
+- **The picker is remounted rather than emptied by hand.** A file input's value
+  is not React's to clear, and choosing a file identical to the one already in it
+  fires no event, so an agent who cleared by mistake could not re-choose the file
+  they had.
+
+### Added: a Help tab, and the check screen gets quiet
+
+The author, on the build the word budget produced: "this has way too many words
+on the screen. create a help me tab and put all of the text you are removing plus
+some FAQs on that tab."
+
+The budget added earlier in this release stops the panel growing back in bulk. It
+does not stop one long paragraph replacing three short ones, and it was being met
+by a screen that still explained itself at every control: six paragraphs of
+standing caveat, each true, each on every check an agent ever runs.
+
+- **A third segment of the tab strip, Help** (US-28). A reading page: headings,
+  short paragraphs, no controls except links, and no requirement identifier
+  anywhere on it. It answers what to upload, what each outcome means including
+  the new Contains, why a value can come from the artwork inside the application,
+  why the brand name is found but not judged for type size, why a bottle photo
+  reads worse than filed artwork, where beverage type comes from, what happens to
+  your files, and what this tool is not.
+- **Six paragraphs come off the check screens** and are rewritten for a reader
+  rather than pasted across. `helpTab.test.tsx` asserts each one absent from the
+  check screen and its replacement present on Help.
+- **The empty-state prompt becomes a short label**, "Upload a file to check.",
+  rather than nothing. The agent still has to know why the button is inert.
+- **The fanciful name and the class or type code become lines, not sentences.**
+  Each is now the name, the value, and a chip reading "Not compared". They are
+  real values the parser read off the document in front of the agent, so they
+  stay as data; why they are not compared is a Help entry. That is the quieter of
+  the two options the brief offered.
+- **A sentence rule, asserted.** From the top of the upload card to the last
+  result row, no explanatory paragraph runs to more than one sentence. Its
+  exemptions are listed in the test and each is something that stays exactly as
+  it is: FR-9's messages, the government warning card's own detail, and "This
+  tool recommends. You decide."
+- **Nothing that names a real problem moved.** The persistent prototype banner,
+  the footer and the FR-9 error messages are unchanged and are not on Help. A
+  quieter screen that achieved itself by hiding a failure would be worse than the
+  wordy one.
+
+### Changed: alcohol content and net contents are presence checks, and they pass
+
+The author, on the released build: "Alcohol content and net content needs to
+also say 'match' or 'Contains' in green when these items are found on the
+artwork (that is the requirement right? to have the volume and alcohol content
+listed?)"
+
+It is the requirement, and the tool was throwing the finding away. 27 CFR
+5.63(a)(3), 4.32(b)(3) and 7.63(a)(3) put alcohol content on the label;
+5.63(b)(2), 4.32(b)(2) and 7.63(a)(5) put net contents there. When the artwork
+carried `42% ALC BY VOL`, the tool had established something real: the label
+carries an element the regulation requires. It reported that nothing had been
+established, because it was comparing the value against the picture it was read
+from. The circular part was the comparison, not the finding.
+
+- **A sixth outcome, `present`, and it is a pass**
+  ([ADR 0018](docs/adr/0018-presence-checks.md), FR-15). Where the application
+  declares no value, the row is a one-sided presence check: it carries the
+  label's value, no score, and a reason citing the section of 27 CFR it answers.
+- **The chip reads Contains, in the same green as Match, with its own shape.**
+  "Contains" is the stronger claim, not a hedge: Match says two things agreed,
+  and here one thing was found. Sharing a colour with Match is what makes the
+  word and the silhouette load-bearing rather than decorative, so Contains uses
+  a ring holding a dot, which no other outcome uses and which is nothing like a
+  tick in greyscale. If the author prefers the word "Match", it is one constant:
+  `label` on the `present` entry in `frontend/src/lib/outcomes.ts`.
+- **No application side on the row at all**, not even a "not supplied"
+  placeholder. The row used to print the identical string in both columns,
+  because the value had been read off the artwork and written into the
+  application side, and an agent reading two identical values reads a
+  comparison. There was none.
+- **Both paths exist and both are tested.** Where the application does declare
+  the value, by typing or from a form edition that carries it, the row is a
+  two-sided comparison reporting match or does not match exactly as before.
+  FR-11's precedence is unchanged.
+- **Absence is still a finding**, reported against the regulation with both
+  container carve-outs in the reason, and a spirits label whose percentage and
+  proof disagree is still the A-12 review: a contradiction is the more specific
+  finding and the presence check does not overrule it.
+- **The summary line reads "5 of 5 checks passed"**, counting comparisons and
+  presence checks together. It replaces "3 of 3 verifiable fields match; 2 read
+  from the artwork only", which was the honest line while those rows were
+  circular comparisons.
+- **ADR 0013 is amended, not deleted.** The `artwork_derived` state narrows to
+  what it was built for: a field with no presence rule, read off the artwork, on
+  a submission carrying no photograph. It should be rare, and on the author's own
+  filing it does not arise, because that form states the class or type in item 9.
+  Whether the class or type should become a presence check too is
+  [OQ-28](docs/OPEN_QUESTIONS.md#oq-28), open rather than guessed: the citations
+  have not been fetched, and a presence check for it would rest on the type-size
+  ranking ADR 0015 exists to work around.
+
+### Performance: the artwork is read once, in one request
+
+The author measured the deployed build on 2026-09-01 with her own mezcal COLA
+document, 382 KB, submitted alone:
+
+| request | when it runs | measured |
+| --- | --- | --- |
+| `POST /api/classify` | the moment she picks the file | 5492 ms, 5410 ms |
+| `POST /api/verify` | when she selects **Check this label** | 5331 ms to 5498 ms |
+
+About eleven seconds of waiting for one document, with each request on its own
+inside NFR-1's target. Both were reading the same pictures: the prefill request
+came back with `artwork_images_read: 1`, and the document's own text layer takes
+277 ms, so the rest of it was a full Tesseract pass over artwork that
+`POST /api/verify` was about to read again for the label side.
+
+- **`POST /api/classify` reads the document's text layer and stops**
+  ([ADR 0017](docs/adr/0017-read-the-artwork-once.md), NFR-1, NFR-6). It counts
+  the pictures it found without reading them and says which of the two readings
+  it did, in a new `artwork_read` on the parsed block. The five boxes fill as
+  fast as the file uploads.
+- **The artwork is read once, at check time**, where the check needs it anyway.
+  What it yields fills alcohol content and net contents in the result.
+- **A value the artwork is about to supply is not reported as a gap.** A gap
+  opens a box inline, moves focus into it and announces that the value was not
+  found in the upload. Saying that about a value the next click reads off the
+  artwork would be the tool asking an agent to do work it is one second from
+  doing itself. The two stay editable behind the disclosure, because FR-11's
+  precedence still makes a typed value win.
+- **`POST /api/read-application` still reads everything.** It is FR-11's route
+  for a caller that wants the parsed values without verifying, and there is no
+  second request behind it to do the reading.
+- **Not a cache, and the ADR says so in as many words.** A server-side store of
+  parsed documents would breach NFR-6, which is an acceptance criterion of this
+  system and a promise printed above the masthead on every screen: "Nothing you
+  upload is stored." The second read is gone because there is no second read.
+
+Measured on a session container, which is not production hardware and is
+reported only as a before-and-after on one machine, with a synthetic 155 KB
+filing carrying one embedded label image, three runs each:
+
+| Request | Before | After |
+| --- | --- | --- |
+| `POST /api/classify` | 1463 / 1518 / 1594 ms, median **1518** | 160 / 216 / 245 ms, median **216** |
+| `POST /api/verify` | 1459 / 1472 / 1606 ms, median **1472** | 1370 / 1394 / 1425 ms, median **1394** |
+| Both together | **2990 ms** | **1610 ms** |
+
+### Performance: the 180-degree check is scored at half resolution
+
+[OQ-27](docs/OPEN_QUESTIONS.md#oq-27) is closed. It was costed on one image on
+2026-08-30 and deliberately not built on it, because one image is not a
+measurement of a decision rule. The measurement that answered it is the one
+ADR 0003 was decided on: the twelve sample labels at all four cardinal
+rotations, forty-eight cases, with the check forced to run on every one of them,
+run over the clean renderings and again over the same set degraded into
+something shaped like a phone photograph. The degraded run is the one that
+decides, because the clean set is right at every scale and so separates nothing:
+
+| scale | long edge | right | both candidates, per case |
+| --- | --- | --- | --- |
+| 1.00 | 1600 px | 48 of 48 | 1504 ms |
+| 0.60 | 960 px | 48 of 48 | 957 ms |
+| 0.50 | 800 px | 48 of 48 | 781 ms |
+| 0.40 | 640 px | 48 of 48 | 649 ms |
+| 0.30 | 480 px | **44 of 48** | 381 ms |
+| 0.25 | 400 px | 48 of 48 | 312 ms |
+
+- **`ORIENTATION_CHECK_SCALE` is 0.5**, and the scale sits one measured step
+  above the first failure rather than at the last passing value. A rule whose
+  accuracy is not monotone in its own parameter has started reading noise, and
+  OQ-27's single-image table has 0.25 answering backwards on the author's own
+  artwork.
+- **Scoring is not reading.** The two candidate passes exist to separate two
+  numbers that on real artwork are fifty points and more apart. The winning
+  rotation is applied to the full-resolution image, which is what the pipeline
+  goes on to read, and `test_orientation_floor.py` asserts both halves.
+
 ## [1.1.0] - unreleased until tagged
 
 The author's own use of the deployed v1.0.1 build on 2026-08-29, with a real

@@ -16,7 +16,7 @@
  * Measured against the deployed build on 2026-08-30 with the author's own
  * filing: "2 of 5 fields match. 3 does not match." The same document posted to
  * the same endpoint with no application parts at all returns those two rows as
- * `artwork_derived` and the line reads "0 of 3 verifiable fields match; 2 read
+ * `artwork_derived` and the line reads "0 of 3 checks passed; 2 read
  * from the artwork only". The API was right; the round trip through the browser
  * was what broke it.
  *
@@ -224,7 +224,7 @@ describe('and what the panel then says about it', () => {
     await user.click(screen.getByRole('button', { name: 'Check this label' }))
 
     await waitFor(() => expect(posted.body).not.toBeNull())
-    const line = '3 of 3 verifiable fields match; 2 read from the artwork only'
+    const line = '3 of 3 checks passed; 2 read from the artwork only'
     expect(await screen.findByText(line)).toBeInTheDocument()
     expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(line)
   })
@@ -235,9 +235,9 @@ describe('and what the panel then says about it', () => {
     // matches, and the count says five of five with no qualifier on it.
     const laundered: Outcome[] = ['match', 'match', 'match', 'match', 'match']
 
-    expect(summary(laundered)).toBe('5 of 5 fields match')
+    expect(summary(laundered)).toBe('5 of 5 checks passed')
     expect(summary(artworkDerivedResult().fields.map((row) => row.outcome))).toBe(
-      '3 of 3 verifiable fields match; 2 read from the artwork only',
+      '3 of 3 checks passed; 2 read from the artwork only',
     )
   })
 })

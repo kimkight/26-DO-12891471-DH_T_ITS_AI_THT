@@ -50,11 +50,21 @@ FIELD_LABELS = {
 # `parsed_from_artwork` is a picture inside the document, read by OCR, which is
 # weaker evidence than text and is therefore only used where the text was
 # silent.
-ApplicationSource = Literal["typed", "parsed_from_form", "parsed_from_artwork", "absent"]
+# `read_from_tick` is the fifth, added with ADR 0016: item 5's product type is
+# three check boxes, and a ticked box is in the pixels of the page rather than in
+# its text. It sits beside `parsed_from_artwork` rather than with
+# `parsed_from_form` because both went through a recognition step and a text
+# layer did not, and it is separate from it because a form's own box is not the
+# label artwork.
+ApplicationSource = Literal[
+    "typed", "parsed_from_form", "parsed_from_artwork", "read_from_tick", "absent"
+]
 
-# Where inside the document one value was read (ADR 0010). Finer than
+# Where inside the document one value was read (ADR 0010, ADR 0016). Finer than
 # ApplicationSource, which is about the agent as well as the document.
-DocumentValueSource = Literal["form_fields", "embedded_text", "embedded_artwork", "absent"]
+DocumentValueSource = Literal[
+    "form_fields", "embedded_text", "embedded_artwork", "product_type_box", "absent"
+]
 
 
 class SegmentationDetail(BaseModel):
@@ -118,10 +128,21 @@ class FieldResult(BaseModel):
     name: str = Field(description="Machine name of the field, for example brand_name.")
     display_name: str = Field(description="How the field is named to an agent.")
     found_on_label: bool = Field(
-        description="False means the field could not be located on the label (FR-1)."
+        description=(
+            "False means the field was not found on the label (FR-1). Where the "
+            "application declared a value, this reports whether that value was "
+            "found by searching the label for it (ADR 0015); where it declared "
+            "none, it reports whether the extractor could locate one."
+        )
     )
     label_value: str | None = Field(
-        default=None, description="The value read off the label, or null if not found."
+        default=None,
+        description=(
+            "What the label carries for this field, or null if not found. Where "
+            "the field was decided by searching, this is the label's own printing "
+            "of the matched run, so an agent can see the label's casing beside "
+            "the application's (FR-4)."
+        ),
     )
     application_value: str | None = Field(
         default=None, description="The value supplied with the application."
@@ -136,22 +157,31 @@ class FieldResult(BaseModel):
     )
     outcome: Outcome = Field(
         description=(
-            "match, needs_review, mismatch, not_compared, or artwork_derived. "
-            "The last is not a verdict about agreement (FR-14, ADR 0013): it "
-            "marks a row whose application value was read off the same label "
-            "artwork that supplied the label side, so the two values compared "
-            "are one reading of one picture and could not have disagreed. It is "
-            "excluded from any count of fields that match, and it never carries "
-            "a score."
+            "match, needs_review, mismatch, not_compared, present, or "
+            "artwork_derived. "
+            "present is a passing one-sided finding (FR-15, ADR 0018): 27 CFR "
+            "requires alcohol content and net contents on the label, and where "
+            "the application declared neither, the row reports that the label "
+            "carries the required element. It has a label value and no "
+            "application value, and it carries no score, because a score is a "
+            "similarity between two strings and there is only one here. "
+            "artwork_derived is not a verdict about agreement (FR-14, "
+            "ADR 0013): it marks a row whose application value was read off the "
+            "same label artwork that supplied the label side, so the two values "
+            "compared are one reading of one picture and could not have "
+            "disagreed. It never carries a score either, and ADR 0018 narrows "
+            "it to the fields presence checks do not cover."
         )
     )
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
     label_region: TextRegionDetail | None = Field(
         default=None,
         description=(
-            "Which panel of the label the value was read from, or null where "
+            "Which panel of the label the value was found in, or null where "
             "the field was not found on the label. See SegmentationDetail for "
-            "what the numbers mean."
+            "what the numbers mean. This is what replaces an extracted value as "
+            "the useful half of the row: an agent can see that the brand was "
+            "found on the front panel rather than in the small print (ADR 0015)."
         ),
     )
     source_photo: int | None = Field(
@@ -330,6 +360,18 @@ class ApplicationDocumentResult(BaseModel):
             "non-zero artwork_images_found means the pictures were there and "
             "could not be read, which is a different thing for an agent to act "
             "on than a document that carries no pictures at all."
+        ),
+    )
+    artwork_read: bool = Field(
+        default=True,
+        description=(
+            "Whether the embedded pictures were put through OCR on this "
+            "reading (ADR 0017). False on the prefill pass, which takes the "
+            "document's text layer alone and leaves the pictures to the check "
+            "that reads them anyway. A caller has to be able to tell that from "
+            "a document carrying no pictures, because artwork_images_read is "
+            "zero in both cases and only one of them is a gap the agent has to "
+            "fill."
         ),
     )
     artwork_images_rejected: list[RejectedImageDetail] = Field(
@@ -740,6 +782,15 @@ class PhaseTimings(BaseModel):
             "those values come from."
         ),
     )
+    item_five_ocr_ms: float = Field(
+        default=0.0,
+        description=(
+            "Recognizing item 5's three check box captions on a rendered page "
+            "(ADR 0016). Zero on every document that carried a text layer, which "
+            "states those captions exactly and for nothing; a scanned or "
+            "photographed form is the only input that pays for this."
+        ),
+    )
     label_ocr_ms: float = Field(
         default=0.0,
         description=(
@@ -755,8 +806,8 @@ class PhaseTimings(BaseModel):
         default=0.0,
         description=(
             "Every Tesseract pass in this request, wherever it ran: the sum of "
-            "classify_ocr_ms, document_ocr_ms, page_ocr_ms, artwork_ocr_ms and "
-            "label_ocr_ms."
+            "classify_ocr_ms, document_ocr_ms, page_ocr_ms, artwork_ocr_ms, "
+            "item_five_ocr_ms and label_ocr_ms."
         ),
     )
     ocr_passes: int = Field(

@@ -1,5 +1,5 @@
 /**
- * The whole interface: one screen, two tabs (FR-10, NFR-4, NFR-5).
+ * The whole interface: one screen, three tabs (FR-10, NFR-4, NFR-5).
  *
  * ## What this page claims to be, and what it refuses to claim
  *
@@ -31,14 +31,20 @@
  * NFR-4's first criterion is that the primary task is reachable from the
  * landing page with no navigation, so "Check one label" is the tab that is
  * already open. The batch tab is the second thing, not the first, because the
- * common case is one label and Sarah's 300-label drop is the exception.
+ * common case is one label and Sarah's 300-label drop is the exception. Help is
+ * the third, and it is where the explanation that used to sit on the check
+ * screen now lives (US-28): a working screen and a reading page are different
+ * things, and the author's instruction was that the first had stopped being one.
+ *
+ * The tab strip is a real tab set rather than three buttons that swap content,
+ * which matters more with three than it did with two: see the roles, the
+ * arrow-key handling and the panel association below.
  *
  * The tabs follow the ARIA tabs pattern: `role="tablist"`, arrow keys move
  * between tabs, `aria-selected` says which is current, and each panel is
- * labelled by its tab. That is a small amount of machinery for two tabs, and it
- * is here because the alternative, two buttons that swap content with no
- * announcement, leaves a screen reader user with no way to know the page
- * changed.
+ * labelled by its tab. That is a small amount of machinery, and it is here
+ * because the alternative, buttons that swap content with no announcement,
+ * leaves a screen reader user with no way to know the page changed.
  *
  * They are drawn as a segmented pill control rather than as underlined tabs,
  * which is presentation and nothing else: the roles, the states and the key
@@ -46,20 +52,44 @@
  * shadow and a weight change together, because a white pill on a pale track is
  * a weak signal on its own, and `aria-selected` is what is actually read out.
  *
- * Both panels stay mounted once opened, so a half-filled form is still there
- * after a look at the other tab. Only the hidden one carries `hidden`, which
- * takes it out of the accessibility tree and the tab order together.
+ * Every panel stays mounted once opened, so a half-filled form is still there
+ * after a look at another tab. Only the hidden ones carry `hidden`, which takes
+ * them out of the accessibility tree and the tab order together.
  */
 import { useRef, useState } from 'react'
 import { BatchTab } from './components/BatchTab'
+import { HelpTab } from './components/HelpTab'
 import { SingleLabelTab } from './components/SingleLabelTab'
 
+/*
+ * Three segments, and Help is the third for the reason the batch tab is the
+ * second: NFR-4's first criterion is that the primary task is reachable with no
+ * navigation, and a tab strip that opens on anything but the work is a tool
+ * introducing itself. Help is where the explanation an agent may want once
+ * lives, rather than on the screen they use every day (US-28).
+ *
+ * Called "Help" rather than "Help me", which is what the author asked for in
+ * her own words. A tab label is a place, not a plea, and every other segment
+ * here names what is behind it.
+ */
 const TABS = [
   { id: 'single', label: 'Check one label' },
   { id: 'batch', label: 'Check many labels' },
+  { id: 'help', label: 'Help' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
+
+/**
+ * What each tab shows. A lookup rather than a nested conditional, because with
+ * three tabs the conditional stops reading as a choice and starts reading as a
+ * puzzle, and a fourth would make it worse.
+ */
+const PANELS: Record<TabId, () => React.ReactNode> = {
+  single: () => <SingleLabelTab />,
+  batch: () => <BatchTab />,
+  help: () => <HelpTab />,
+}
 
 export default function App() {
   const [active, setActive] = useState<TabId>('single')
@@ -170,7 +200,7 @@ export default function App() {
             aria-labelledby={`tab-${tab.id}`}
             hidden={active !== tab.id}
           >
-            {opened.has(tab.id) ? tab.id === 'single' ? <SingleLabelTab /> : <BatchTab /> : null}
+            {opened.has(tab.id) ? PANELS[tab.id]() : null}
           </div>
         ))}
       </main>

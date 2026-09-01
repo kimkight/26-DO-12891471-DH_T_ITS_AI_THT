@@ -368,13 +368,40 @@ and name the remainder.
 
 **8.3a The application-document path, which is the one that missed NFR-1.**
 
+**Both requests, because a submission is both.** An agent picking a file waits
+for `POST /api/classify`, and then, when they press the button, for
+`POST /api/verify`. Measuring only the second reported a target met per request
+and missed per submission: the author's measurement of 2026-09-01 was 5492 and
+5410 ms for the first and 5331 to 5498 ms for the second, about eleven seconds
+for one document, with each request on its own inside the target
+([ADR 0017](adr/0017-read-the-artwork-once.md)). So the figure to record is the
+sum, and the two parts beside it.
+
 ```bash
-curl -s -o /tmp/verify.json -w 'total %{time_total}s\n' \
+curl -s -o /tmp/classify.json -w 'classify %{time_total}s\n' \
+  -F 'files=@/path/to/your-cola-application.pdf' \
+  "$URL/api/classify"
+
+curl -s -o /tmp/verify.json -w 'verify   %{time_total}s\n' \
   -F 'files=@/path/to/your-cola-application.pdf' \
   "$URL/api/verify"
 
 python -c "import json;t=json.load(open('/tmp/verify.json'))['timings'];print(json.dumps(t,indent=2))"
 ```
+
+The prefill request should now be about the time the file takes to upload rather
+than about five seconds, because it reads the document's text layer and none of
+the pictures inside it. Check that it says so rather than inferring it from the
+clock:
+
+```bash
+python -c "import json;d=json.load(open('/tmp/classify.json'))['application_document'];print('artwork_read', d['artwork_read'], 'found', d['artwork_images_found'], 'read', d['artwork_images_read'])"
+```
+
+`artwork_read` false with a non-zero `artwork_images_found` is the expected
+reading: the pictures were located, counted, and left for the check. False with a
+zero count means this document carries no artwork at all, which is a different
+thing and is why the two are reported separately.
 
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
@@ -386,6 +413,14 @@ what the last one bought. The
 `timings` block printed by the second command is the phase breakdown, and
 `ocr_passes` is the figure to look at first: a document-only submission should
 read one picture once.
+
+**Read it from the response, not from the screen.** The panel stopped printing
+the elapsed time and the phase disclosure in v1.2.0, on the author's own
+instruction, because an agent checking a label is not measuring the tool
+(NFR-1, NFR-4). Nothing about the measurement changed: every phase is still
+timed by a timer around the work it names, `timings` still carries them all, and
+this step is now the only place they are read. `item_five_ocr_ms` is new in
+v1.2.0 and should be 0 on any document with a text layer (ADR 0016).
 
 **8.4 The stream is a stream, and this is the step that cannot be skipped.**
 
