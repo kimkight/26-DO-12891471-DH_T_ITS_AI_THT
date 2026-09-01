@@ -16,7 +16,7 @@ updates every artifact the answer affects.
 | [OQ-4](#oq-4) | Closed by assumption A-12 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-5](#oq-5) | Closed by assumption A-13 | Nothing; FR-7 acceptance criteria state the rule |
 | [OQ-6](#oq-6) | Closed by ADR 0006 | Nothing; the execution model is decided |
-| [OQ-7](#oq-7) | Open | Accessibility acceptance (NFR-5) |
+| [OQ-7](#oq-7) | Open on the formal question; answered in practice 2026-09-01 | Nothing; Section 508 via WCAG 2.0 AA is claimed and evidenced in ACCESSIBILITY_CONFORMANCE.md, and WCAG 2.1 AA is verified above it |
 | [OQ-8](#oq-8) | Open | Accuracy acceptance (US-21) |
 | [OQ-9](#oq-9) | Open | Matching threshold defaults (FR-3) |
 | [OQ-10](#oq-10) | Open | ATO planning |
@@ -358,8 +358,23 @@ obligation that would plausibly apply to a system used by agency staff, but no
 source in this assignment states that it applies to a prototype of this kind,
 and the conclusion is not asserted.
 
+**Answered in practice on 2026-09-01, and still open as a question.** The author's
+instruction was "this entire project needs to be 508 compliant; ensure that it
+is." So the work was done as though it applies: NFR-5 now names Section 508 and
+the WCAG 2.0 AA standard it adopts at 36 CFR Part 1194, Appendix A, E205.4, and
+[ACCESSIBILITY_CONFORMANCE.md](ACCESSIBILITY_CONFORMANCE.md) is a
+criterion-by-criterion report with its exceptions stated.
+
+What remains open is the half only the agency can answer: whether a prototype of
+this kind is formally in scope, and whether there is an agency standard beyond
+WCAG 2.1 AA. Neither changes what was built. Doing the work while the question is
+open is the right way round: the cost of being wrong that way is a report nobody
+needed, and the cost of being wrong the other way is a system an agent cannot
+use.
+
 **Who can answer:** Marcus Williams, or the agency Section 508 program office.
-**Blocks:** the accessibility acceptance bar. WCAG 2.1 AA is targeted regardless.
+**Blocks:** nothing. Section 508 via WCAG 2.0 AA is claimed and evidenced, and
+WCAG 2.1 AA is verified above it.
 
 ## OQ-8
 **What accuracy is good enough?**

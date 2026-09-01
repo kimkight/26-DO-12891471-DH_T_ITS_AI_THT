@@ -244,6 +244,46 @@ application to the picture of the label."
 - The beverage type is still never compared against the label, and the embedded
   label artwork still cannot supply it: a label does not print a form answer.
 
+### Added: a Section 508 conformance report, with its exceptions
+
+The author: "this entire project needs to be 508 compliant; ensure that it is."
+
+Section 508 of the Rehabilitation Act, as revised in 2017, adopts WCAG 2.0
+Levels A and AA for web content at 36 CFR Part 1194, Appendix A, E205.4. NFR-5
+targeted WCAG 2.1 AA, which is a superset and therefore satisfies it, so the gap
+was not conformance; it was that the requirement never named the standard a
+federal reviewer would ask about, and that the criteria no automated tool
+evaluates had not been walked and recorded.
+
+- **[docs/ACCESSIBILITY_CONFORMANCE.md](docs/ACCESSIBILITY_CONFORMANCE.md)**
+  (US-30). Criterion by criterion across all four principles, with a result and
+  a line of evidence for each, five named test methods, and three stated
+  exceptions.
+- **NFR-5 rewritten** to name Section 508 and the WCAG 2.0 AA standard it
+  adopts, and to say separately that the interface is verified to WCAG 2.1 AA.
+  Those answer different questions: what is required, and what was done.
+- **The criteria axe reports as incomplete are now tested**, in
+  `a11y.spec.ts::the criteria a tool reports as incomplete`: reflow at 320 by
+  256 pixels on all three tabs and with a five-row result, text spacing
+  overridden to the values 1.4.12 names, 200 percent zoom, use of colour under a
+  real greyscale filter on two different results, name-role-value on the tab
+  set, the disclosure and the outcome chips, and the status-message regions.
+- **The contrast test derives its outcome list from the outcome definitions**
+  rather than from a list kept beside them, so an outcome added with an
+  unchecked colour fails rather than shipping. It also checks the focus ring
+  against every ground it actually lands on rather than only the two surfaces.
+  No new token was introduced by the presence checks or the Help tab: Contains
+  reuses the match pair deliberately, and Help uses only tokens already covered.
+- **The pill control was already a real tab set** and is now asserted as one,
+  with `aria-selected` and the panel association checked rather than assumed.
+- **No screen reader was used, and the report says so** as exception 5.1, with
+  what that does and does not leave open and what should be run before any use
+  beyond this assessment. A truthful report with exceptions is worth more to a
+  reviewer than a blanket claim.
+- **OQ-7 is answered in practice and left open as a question.** Whether Section
+  508 formally applies to a prototype of this kind is for the agency; the work
+  was done as though it does.
+
 ### Added: a reset, on both views that hold state
 
 The author: "add a reset option that clears the information so another

@@ -47,6 +47,7 @@ seconds, or agents go back to doing it manually.
 | `frontend/` | React and TypeScript, built with Vite. The agent-facing interface. |
 | `docs/` | Charter, scope, requirements, stories, architecture, security, test strategy, SDLC process, deployment outline. |
 | `docs/adr/` | Architecture decision records. |
+| `docs/ACCESSIBILITY_CONFORMANCE.md` | Section 508 conformance, criterion by criterion, with its exceptions stated. |
 | `samples/` | Twelve label specifications, the renderer that draws them, and the ground truth CSVs. Images are generated locally and git-ignored. |
 | `scripts/` | `measure.py`, which runs the engine over the sample set and reports per-field accuracy and latency. |
 | `infra/terraform/` | Terraform for the deployed stack: ECR, ECS on Fargate, ALB, CloudWatch Logs, IAM, and the GitHub OIDC deploy role. |
@@ -262,6 +263,7 @@ and the first figures measured on the deployed target are below.**
 | Beverage type from item 5 | Works: `backend/app/product_type.py`. Item 5's three check boxes are located from their own captions on the rendered page and compared by luminance; the darkest is reported only when it clears a defended margin, and two close or none filled is not determined. Never compared against the label; it selects which numeric rule runs. See [ADR 0016](docs/adr/0016-product-type-from-the-page.md) |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
 | Bold type on the warning prefix | **Not checked**, deliberately (OOS-4). See below. |
+| Accessibility | **Section 508 conformance is claimed and evidenced**, evaluated against WCAG 2.0 A and AA as 36 CFR Part 1194, Appendix A, E205.4 adopts it, and verified to WCAG 2.1 AA above that. Criterion by criterion in [docs/ACCESSIBILITY_CONFORMANCE.md](docs/ACCESSIBILITY_CONFORMANCE.md), gated in CI by axe, a computed-contrast test, a keyboard walk and the criteria no tool evaluates. **No screen reader was used**, which is stated there as an exception rather than implied away. |
 
 Numbers are deliberately absent from this table and are in their own section
 below, because a figure without the hardware, the date and the sample it came

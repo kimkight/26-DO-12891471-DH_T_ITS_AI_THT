@@ -935,23 +935,56 @@ but to reload the page.
   leaves focus on the document body has failed for the agent who most needs it
   to work.
 
-### NFR-5 Accessibility
+### NFR-5 Accessibility: Section 508, evaluated against WCAG
 
 **Priority:** Must
-**Source:** Sarah Chen interview; Decision D-3
+**Source:** Sarah Chen interview; Decision D-3; the author's instruction of
+2026-09-01, "this entire project needs to be 508 compliant; ensure that it is";
+36 CFR Part 1194, Appendix A, E205.4
 
-The interface targets WCAG 2.1 Level AA.
+**The standard is Section 508 of the Rehabilitation Act as revised in 2017.**
+For web content, 36 CFR Part 1194, Appendix A adopts WCAG 2.0 Levels A and AA at
+E205.4, so that is what conformance is evaluated against.
+
+**The interface is built and verified to WCAG 2.1 Level AA**, which is a
+superset: every WCAG 2.0 AA criterion is a WCAG 2.1 AA criterion, and 2.1 adds
+twelve more. Naming both is the honest statement, because the two answer
+different questions: the first is what is required, the second is what was done.
 
 **Acceptance criteria**
-- Outcomes are conveyed by text and shape, not by colour alone.
-- All interactive controls are keyboard reachable and have visible focus.
+- Outcomes are conveyed by text and shape, not by colour alone. Where two
+  outcomes deliberately share a colour, as Contains and Match do (FR-15), the
+  word and the shape carry the whole of the distinction and are verified under a
+  greyscale check of the rendered page.
+- All interactive controls are keyboard reachable and have visible focus, with
+  the focus indicator computed from the rendered style rather than asserted from
+  the stylesheet.
 - Form inputs have programmatically associated labels.
-- Text contrast meets 4.5:1 for body text.
+- Text contrast meets 4.5:1 for body text and 3:1 for non-text UI, computed
+  against the tokens as rendered, on every surface each is used on. The list of
+  outcome colours is derived from the outcome definitions, so an outcome added
+  with an unchecked colour fails rather than shipping.
 - Results appearing after submission are announced to assistive technology.
+- Every custom control reports its name, its role and its state. The pill
+  control is a real tab set, not buttons that swap content.
+- The criteria no automated tool evaluates are walked and recorded, not assumed:
+  meaningful sequence, focus order, error identification and suggestion, labels
+  and instructions, status messages, reflow, text spacing, and use of colour.
+- **A conformance report exists, is criterion by criterion, and states its
+  exceptions.** [docs/ACCESSIBILITY_CONFORMANCE.md](ACCESSIBILITY_CONFORMANCE.md).
+  A claim with two stated exceptions is worth more to a reviewer than a blanket
+  one, and a report that omits that no screen reader was used is a report that
+  implies coverage the tests do not give.
 
 Sarah states "half our team is over 50" and describes a wide range of technology
-comfort. [Source: Sarah Chen interview] The applicability of Section 508 to this
-prototype is not stated in the assignment and must be confirmed; see OQ-7.
+comfort. [Source: Sarah Chen interview]
+
+**What is still open, and what was done about it.** Whether Section 508 formally
+applies to a prototype of this kind, and whether the agency holds a standard
+beyond it, is a question for the agency and is OQ-7. The work was done as though
+it applies, which is the only useful way to hold an open question of that shape:
+the cost of being wrong that way is a report nobody needed, and the cost of being
+wrong the other way is a system an agent cannot use.
 
 ### NFR-6 No persistence of uploaded content
 
