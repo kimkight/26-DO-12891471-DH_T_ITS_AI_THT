@@ -71,6 +71,19 @@ interface Props {
    * not change because someone is editing.
    */
   gaps: (keyof ApplicationData)[]
+  /**
+   * The values the upload has not supplied *yet*, because the artwork they are
+   * printed on is read by the check rather than by the prefill pass (ADR 0017).
+   *
+   * A third state, and it has to be a third state. These are not gaps: nothing
+   * is being asked of the agent, so no box opens inline and nothing takes
+   * focus. Nor are they read: there is no value to summarise, and a summary
+   * line with an empty value beside a chip saying where it came from would be
+   * the interface reporting a reading that has not happened. They stay
+   * editable behind the disclosure, because an agent who wants to type one
+   * before the check still may, and FR-11's precedence still makes theirs win.
+   */
+  pending?: (keyof ApplicationData)[]
   /** The disclosure's state, held by the parent because it is set from outside. */
   open: boolean
   onToggle: () => void
@@ -108,13 +121,17 @@ export function ApplicationFields({
   sources,
   processed,
   gaps: missing,
+  pending = [],
   open,
   onToggle,
   onChange,
   onGapNews,
 }: Props) {
   const gaps = TEXT_FIELDS.filter((field) => missing.includes(field.name))
-  const read = TEXT_FIELDS.filter((field) => !missing.includes(field.name))
+  // Everything that is not a gap stays editable behind the disclosure, pending
+  // values included. Only the ones with something in them are summarised.
+  const editable = TEXT_FIELDS.filter((field) => !missing.includes(field.name))
+  const read = editable.filter((field) => !pending.includes(field.name))
   const firstGapRef = useRef<HTMLInputElement>(null)
 
   /*
@@ -308,7 +325,7 @@ export function ApplicationFields({
             the one read off the application. Leave a box empty and that field is not compared.
           </p>
 
-          {(processed ? read : TEXT_FIELDS).map((field) => textField(field))}
+          {(processed ? editable : TEXT_FIELDS).map((field) => textField(field))}
 
           {/*
             The beverage type control lives here when it was read, and inline

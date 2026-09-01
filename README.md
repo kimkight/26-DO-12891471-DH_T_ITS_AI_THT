@@ -27,7 +27,12 @@ seconds, or agents go back to doing it manually.
 > under it**. The extra second and a half over the 3.5 s the same document
 > measured against deploy #11 is the 180-degree orientation check, and it is
 > the reason the readings are right at all: it is a real trade and the section
-> below states it rather than smoothing it over. What those runs did not
+> below states it rather than smoothing it over. v1.2.0 buys margin back on
+> that path in two measured steps: the artwork is read once rather than in both
+> requests one submission makes
+> ([ADR 0017](docs/adr/0017-read-the-artwork-once.md)), and the orientation
+> check scores its candidates at half resolution, right in 48 of 48 measured
+> cases ([OQ-27](docs/OPEN_QUESTIONS.md#oq-27)). What those runs did not
 > settle is accuracy on real label artwork: three phone photographs of a round
 > bottle still leave the brand and the class unreadable on curved glass, which is
 > the residual [ADR 0007](docs/adr/0007-multi-photo-single-label.md) works around
@@ -251,7 +256,7 @@ and the first figures measured on the deployed target are below.**
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
 | Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
-| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). |
+| Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). It is read **once**, by the check: the prefill pass takes the document's text layer alone, and there is no cache ([ADR 0017](docs/adr/0017-read-the-artwork-once.md)). |
 | Accuracy on real photographed labels | **Unmeasured, and the largest open technical risk.** Real photographs have been submitted; what they found is A-15, OQ-21, and the scope line in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md) section 6. A label wrapped on a round bottle is not a supported input. |
 | Beverage type from item 5 | Works: `backend/app/product_type.py`. Item 5's three check boxes are located from their own captions on the rendered page and compared by luminance; the darkest is reported only when it clears a defended margin, and two close or none filled is not determined. Never compared against the label; it selects which numeric rule runs. See [ADR 0016](docs/adr/0016-product-type-from-the-page.md) |
 | COLA document parsing on real applications | **Unverified.** The item map is read off the blank TTB F 5100.31 (04/2023) and the three extraction paths are exercised against documents generated at test time. No real filed application or Registry printout has been parsed, because committing one would put an applicant's record in the repository. See OQ-22 and A-17. |
@@ -355,12 +360,45 @@ not run at all. It is the reason the OCR confidence on this artwork went from
 
 Paying a second and a half of a five-second budget to stop reading a label
 upside down is worth it. What it is not is free, and the honest statement is
-that this path now sits at the bar rather than comfortably inside it. There is
-a costed optimisation in [OQ-27](docs/OPEN_QUESTIONS.md#oq-27): the two
-rotation candidates are read at full resolution, and reading them at half
-resolution separated 62.2 from 25.0 on this artwork against 91.8 from 32.1 at
-full, for about a third less time. It is measured on one image, so it is
-recorded rather than built.
+that this path sat at the bar rather than comfortably inside it. Two changes in
+v1.2.0 buy the margin back, and both are measured.
+
+**The document was being read twice, in two requests.** The author measured the
+deployed build on 2026-09-01 with the same 382 KB filing: `POST /api/classify`,
+which runs the moment a file is picked, took 5492 and 5410 ms, and
+`POST /api/verify` took 5331 to 5498 ms after that. About eleven seconds of
+waiting for one document. The prefill request returned `artwork_images_read: 1`,
+which is the whole of the cost in it: it ran the artwork pass to fill two boxes,
+and the check then read the same picture again for the label side. The document's
+own text layer takes 277 ms. So the prefill pass stops reading the artwork; the
+check reads it once, where it is needed anyway, and what it yields fills alcohol
+content and net contents in the result. See
+[ADR 0017](docs/adr/0017-read-the-artwork-once.md), which also records why this
+is not solved with a cache: NFR-6 is an acceptance criterion and a promise
+printed on every screen.
+
+Measured on a session container, which is not production hardware and is
+reported only as a before-and-after on one machine, with a synthetic 155 KB
+filing carrying one embedded label image, three runs each:
+
+| Request | Before | After |
+| --- | --- | --- |
+| `POST /api/classify` | 1463 / 1518 / 1594 ms, median **1518** | 160 / 216 / 245 ms, median **216** |
+| `POST /api/verify` | 1459 / 1472 / 1606 ms, median **1472** | 1370 / 1394 / 1425 ms, median **1394** |
+| What an agent waits, both together | **2990 ms** | **1610 ms** |
+
+**And the 180-degree check now scores its two candidates at half resolution**,
+which closes [OQ-27](docs/OPEN_QUESTIONS.md#oq-27). That question was costed on
+one image and deliberately not built on it. The measurement that answered it is
+the one ADR 0003 was decided on: the twelve sample labels at all four cardinal
+rotations, forty-eight cases, with the check forced to run on every one, over the
+set degraded into something shaped like a phone photograph. Half resolution is
+right in 48 of 48, as full resolution is, for 781 ms per case against 1504 ms.
+The first failure is one step below at 0.30, 44 of 48. The scale sits above it
+rather than at the last passing value, and the reasoning is in OQ-27 and in
+`ORIENTATION_CHECK_SCALE`. Scoring is not reading: the winning rotation is
+applied to the full-resolution image, which is what the pipeline goes on to
+read.
 
 **The panel segmentation in this release does not move the figure**, because it
 adds no Tesseract read: both the column split and the block grouping are

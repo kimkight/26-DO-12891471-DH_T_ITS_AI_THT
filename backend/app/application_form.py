@@ -217,6 +217,15 @@ class ParsedApplication:
     # Every embedded image that did not clear the floor, with the reason. See
     # RejectedImage: the picture itself never travels.
     artwork_images_rejected: list[RejectedImage] = field(default_factory=list)
+    # Whether the artwork pass ran at all on this reading (ADR 0017).
+    #
+    # False means the pictures inside the document were located and counted and
+    # deliberately not read. It is not the same as "there was no artwork" and it
+    # is not the same as "the artwork read nothing": a caller has to be able to
+    # tell a document that carries no pictures from one whose pictures are still
+    # to be read at check time, because the second one is not a gap the agent
+    # has to fill.
+    artwork_read: bool = True
     # The embedded image the label side can be taken from when the agent
     # supplied no photograph of their own (ADR 0010, FR-1).
     label_artwork: EmbeddedArtwork | None = None
@@ -259,6 +268,7 @@ def parse_application_document(
     content_type: str | None,
     *,
     pre_read: OcrResult | None = None,
+    read_artwork: bool = True,
 ) -> ParsedApplication:
     """Read one uploaded COLA document. Never reaches the network (NFR-3).
 
@@ -266,6 +276,15 @@ def parse_application_document(
     is what ``app.classify`` produces while deciding that this file is a form at
     all (ADR 0011). Passing it back means the picture is read once rather than
     twice. It is ignored for a PDF, whose text does not come from OCR.
+
+    ``read_artwork`` decides whether the pictures embedded in a PDF are put
+    through Tesseract. It is the whole of
+    [ADR 0017](../../docs/adr/0017-read-the-artwork-once.md): the prefill pass
+    sets it False and takes the text layer alone, which costs milliseconds, and
+    the check sets it True because the check needs the artwork anyway. Reading
+    it twice was the same picture through the same pipeline in two requests, for
+    one submission. It has no effect on an image, which carries no objects to
+    lift out.
     """
     if not content:
         raise UnreadableDocumentError(
@@ -273,7 +292,7 @@ def parse_application_document(
             "type the application values instead."
         )
     if _is_pdf(content, content_type):
-        return _parse_pdf(content)
+        return _parse_pdf(content, read_artwork=read_artwork)
     return _parse_image(content, pre_read=pre_read)
 
 
@@ -308,7 +327,7 @@ class _PdfContents:
     item_five: tuple[bytes, list[CaptionBox] | None] | None = None
 
 
-def _parse_pdf(content: bytes) -> ParsedApplication:
+def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplication:
     """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
     with _PDFIUM_LOCK, timing.phase("document_pdfium"):
         contents = _read_pdf_with_pdfium(content)
@@ -316,7 +335,16 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     # The artwork read happens here, outside the lock, for the reason the page
     # OCR below does: Tesseract is the expensive part and there is no reason for
     # one document's reading to block another's.
-    artwork = _read_artwork(contents.artwork, contents.artwork_rejected)
+    #
+    # Where the caller asked for the text layer alone it does not happen at all,
+    # and the pictures are counted rather than read (ADR 0017). That is the
+    # single most expensive thing this module does, and on the prefill pass it
+    # was being paid for a second time by the check that followed it.
+    artwork = (
+        _read_artwork(contents.artwork, contents.artwork_rejected)
+        if read_artwork
+        else _unread_artwork(contents.artwork, contents.artwork_rejected)
+    )
     # Item 5, sampled off the rendered page (ADR 0016). Outside the lock like
     # every other expensive step, and only where nothing has answered it already.
     # None here means no page's text layer named the item; the scan branch below
@@ -350,7 +378,10 @@ def _parse_pdf(content: bytes) -> ParsedApplication:
     ):
         item_five = read_item_five((contents.rendered_pages[0], None))
 
-    if not ocr_lines and not artwork.values:
+    # A document whose pictures were deliberately left unread is not a document
+    # that could not be read (ADR 0017). Raising here would tell an agent their
+    # file is unreadable at prefill time and then verify it a moment later.
+    if not ocr_lines and not artwork.values and not (artwork.images_found and not artwork.read):
         raise UnreadableDocumentError(
             "No text could be read from the uploaded PDF, either from the file "
             "itself, or by reading its pages as images, or from any picture "
@@ -558,6 +589,9 @@ class _ArtworkReading:
     # The OCR result for ``label_artwork``, carried so that the label side does
     # not read the same picture a second time. See ParsedApplication.
     label_artwork_read: OcrResult | None = None
+    # Whether Tesseract was run over these pictures at all (ADR 0017). False
+    # means they were located and counted and left unread.
+    read: bool = True
 
 
 def _embedded_images(
@@ -675,6 +709,35 @@ def _artwork_png(image: pdfium.PdfImage, page_index: int) -> bytes | None:
         return None
 
 
+def _unread_artwork(
+    images: list[EmbeddedArtwork], rejected: list[RejectedImage] | None = None
+) -> _ArtworkReading:
+    """Count the pictures and read none of them (ADR 0017).
+
+    **This is not a degenerate case of ``_read_artwork``; it is the point of the
+    decision.** The prefill pass exists so that the five boxes fill as fast as
+    the file uploads, and the only thing in it that was not fast was a full
+    Tesseract pass over every picture in the document, run to fill two values
+    that the check a moment later reads the same pictures for again.
+
+    What survives is everything that costs nothing: how many pictures cleared
+    the floor, and which ones did not and why. What does not survive is any
+    value, and any claim that one of these pictures can stand in as the label
+    side, because deciding that means reading them. ``read`` says which of the
+    two readings this is, so that "no artwork" and "artwork not yet read" are
+    never confused for each other downstream.
+    """
+    return _ArtworkReading(
+        values={},
+        rejected=list(rejected or []),
+        images_found=len(images),
+        images_read=0,
+        label_artwork=None,
+        label_artwork_read=None,
+        read=False,
+    )
+
+
 def _read_artwork(
     images: list[EmbeddedArtwork], rejected: list[RejectedImage] | None = None
 ) -> _ArtworkReading:
@@ -786,6 +849,7 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
         artwork_images_found=artwork.images_found,
         artwork_images_read=artwork.images_read,
         artwork_images_rejected=artwork.rejected,
+        artwork_read=artwork.read,
         label_artwork=artwork.label_artwork,
         label_artwork_read=artwork.label_artwork_read,
     )
@@ -1471,6 +1535,7 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
         artwork_images_found=parsed.artwork_images_found,
         artwork_images_read=parsed.artwork_images_read,
         artwork_images_rejected=parsed.artwork_images_rejected,
+        artwork_read=parsed.artwork_read,
         label_artwork=parsed.label_artwork,
         label_artwork_read=parsed.label_artwork_read,
     )

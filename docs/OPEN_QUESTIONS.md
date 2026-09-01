@@ -1412,17 +1412,18 @@ this path, which is why no such claim is made.
 **Would reading the two rotation candidates at a lower resolution separate them
 just as reliably, and how much of NFR-1's margin would that buy back?**
 
-**Status: Open, raised 2026-08-30. Costed here and deliberately not built.**
+**Status: Closed 2026-09-01. Measured over the forty-eight cases, and built at
+half resolution.**
 
-**Why it is worth asking.** The 180-degree check in `backend/app/ocr.py` is what
+**Why it was worth asking.** The 180-degree check in `backend/app/ocr.py` is what
 made the author's mezcal artwork readable, and it is what took this path from
 3.5 s to 5.0 s against NFR-1's roughly five (OQ-26). It costs two full Tesseract
 reads at the working resolution, and it does so only to decide between two
 numbers that are far apart: on that artwork, 91.8 upright against 32.1 upside
 down. Separating 91.8 from 32.1 does not obviously need every pixel.
 
-**What was measured, on one image.** The same artwork, both candidates scored at
-each scale, on a session container. The time is for both candidates together;
+**The first measurement, on one image.** The same artwork, both candidates scored
+at each scale, on a session container. The time is for both candidates together;
 the confidences are upright against upside down.
 
 | scale | long edge | both candidates | upright | upside down | chose |
@@ -1434,28 +1435,46 @@ the confidences are upright against upside down.
 | 0.30 | 480 px | 285 ms | 35.3 | 21.7 | correctly |
 | 0.25 | 400 px | 183 ms | 0.0 | 1.0 | **backwards** |
 
-**The estimate.** At half resolution the check costs about a third less, which
-on the deployed figures is roughly 0.5 s off a 5.0 s request, and the two
-candidates are still 37 points apart. At 0.30 it costs about 70 percent less,
-roughly 1.0 s, and the gap has narrowed to 14 points. At 0.25 the text has
-dissolved far enough that the check answers backwards, which is the failure
-mode that matters: a cheap check that turns a readable label upside down is
-worse than no check.
+One image is not a measurement of a decision rule, so this was not built on it.
 
-**Why it is not built.** One image is not a measurement of a decision rule. The
-figure that would justify changing this is the one ADR 0003 was decided on: the
-twelve-label sample set at all four cardinal rotations, forty-eight cases, with
-the check forced to run on every one of them, scored at each candidate scale.
-Until that exists, picking a scale from a single sheet would be exactly the kind
-of arithmetic this repository declines to publish as measurement
-([README](../README.md), "Measured performance and accuracy"). The margin it
-would buy is real but the path is inside the bar without it.
+**The measurement that answered it, on 2026-09-01.** The set ADR 0003 was decided
+on: the twelve sample labels at all four cardinal rotations, forty-eight cases,
+with the check forced to run on every one of them and offered the correct turn
+against its opposite. Run twice. First on the clean renderings, where the check
+is right in 48 of 48 at every scale down to 0.25; an input that easy cannot
+separate a good scale from a bad one, so it decides nothing. Then on the same
+set degraded into something shaped like a phone photograph
+(`tests/conftest.py::photographic`), which is the input the check exists for:
 
-**What would answer it:** run that sweep, and report the accuracy at each scale
-beside the time saved. A scale is only a candidate if it is right in as many of
-the 48 cases as full resolution is.
+| scale | long edge | right | both candidates, per case |
+| --- | --- | --- | --- |
+| 1.00 | 1600 px | 48 of 48 | 1504 ms |
+| 0.60 | 960 px | 48 of 48 | 957 ms |
+| 0.50 | 800 px | 48 of 48 | 781 ms |
+| 0.40 | 640 px | 48 of 48 | 649 ms |
+| 0.30 | 480 px | **44 of 48** | 381 ms |
+| 0.25 | 400 px | 48 of 48 | 312 ms |
 
-**Who can answer:** anyone with a checkout, Tesseract and the sample set; it
-needs no deployed environment and no real applicant artwork.
-**Blocks:** nothing. NFR-1 is met at 5.0 s without it. It would restore margin
-on the path that has least of it.
+The four failures at 0.30 are the beer label at all four submitted rotations,
+where the correct turn scores 35.2 against its opposite's 37.1: 1.9 points the
+wrong way round.
+
+**What was built: 0.50, and the reason it is not lower.** Half resolution is
+right in as many of the forty-eight cases as full resolution is, on both the
+clean and the degraded set, and on the one real filing measured it keeps the two
+candidates 37 points apart. It costs about 48 percent less on the degraded set
+and about 34 percent less on the real filing, which on the deployed figures is
+roughly half a second off a path that had 5.0 s against a target of about five.
+
+0.30 fails, and 0.25 passes again below it. A rule whose accuracy is not
+monotone in its own parameter has started reading noise rather than text, and
+the single-image table above has 0.25 answering backwards on real artwork. So
+the scale sits one measured step above the first failure rather than at the last
+passing value. `ORIENTATION_CHECK_SCALE` in `backend/app/ocr.py` carries the
+table and the argument; `tests/test_orientation_floor.py` asserts that the
+scoring passes are reduced and that the picture the pipeline goes on to read is
+not.
+
+**What would reopen it:** a Tesseract release that changes how word confidence
+behaves under downsampling, or a real filing on which the check answers
+backwards at 0.50. Either means re-running the sweep before trusting the scale.

@@ -253,6 +253,7 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
         notes=parsed.notes,
         artwork_images_found=parsed.artwork_images_found,
         artwork_images_read=parsed.artwork_images_read,
+        artwork_read=parsed.artwork_read,
         artwork_images_rejected=[
             RejectedImageDetail(
                 page=image.page,

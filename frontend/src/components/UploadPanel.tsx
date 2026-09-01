@@ -35,6 +35,7 @@ import { FilePreview, TileHeading } from './Ui'
 import { SIDES, announce } from '../lib/uploadAnnouncement'
 import { classifyUploads } from '../lib/api'
 import type { UiError } from '../lib/api'
+import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { plainMessage } from '../lib/plainLanguage'
 import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
@@ -122,8 +123,17 @@ export function UploadPanel({
 
   const document = result?.application_document ?? null
   const found = document?.fields.filter((entry) => entry.found_on_document) ?? []
-  const missing = document?.fields.filter((entry) => !entry.found_on_document) ?? []
+  // A value the artwork is about to supply is not a value the agent has to
+  // enter (ADR 0017), so it is not listed as one. The check reads the pictures
+  // and fills it in.
+  const pending = new Set<string>(pendingFromArtwork(document))
+  const missing =
+    document?.fields.filter((entry) => !entry.found_on_document && !pending.has(entry.name)) ?? []
   const fromArtwork = found.filter((entry) => entry.source === 'embedded_artwork')
+  // The document carries pictures, and they are read by the check rather than
+  // here. That is what makes the next line true without the artwork having been
+  // read yet.
+  const artworkPending = document ? document.artwork_read === false && pending.size > 0 : false
 
   return (
     <section className="upload-panel" aria-labelledby={headingId}>
@@ -233,7 +243,7 @@ export function UploadPanel({
             The bottle caveat is not repeated here. The results panel states it
             once, where the check it qualifies is being read.
           */}
-          {document.label_artwork_available && !result?.label_images ? (
+          {(document.label_artwork_available || artworkPending) && !result?.label_images ? (
             <p className="field__hint">
               This application carries its own label artwork, so you do not have to add an image.
             </p>
