@@ -1654,6 +1654,23 @@ main {
 }
 
 /*
+ * The one line that says what a search hit does and does not establish
+ * (ADR 0015).
+ *
+ * Quiet rather than ruled: it qualifies every searched row, and a boxed notice
+ * above the results would read as a warning about them. It is set at the same
+ * size and colour as the footnote at the bottom of the panel, because it is the
+ * same kind of sentence. The text carries the whole of the meaning (NFR-5).
+ */
+.footnote--search {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+/*
  * The one line that says the label being checked came out of the application
  * document rather than off a bottle (ADR 0010).
  *

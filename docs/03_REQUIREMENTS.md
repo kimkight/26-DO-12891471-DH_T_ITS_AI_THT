@@ -62,22 +62,59 @@ supplies none and inventing them is prohibited by the ground rules. See OOS-7.
 
 ## 3. Functional requirements
 
-### FR-1 Field extraction from label artwork
+### FR-1 Verification by search: is the declared value on the label?
 
 **Priority:** Must
-**Source:** Technical Requirements, Sample Label section
+**Source:** Technical Requirements, Sample Label section; author's session on the
+deployed build, 2026-08-30
 
-Extract brand name, class/type designation, alcohol content, net contents, and
-the government warning statement from uploaded label artwork. One label may be
-submitted as more than one photograph of itself, because a label wraps a round
-bottle and no single photograph shows all of it flat. See
+Read uploaded label artwork, and for each value the application declares, report
+whether that value appears on the label and where. One label may be submitted as
+more than one photograph of itself, because a label wraps a round bottle and no
+single photograph shows all of it flat. See
 [ADR 0007](adr/0007-multi-photo-single-label.md).
+
+**This requirement was inverted on 2026-08-31, and the inversion is the point of
+it.** It used to require extracting a value from the label and then comparing two
+strings. Locating a value is a ranking over candidates, and every field-level
+defect reported against a deployed build has been a failure of that ranking
+rather than of the comparison or of the reading: the brand name reported as the
+producer's tax identifier, and then the brand name and the class or type
+designation both reported as "not found" on a document whose label text contained
+`DEL MAGUEY` and `MEZCAL` exactly. The application already declares the answer, so
+the tool searches for it. See [ADR 0015](adr/0015-verify-by-search.md) for the
+measurements and the alternatives rejected.
+
+**What a hit establishes, and what it does not.** A hit establishes that the
+declared value appears on the label. It does **not** establish that it appears as
+the brand, in the type size 27 CFR requires, or on the panel it is required on.
+Type size and prominence are OOS-5 and are not checked at all. That limit is
+stated on the screen, once, above the rows, and it is a weaker claim than the old
+design implied and a far stronger one than "not found" about text the tool has
+read.
 
 **Acceptance criteria**
 - Given the sample distilled spirits label, when it is submitted, then the
-  system returns a value or an explicit "not found" for each of the five fields.
-- Given a field that cannot be located, then the field is reported as not found
-  rather than reported as empty or silently omitted.
+  system returns an outcome and its evidence for each of the five fields.
+- Given a declared value that appears on the label, then the outcome is a match
+  and the result names the column and the block it was found in, and shows the
+  label's own printing of it.
+- Given a declared value that does not appear on the label, then the field is
+  reported as not found rather than reported as empty or silently omitted, and
+  the closest text on the label is reported with its score so the call can be
+  judged.
+- Given a declared value that appears only inside a longer word, then it is not
+  reported as a match: the search matches whole words.
+- Given a class or type designation carrying a registry code the label does not
+  print, for example `MEZCAL FB`, then the full value is searched for first and
+  the code is left off only if that fails, and the result says the code was left
+  off.
+- Given a field the application did not supply, then there is nothing to search
+  for and the existing extractor runs as the fallback, reporting not found rather
+  than a guess where its heuristic cannot identify a value.
+- Given a value on the screen, then the result states that a hit shows the value
+  is on the label and not that it is on the label as the brand, in the required
+  type size, or on the required panel.
 - Extraction adds no outbound network call on the default path (see NFR-6).
 - Given a photograph taken sideways, or one whose orientation is recorded only
   in its EXIF tag, then it is turned upright before it is read, and the result
@@ -104,8 +141,14 @@ bottle and no single photograph shows all of it flat. See
 **Priority:** Must
 **Source:** Sarah Chen interview; Technical Requirements
 
-Accept application data for the same five fields and compare it against what was
-extracted from the label.
+Accept application data for the same five fields and check it against the label.
+
+**The application side is the question, not the answer** (FR-1,
+[ADR 0015](adr/0015-verify-by-search.md)). What the applicant declared is what the
+label is searched for; the label no longer has to volunteer a value first. That
+makes an application value load-bearing in a way it was not: a field left blank is
+a field with nothing to search for, and it falls back to the extractor and to the
+not-compared outcome below.
 
 **How the data arrives is FR-11's question, not this one.** The API takes the
 five values and does not care whether they were read off an uploaded COLA
@@ -117,6 +160,8 @@ is about what happens to the five values once they are here.
 **Acceptance criteria**
 - Given a label and its application data, when verification runs, then each of
   the five fields carries exactly one outcome.
+- Given a declared value for a field, then that value is what the label is
+  searched for, and the result reports whether it was found (FR-1).
 - Given application data missing a field, then that field is reported as not
   compared, and this is distinguished from a mismatch. A field the agent never
   opened is such a field, so a collapsed disclosure is a legitimate submission
@@ -133,14 +178,26 @@ Check. ABV is correct? Check. Government warning is there? Check."
 
 Each field returns one of: **match**, **needs human review**, or **mismatch**.
 
+**The thresholds are unchanged by the FR-1 inversion, and that is deliberate.**
+The score a search produces is a similarity between a declared value and a run of
+label text, which is the same kind of quantity this requirement has always
+classified. A second scale for it would leave two definitions of "close". See
+[ADR 0015](adr/0015-verify-by-search.md), decision 1.
+
 **Acceptance criteria**
 - Given a field whose normalized similarity is at or above the match threshold,
   then the outcome is match.
 - Given a field whose similarity falls between the review and match thresholds,
   then the outcome is needs human review.
 - Given a field below the review threshold, then the outcome is mismatch.
-- The result includes the extracted value, the application value, and the score,
-  so that an agent can judge the call rather than trust it.
+- The result includes what was read off the label, the application value, and the
+  score, so that an agent can judge the call rather than trust it. Where the
+  field was decided by searching, what was read off the label is the label's own
+  printing of the matched run, and the result also names where on the sheet it
+  was found (FR-1, FR-10).
+- Given a declared value not found on the label, then the closest text the label
+  does carry is reported with its score, rather than the row saying only that
+  nothing was found.
 
 Dave's requirement in his own words: "Technically a mismatch? Sure. But it's
 obviously the same thing. You need judgment." The middle outcome is how the tool
@@ -152,14 +209,23 @@ defers to that judgment instead of overriding it.
 **Priority:** Must
 **Source:** Dave Morrison interview; Decision D-5
 
-Text comparison normalizes case, surrounding whitespace, and punctuation before
-scoring, so that presentational differences do not read as substantive ones.
+Both sides are normalized for case, surrounding whitespace, and punctuation
+before scoring, so that presentational differences do not read as substantive
+ones. This governs the search FR-1 requires as well as any comparison of two
+strings: the same `normalize_text` runs on the declared value and on every word
+of the label reading.
 
 **Acceptance criteria**
-- Given label `STONE'S THROW` and application `Stone's Throw`, then the outcome
-  is match or needs human review, and never mismatch.
+- Given label `STONE'S THROW` and application `Stone's Throw`, then the value is
+  found on the label and the outcome is match or needs human review, and never
+  mismatch.
+- Given a match found this way, then the result shows the label's own casing
+  beside the declared value, so an agent can see that the difference is
+  presentational rather than being told that it is.
 - Given a straight apostrophe against a typographic apostrophe in otherwise
   identical text, then the outcome is match.
+- Given punctuation the reading invented, for example a comma inside a brand
+  name, then the outcome is still match.
 - Given two genuinely different brand names, then normalization does not cause
   them to be reported as a match.
 
@@ -173,6 +239,13 @@ warning is governed by FR-5 and FR-6, which are deliberately stricter.
 
 The government warning is compared for exact text after whitespace and letter
 case normalization, against the text quoted in section 1.
+
+**Unchanged by the FR-1 inversion of 2026-08-31.** This requirement already
+searches the label for a known string; the string is fixed by 27 CFR 16.21 rather
+than declared by the applicant, and the comparison is exact rather than fuzzy by
+requirement. Nothing in [ADR 0015](adr/0015-verify-by-search.md) touches it, the
+warning row carries no similarity score, and the near-miss routing below stands
+exactly as it was.
 
 **Acceptance criteria**
 - Given a warning matching 27 CFR 16.21 exactly except for line breaks, runs of

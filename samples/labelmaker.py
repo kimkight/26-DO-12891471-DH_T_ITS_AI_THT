@@ -368,3 +368,90 @@ def render_panels_png_bytes(spec: PanelLabelSpec) -> bytes:
     buffer = io.BytesIO()
     render_panels(spec).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# --------------------------------------------------------------------------
+# Busy artwork whose largest text is not the brand name (v1.2.0).
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class BusyLabelSpec:
+    """A label whose brand name is small type on a crowded panel.
+
+    This is the shape of the author's own mezcal artwork, reduced to the one
+    property that matters: **the largest text on the sheet is not the brand
+    name**, and the brand name is set no larger than several other lines around
+    it. Type size cannot identify the brand on a label like this, and no tuning
+    of a type-size rule makes it, which is the whole case for searching for the
+    declared value instead (ADR 0015).
+
+    ``display`` is the large decorative line, ``brand`` the small line the
+    application declares, and ``clutter`` the other small lines it has to be
+    picked out from. Nothing here is inked or coloured: the subject of the
+    fixture is where the words are and how big they are, and the colour arm and
+    the panel segmentation have fixtures of their own.
+    """
+
+    display: str
+    brand: str
+    clutter: tuple[str, ...] = ()
+    class_type: str = ""
+    alcohol_content: str = ""
+    net_contents: str = ""
+    warning: str = ""
+
+
+def render_busy(spec: BusyLabelSpec) -> Image.Image:
+    """Draw one busy label. The display line is the only large type on it."""
+    fonts = available_fonts()
+    if fonts is None:
+        raise RuntimeError("No usable TrueType font was found on this machine.")
+    bold_path, regular_path = fonts
+
+    image = Image.new("RGB", CANVAS, (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    display_font = ImageFont.truetype(bold_path, 104)
+    # One size for the brand and for everything it has to be told apart from, so
+    # that a type-size ranking has nothing whatever to separate them by.
+    small_font = ImageFont.truetype(regular_path, 32)
+    warning_font = ImageFont.truetype(regular_path, 26)
+
+    margin = 70
+    width = CANVAS[0] - 2 * margin
+    y = 100
+    for line in _wrap(draw, spec.display, display_font, width):
+        draw.text((margin, y), line, font=display_font, fill=(0, 0, 0))
+        y += 128
+    y += 40
+
+    small = [
+        *spec.clutter[: len(spec.clutter) // 2],
+        spec.brand,
+        *spec.clutter[len(spec.clutter) // 2 :],
+        spec.class_type,
+        spec.alcohol_content,
+        spec.net_contents,
+    ]
+    for line in small:
+        if not line:
+            continue
+        draw.text((margin, y), line, font=small_font, fill=(0, 0, 0))
+        y += 52
+    y += 20
+
+    for paragraph in spec.warning.split("\n"):
+        for line in _wrap(draw, paragraph, warning_font, width):
+            draw.text((margin, y), line, font=warning_font, fill=(0, 0, 0))
+            y += 34
+
+    return image
+
+
+def render_busy_png_bytes(spec: BusyLabelSpec) -> bytes:
+    """Render a busy label to PNG bytes, so no image reaches the disk."""
+    import io
+
+    buffer = io.BytesIO()
+    render_busy(spec).save(buffer, format="PNG")
+    return buffer.getvalue()

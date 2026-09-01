@@ -9,6 +9,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.0] - unreleased until tagged
 
+The author's use of the released v1.1.0 build on 2026-08-30, with the same real
+mezcal COLA document uploaded alone. Everything upstream worked and two of the
+four compared fields still came back as defects.
+
+### The evidence
+
+The application side filled correctly, `DEL MAGUEY` for the brand name and
+`MEZCAL FB` for the class or type, both out of the document's own text layer.
+The label artwork was found, lifted out, turned the right way up and read. And
+then:
+
+> Does not match. Brand name. On the label: **Not found on the label**. On the
+> application: DEL MAGUEY.
+
+Measured against the segmented label text that same pipeline produced:
+
+| declared by the application | present in the label text | best fuzzy score |
+| --- | --- | --- |
+| `DEL MAGUEY` | **yes, exact** | 100.0 |
+| `MEZCAL` | **yes, exact** | 100.0 |
+| `42% ALC BY VOL` | **yes, exact** | 100.0 |
+| `750 ML` | **yes, exact** | 100.0 |
+
+Four of four declared values were on the label, exactly, in text the tool was
+already holding. It reported two of them as not found. The author's summary of
+what the tool is for: "basically the whole goal is to match what's in the
+application to the picture of the label."
+
+### Changed
+
+- **The comparison is inverted: the label is searched for the value the
+  application declares** ([ADR 0015](docs/adr/0015-verify-by-search.md), FR-1
+  through FR-4 rewritten). The tool no longer extracts a value from the label and
+  then compares two strings. Extraction is the fragile half, and every field-level
+  defect reported against a deployed build has been an extraction failure rather
+  than a matching failure or an OCR failure: the brand name read as the producer's
+  tax identifier, and then the brand name and the class or type both declined by a
+  type-size ranking on a label whose largest text is the fanciful name.
+  - Both sides are normalized as FR-4 already required. The label reading is
+    searched one unit per region of the sheet, with the lines joined, so a brand
+    set across two lines is found. Whole-word containment scores 100; otherwise
+    the best window of words is scored with the same `fuzz.ratio` as before.
+  - **The thresholds are the ones already configured.** A search score is
+    classified by the same `classify` at the same A-4 numbers, 95 and 80. No new
+    scale is introduced.
+  - **The row reports where the value was found**, by column and block, and shows
+    the label's own printing of it. That replaces the extracted value and is more
+    useful than one: an agent can see the brand was found on the front panel
+    rather than in the small print. Dave Morrison's `STONE'S THROW` against
+    `Stone's Throw` now shows both casings side by side.
+  - **The limit is stated, once, on the screen and in FR-1**: a hit shows the
+    declared value appears on the label; it does not show it appears as the brand,
+    in the required type size, or on the required panel. Type size and placement
+    are OOS-5 and unchanged.
+  - **The class or type is searched for its description, not its registry code.**
+    The application states `MEZCAL FB` and no label prints `FB`. The full value is
+    searched for first, so stripping can never lose a match, and the row says the
+    code was left off.
+  - **Extraction does not disappear.** Where the application supplied no value
+    there is nothing to search for, and the existing extractor is the fallback
+    with its existing honest not-found behaviour.
+- **`scripts/measure.py` now measures the search**, because it hands the pipeline
+  the same reading the API does. Its accuracy figures are for the code an agent
+  runs rather than for a fallback path.
+
+### Unchanged, deliberately
+
+- **FR-5, the government warning.** It already searches the label for a known
+  statutory string, it is exact rather than fuzzy by requirement, and it returns
+  an exact match on the author's own document. Nothing here touches it and it
+  still carries no similarity score.
+- **FR-7, A-12 and A-13, the numeric comparisons.** The alcohol content and the
+  net contents are located by pattern, which is deterministic and which read both
+  correctly on the author's document. A similarity score cannot express "different
+  units, no conversion, needs human review", or the 27 CFR 5.65 proof cross-check,
+  or a wine range under 27 CFR 4.36. So those rules stand, and the search supplies
+  the label side for them only where the pattern found nothing and the declared
+  value is on the label at or above the match threshold.
+- **FR-14 and ADR 0013.** A row whose two sides are one reading of one picture is
+  still reported as read from the artwork rather than as a match, and searching
+  that picture for a value read off it is circular in exactly the same way.
+
 ### Added
 
 - **Item 5's product type is read off the rendered page**

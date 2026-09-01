@@ -22,7 +22,7 @@ one into a result line for that row without failing the request (FR-8, NFR-2).
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from app import timing
@@ -63,6 +63,7 @@ from app.schemas import (
     WarningDiffSegment,
     WarningResult,
 )
+from app.search import LabelUnit, SearchHit, label_units, verify_presence
 from app.warning import WARNING_STATEMENT, WarningCheck
 
 COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents")
@@ -71,6 +72,39 @@ COMPARED_FIELDS = ("brand_name", "class_type", "alcohol_content", "net_contents"
 # the application document is a self-consistency check, and the response says so
 # rather than letting the two look alike.
 LabelSource = Literal["uploaded_photographs", "application_artwork"]
+
+# The two fields the search decides outright, and the two it only rescues.
+#
+# **The split is the evidence, not a compromise.** The brand name and the class
+# or type designation carry no pattern to match, so they were located by type
+# size, and type size is the ranking that declined on the author's own artwork
+# and reported the tax identifier before that (ADR 0015). For those two the
+# declared value is searched for and the search is the whole comparison.
+#
+# The alcohol content and the net contents are located by pattern, which is
+# deterministic and which read both of them correctly on the same document. Their
+# comparison is FR-7's, and A-12 and A-13 attach rules to it that a similarity
+# score cannot express: two values in different units are needs human review with
+# no conversion, an unparseable alcohol content is needs human review, a range is
+# reported as a range, and proof is cross-checked against 27 CFR 5.65. So the
+# search does not replace their comparison. What it does is supply the label side
+# when the pattern found nothing and the declared value is on the label anyway,
+# after which every one of those rules runs exactly as it did.
+SEARCHED_FIELDS = ("brand_name", "class_type")
+RESCUED_FIELDS = ("alcohol_content", "net_contents")
+
+
+@dataclass(frozen=True)
+class Sheet:
+    """One photograph's reading, ready to be searched (ADR 0015).
+
+    ``index`` is the photograph it came from, numbered as ADR 0007 numbers them,
+    so that a hit can say which picture it was found in as well as where on that
+    picture's sheet.
+    """
+
+    index: int
+    units: list[LabelUnit]
 
 
 def _size_limit_text() -> str:
@@ -310,6 +344,11 @@ class _Read:
     read_path: ReadPath = ReadPath()
     segmentation: Segmentation = Segmentation()
     error: VerificationError | None = None
+    # The reading itself, grouped one unit per region of the sheet, which is
+    # what a declared value is searched for in (FR-1, ADR 0015). Carried on the
+    # read rather than merged, for the reason the regions are: a unit means
+    # nothing outside the photograph it was read from.
+    units: list[LabelUnit] = field(default_factory=list)
 
 
 def verify_photos(
@@ -365,6 +404,7 @@ def verify_photos(
         application_sources=application_sources,
         application_document=application_document,
         label_source=label_source,
+        sheets=[Sheet(index=read.index, units=read.units) for read in usable],
     )
 
 
@@ -419,6 +459,7 @@ def _read_one(index: int, content: bytes, already: OcrResult | None = None) -> _
         ocr_ms=ocr.elapsed_ms,
         read_path=ocr.read_path,
         segmentation=ocr.segmentation,
+        units=label_units(ocr.lines),
     )
 
 
@@ -718,6 +759,44 @@ def _artwork_derived(name: str, comparison: Comparison) -> Comparison:
     )
 
 
+def _search_sheets(
+    name: str,
+    declared: str,
+    sheets: list[Sheet],
+    *,
+    strip_trailing_code: bool = False,
+) -> tuple[Comparison, SearchHit | None, int | None]:
+    """Search every photograph of the label and report the best answer (ADR 0007).
+
+    One label may arrive as several photographs, and a value printed on the front
+    is not on the back. So each sheet is searched on its own and the best hit
+    wins, which is the same rule ADR 0007 already applies to a merged field:
+    found on any photograph counts as found, and where two show it the better
+    reading is the one reported.
+
+    Ranking is by the score the search produced, ties going to the earlier
+    photograph, so a value read identically in two pictures is attributed to the
+    first of them rather than to whichever the iterator reached last. A sheet that
+    produced no hit at all ranks below every sheet that produced one.
+    """
+    scored = [
+        (
+            *verify_presence(
+                FIELD_LABELS[name], declared, sheet.units, strip_trailing_code=strip_trailing_code
+            ),
+            sheet.index,
+        )
+        for sheet in sheets
+    ]
+    comparison, hit, index = max(scored, key=lambda entry: _hit_score(entry[1]))
+    return comparison, hit, index if hit is not None else None
+
+
+def _hit_score(hit: SearchHit | None) -> float:
+    """A hit's score for ranking, with "nothing found" ranking below every hit."""
+    return -1.0 if hit is None else hit.score
+
+
 def build_result(
     parsed: ParsedFields,
     application: dict[str, str],
@@ -730,6 +809,7 @@ def build_result(
     application_sources: dict[str, ApplicationSource] | None = None,
     application_document: ApplicationDocumentResult | None = None,
     label_source: LabelSource = "uploaded_photographs",
+    sheets: list[Sheet] | None = None,
 ) -> VerificationResult:
     """Compare every field and assemble the response (FR-2, FR-3).
 
@@ -745,30 +825,81 @@ def build_result(
     optional too, and a caller that omits them gets exactly the response this
     function always returned: every supplied application value reads as typed,
     which is what it was, and no parsed block is reported.
+
+    ``sheets`` carries the reading each declared value is searched for in
+    (FR-1, ADR 0015). It is optional for the same reason ``photos`` is, and the
+    fallback is the honest one rather than a convenience: **a caller holding
+    parsed fields and no reading has nothing to search**, so every field falls
+    back to the extractor and to comparing two strings, which is what this
+    function did before the inversion. The API and the batch path both supply it,
+    so nothing an agent uses takes that path.
     """
     recorded = timing.current()
     # The comparison itself, timed like everything else rather than left as
     # the remainder. It is milliseconds next to a Tesseract pass, and
     # measuring it is how that stays a fact rather than an assumption.
     with timing.phase("compare"):
-        attribution = sources or {}
+        attribution = dict(sources or {})
         value_sources = application_sources or {}
-        comparisons = {
-            "brand_name": compare_text(parsed.brand_name, application.get("brand_name")),
-            "class_type": compare_text(parsed.class_type, application.get("class_type")),
-            "alcohol_content": compare_abv(
-                parsed.alcohol_content, application.get("alcohol_content")
-            ),
-            "net_contents": compare_net_contents(
-                parsed.net_contents, application.get("net_contents")
-            ),
-        }
-        label_values = {
+        searchable = sheets or []
+        label_values: dict[str, str | None] = {
             "brand_name": parsed.brand_name,
             "class_type": parsed.class_type,
             "alcohol_content": parsed.alcohol_content,
             "net_contents": parsed.net_contents,
         }
+        regions = dict(parsed.region)
+        comparisons: dict[str, Comparison] = {}
+        searched: set[str] = set()
+
+        # **The inversion (FR-1, ADR 0015).** Where the application declares a
+        # value and there is a reading to search, the check is whether that value
+        # appears on the label, and the answer replaces both the extracted value
+        # and the comparison of two strings.
+        for name in SEARCHED_FIELDS:
+            declared = (application.get(name) or "").strip()
+            if not declared or not searchable:
+                comparisons[name] = compare_text(label_values[name], application.get(name))
+                continue
+            comparison, hit, photo = _search_sheets(
+                name, declared, searchable, strip_trailing_code=name == "class_type"
+            )
+            comparisons[name] = comparison
+            searched.add(name)
+            # A hit that fell below the review threshold is the closest text on
+            # the label, and it is in the reason where it belongs. It is not the
+            # label's value for this field, so the row still reports not found.
+            found = comparison.outcome in (Outcome.MATCH, Outcome.NEEDS_REVIEW)
+            label_values[name] = hit.text if hit is not None and found else None
+            if hit is not None and found:
+                regions[name] = hit.region
+                if photo is not None:
+                    attribution[name] = photo
+            else:
+                regions.pop(name, None)
+                attribution.pop(name, None)
+
+        # The rescue (see RESCUED_FIELDS). Only where the pattern found nothing:
+        # a value the pattern did read is the label's own statement of the field,
+        # and replacing it with a run of text that merely resembles the
+        # application would be the tool grading its own homework.
+        for name in RESCUED_FIELDS:
+            declared = (application.get(name) or "").strip()
+            if label_values[name] is None and declared and searchable:
+                _, hit, photo = _search_sheets(name, declared, searchable)
+                if hit is not None and hit.score >= settings.match_threshold:
+                    label_values[name] = hit.text
+                    regions[name] = hit.region
+                    searched.add(name)
+                    if photo is not None:
+                        attribution[name] = photo
+
+        comparisons["alcohol_content"] = compare_abv(
+            label_values["alcohol_content"], application.get("alcohol_content")
+        )
+        comparisons["net_contents"] = compare_net_contents(
+            label_values["net_contents"], application.get("net_contents")
+        )
 
         # The circularity overlay (FR-14, ADR 0013), applied after the
         # comparisons and before the rows are built, so that exactly one place
@@ -790,8 +921,15 @@ def build_result(
         # a mandatory element the tool could not identify on the label is still
         # a finding; what changes is that the reason says which of the two
         # happened. See ParsedFields.declined.
+        # It fires only on a field the extractor still decided. Where the search
+        # ran, type size never got a vote, so "the largest text was not clear of
+        # the next largest" would be describing a ranking that did not happen.
         comparisons = {
-            name: (_declined(comparison) if name in parsed.declined else comparison)
+            name: (
+                _declined(comparison)
+                if name in parsed.declined and name not in searched
+                else comparison
+            )
             for name, comparison in comparisons.items()
         }
 
@@ -805,7 +943,7 @@ def build_result(
                 score=comparison.score,
                 outcome=comparison.outcome,
                 reason=comparison.reason,
-                label_region=_region_detail(parsed.region.get(name)),
+                label_region=_region_detail(regions.get(name)),
                 source_photo=attribution.get(name),
                 application_value_source=value_sources.get(
                     name, "typed" if application.get(name) else "absent"
