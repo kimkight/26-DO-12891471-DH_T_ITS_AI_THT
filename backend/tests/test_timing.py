@@ -271,9 +271,16 @@ class TestThePictureIsReadOnce:
 
         assert body["application_document"]["artwork_images_read"] == 2
         assert body["timings"]["ocr_passes"] == 2
-        net_contents = next(field for field in body["fields"] if field["name"] == "net_contents")
-        # Filled from the second picture, which is what the extra pass bought.
-        assert net_contents["application_value"]
+        # Read from the second picture, which is what the extra pass bought. The
+        # parsed block is where that shows since ADR 0018: the row itself is a
+        # presence check with no application side.
+        parsed = next(
+            entry
+            for entry in body["application_document"]["fields"]
+            if entry["name"] == "net_contents"
+        )
+        assert parsed["found_on_document"] is True
+        assert parsed["source"] == "embedded_artwork"
 
 
 @requires_tesseract

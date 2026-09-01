@@ -32,19 +32,17 @@ const ARTWORK_ONLY: Outcome[] = [
 
 describe('the count says what is true rather than five of five', () => {
   it('counts only the rows that could have disagreed, and names the rest', () => {
-    expect(summary(ARTWORK_ONLY)).toBe(
-      '2 of 2 verifiable fields match; 3 read from the artwork only',
-    )
+    expect(summary(ARTWORK_ONLY)).toBe('2 of 2 checks passed; 3 read from the artwork only')
   })
 
   it('reads in the shape the author specified for two derived rows', () => {
     const outcomes: Outcome[] = ['match', 'match', 'match', 'artwork_derived', 'artwork_derived']
-    expect(summary(outcomes)).toBe('3 of 3 verifiable fields match; 2 read from the artwork only')
+    expect(summary(outcomes)).toBe('3 of 3 checks passed; 2 read from the artwork only')
   })
 
   it('says nothing about verifiability when nothing was artwork-derived', () => {
     const outcomes: Outcome[] = ['match', 'match', 'match', 'match', 'match']
-    expect(summary(outcomes)).toBe('5 of 5 fields match')
+    expect(summary(outcomes)).toBe('5 of 5 checks passed')
   })
 
   it('does not fold an artwork-derived row into the matches', () => {
@@ -55,14 +53,14 @@ describe('the count says what is true rather than five of five', () => {
 
   it('a failing row still reduces the numerator rather than the denominator', () => {
     const outcomes: Outcome[] = ['mismatch', 'match', 'artwork_derived', 'artwork_derived', 'match']
-    expect(summary(outcomes)).toBe('2 of 3 verifiable fields match; 2 read from the artwork only')
+    expect(summary(outcomes)).toBe('2 of 3 checks passed; 2 read from the artwork only')
   })
 })
 
 describe('what a screen reader hears matches what the panel prints', () => {
   it('opens with the same summary and then explains the derived rows', () => {
     const spoken = announcement(ARTWORK_ONLY)
-    expect(spoken).toContain('2 of 2 verifiable fields match; 3 read from the artwork only')
+    expect(spoken).toContain('2 of 2 checks passed; 3 read from the artwork only')
     expect(spoken).toContain('nothing independent to check it against')
   })
 

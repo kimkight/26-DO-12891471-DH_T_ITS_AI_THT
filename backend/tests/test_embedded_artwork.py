@@ -441,15 +441,22 @@ class TestAnApplicationDocumentOnTheApiWithNoPhotograph:
             "net_contents",
             "government_warning",
         }
-        # Nothing was compared against nothing: every compared field has an
-        # application value that came from somewhere in the document.
-        for name in ("brand_name", "class_type", "alcohol_content", "net_contents"):
+        # Nothing was compared against nothing. **Amended by ADR 0018**, which
+        # splits that into its two honest halves: the two fields the form
+        # carries are compared against what it says, and the two 27 CFR
+        # requires on the label are presence checks against the label alone,
+        # with no application side because the form declared none.
+        for name in ("brand_name", "class_type"):
             entry = next(item for item in body["fields"] if item["name"] == name)
             assert entry["application_value"], f"{name} should have an application value"
             assert entry["application_value_source"] in (
                 "parsed_from_form",
                 "parsed_from_artwork",
             )
+        for name in ("alcohol_content", "net_contents"):
+            entry = next(item for item in body["fields"] if item["name"] == name)
+            assert entry["label_value"], f"{name} should have been read off the label"
+            assert entry["outcome"] == "present"
         warning = next(item for item in body["fields"] if item["name"] == "government_warning")
         assert warning["found_on_label"] is True
 

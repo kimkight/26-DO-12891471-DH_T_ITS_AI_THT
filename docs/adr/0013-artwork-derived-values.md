@@ -2,10 +2,47 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted, amended 2026-09-01 by [ADR 0018](0018-presence-checks.md) |
 | Date | 2026-08-30 |
 | Author | Kimberly D. Kight |
 | Decision reference | Extends [ADR 0010](0010-embedded-label-artwork.md), which put the artwork into the application side; adds FR-14; keeps FR-11's precedence and FR-7's outcomes unchanged |
+
+## Amendment, 2026-09-01
+
+**Two of the rows this decision was written about are not comparisons any more,
+so they never reach the state it invents.** [ADR 0018](0018-presence-checks.md)
+makes alcohol content and net contents one-sided presence checks wherever the
+application declares no value: the row reports that the label carries the
+element 27 CFR requires, in green, with no application side at all.
+
+What that corrects is a mistake in this document rather than in its reasoning.
+The argument below is right that comparing a value against the picture it was
+read from establishes nothing. What it did not notice is that the *reading*
+established something: the label carries a mandatory element. Section 3 of this
+ADR says so in as many words, under "Presence remains an independent finding",
+and then reports only the absent case. ADR 0018 reports the present case too.
+
+**What stands, unchanged.** The `artwork_derived` state itself, its word, its
+silhouette, its absent score, its source line on the row, its exclusion from the
+count, and the rule that only agreement is ever relabelled. So does the
+provenance rule below: it keys on where a value came from and not on a field
+name, which is exactly why it narrows cleanly rather than needing rewriting.
+
+**What it narrows to.** A field with no presence rule, read off the artwork, on
+a submission carrying no photograph. On the fixtures that is a class or type
+designation on a Registry printout whose text layer omits it; on the author's
+own filing it does not arise at all, because that form states the class or type
+in item 9. Rare is not never, and
+`tests/test_artwork_derived_values.py::test_the_artwork_derived_state_survives_where_it_still_applies`
+holds the state open.
+
+**What is superseded.** Two acceptance criteria on FR-14, named in
+`docs/03_REQUIREMENTS.md`: the one that made a presence field's row
+`artwork_derived`, and the one that phrased the summary line as "3 of 3
+verifiable fields match; 2 read from the artwork only". The line now reads "5 of
+5 checks passed" and counts both kinds of check.
+
+The rest of this document is left as it was written on 2026-08-30.
 
 ## Context
 

@@ -698,6 +698,41 @@ def _is_circular(
     )
 
 
+# The fields 27 CFR requires on the label, whose presence is a finding in its own
+# right (FR-15, ADR 0018). See app.compare._PRESENCE_RULES for the citations,
+# both carve-outs, and the wording of both answers.
+PRESENCE_FIELDS = ("alcohol_content", "net_contents")
+
+
+def _declared(
+    name: str,
+    application: dict[str, str],
+    value_sources: dict[str, ApplicationSource],
+    label_source: LabelSource,
+) -> str | None:
+    """What the application declared for this field, or None where it declared nothing.
+
+    **A value the artwork supplied is not something the application declared,
+    where that artwork is also the label side** (FR-15, ADR 0018). It is the
+    label, read once and written into two columns. Comparing the two was the
+    design mistake: it can only ever agree, which is why ADR 0013 had to invent
+    a fifth outcome to stop the agreement being reported as one.
+
+    Withdrawing it from the application side is the narrower and truer fix. The
+    row then asks the question that was never circular, which 27 CFR asks
+    anyway: does the label carry the required element? On the author's own
+    filing the answer is yes, and the row says so, in green.
+
+    Nothing else changes. A typed value, a value out of the document's text
+    layer, and a value read off filed artwork checked against a photograph the
+    agent supplied are all real declarations and are all compared as before.
+    """
+    value = application.get(name)
+    if name in PRESENCE_FIELDS and _is_circular(name, value_sources, label_source):
+        return None
+    return value
+
+
 def _declined(comparison: Comparison) -> Comparison:
     """Say that the label carried candidates and none of them stood out.
 
@@ -881,12 +916,24 @@ def build_result(
                 regions.pop(name, None)
                 attribution.pop(name, None)
 
+        # What the application actually declared, per field (FR-15, ADR 0018).
+        # For the two presence fields this withdraws a value the artwork
+        # supplied where that artwork is also the label side: it is the label
+        # written into two columns, and the row below asks the one-sided
+        # question 27 CFR asks instead of comparing a value with itself.
+        declared_values = {
+            name: _declared(name, application, value_sources, label_source) for name in application
+        }
+
         # The rescue (see RESCUED_FIELDS). Only where the pattern found nothing:
         # a value the pattern did read is the label's own statement of the field,
         # and replacing it with a run of text that merely resembles the
         # application would be the tool grading its own homework.
         for name in RESCUED_FIELDS:
-            declared = (application.get(name) or "").strip()
+            # The declared value, not the raw one. Searching the label artwork
+            # for a value read off that same artwork is the circularity in its
+            # purest form: it would always find it (FR-15, ADR 0018).
+            declared = (declared_values.get(name) or "").strip()
             if label_values[name] is None and declared and searchable:
                 _, hit, photo = _search_sheets(name, declared, searchable)
                 if hit is not None and hit.score >= settings.match_threshold:
@@ -897,10 +944,10 @@ def build_result(
                         attribution[name] = photo
 
         comparisons["alcohol_content"] = compare_abv(
-            label_values["alcohol_content"], application.get("alcohol_content")
+            label_values["alcohol_content"], declared_values.get("alcohol_content")
         )
         comparisons["net_contents"] = compare_net_contents(
-            label_values["net_contents"], application.get("net_contents")
+            label_values["net_contents"], declared_values.get("net_contents")
         )
 
         # The circularity overlay (FR-14, ADR 0013), applied after the
@@ -941,14 +988,22 @@ def build_result(
                 display_name=FIELD_LABELS[name],
                 found_on_label=label_values[name] is not None,
                 label_value=label_values[name],
-                application_value=application.get(name) or None,
+                application_value=declared_values.get(name) or None,
                 score=comparison.score,
                 outcome=comparison.outcome,
                 reason=comparison.reason,
                 label_region=_region_detail(regions.get(name)),
                 source_photo=attribution.get(name),
-                application_value_source=value_sources.get(
-                    name, "typed" if application.get(name) else "absent"
+                # **No application side on a presence row**, because there is
+                # nothing on that side (FR-15, ADR 0018). A row printing the
+                # same string in both columns is what invited the confusion this
+                # decision removes, and the source has to go with the value:
+                # a value withdrawn from the comparison may not keep a chip
+                # saying where it was read from.
+                application_value_source=(
+                    value_sources.get(name, "typed" if application.get(name) else "absent")
+                    if declared_values.get(name)
+                    else "absent"
                 ),
             )
             for name, comparison in comparisons.items()

@@ -207,7 +207,9 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
    * real layout engine can prove it clears 4.5:1 as actually rendered, which
    * is why the chip is put on the page rather than only in a unit test.
    */
-  test('the artwork-derived state, on a document-only submission', async ({ page }) => {
+  test('the presence and artwork-derived states, on a document-only submission', async ({
+    page,
+  }) => {
     await page.route('**/api/classify', async (route) => {
       await route.fulfill({
         status: 200,
@@ -234,12 +236,43 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     // the live region alike. Both are asserted: the sentence an agent reads and
     // the sentence an agent hears have to be one sentence, and a locator that
     // matched either would not prove it.
-    const line = '2 of 2 verifiable fields match; 3 read from the artwork only'
+    const line = '4 of 4 checks passed; 1 read from the artwork only'
     await expect(page.locator('.summary-line')).toHaveText(line)
     await expect(page.getByRole('status', { name: 'Check result' })).toContainText(line)
     // And the row says why it is different, on the row.
     await expect(page.getByText('Label artwork (same source as the label)').first()).toBeVisible()
     await expect(page.getByText('Read from the artwork').first()).toBeVisible()
+
+    // The presence rows: the word, and no application side to read as a
+    // comparison (FR-15, ADR 0018).
+    const contains = page.locator('[data-outcome="present"]')
+    await expect(contains).toHaveCount(2)
+    await expect(contains.first()).toContainText('Contains')
+    const alcohol = page.locator('article', { has: page.getByText('Alcohol content') }).first()
+    await expect(alcohol.getByText(/On the application/)).toHaveCount(0)
+
+    /*
+     * Contains and Match share a colour, so the greyscale rule is where the
+     * separation has to survive. Checked here rather than only in a unit test
+     * because it is a property of the rendered page: the two chips have to
+     * differ by word and by silhouette with every colour removed.
+     */
+    await page.evaluate(() => {
+      document.documentElement.style.filter = 'grayscale(1)'
+    })
+    await expect(contains.first()).toContainText('Contains')
+    await expect(page.locator('[data-outcome="match"]').first()).toContainText('Match')
+    const shapes = await page.evaluate(() =>
+      ['present', 'match'].map(
+        (outcome) =>
+          document.querySelector(`[data-outcome="${outcome}"] svg path`)?.getAttribute('d') ?? '',
+      ),
+    )
+    expect(shapes[0]).not.toBe(shapes[1])
+    expect(shapes.every((shape) => shape.length > 0)).toBe(true)
+    await page.evaluate(() => {
+      document.documentElement.style.filter = ''
+    })
 
     const found = await violations(page)
     expect(report(found)).toBe('')
@@ -601,9 +634,18 @@ const WARNING_NOTE =
   'Bold type was not checked. 27 CFR 16.22(a)(2) also requires the prefix to be in bold, and this prototype does not check typeface.'
 
 /**
- * The author's own submission, as the API returns it (FR-14, ADR 0013): a COLA
- * document uploaded alone, its embedded artwork standing in as the label side,
- * and three of the five rows therefore comparing a value with itself.
+ * The author's own submission, as the API returns it: a COLA document uploaded
+ * alone, with its embedded artwork standing in as the label side.
+ *
+ * Two of the five rows are presence checks (FR-15, ADR 0018): 27 CFR requires
+ * alcohol content and net contents on the label, the label carries both, and
+ * the application declared neither, so each row is a one-sided finding with no
+ * application value at all.
+ *
+ * The class or type designation is the row that remains artwork-derived
+ * (FR-14, ADR 0013). ADR 0018 narrows that state rather than removing it, and
+ * this fixture is where both states are on the page at once, which is the case
+ * a greyscale check and an axe scan both have to cover.
  */
 const ARTWORK_DERIVED_RESULT = {
   fields: [
@@ -637,26 +679,26 @@ const ARTWORK_DERIVED_RESULT = {
       display_name: 'Alcohol content',
       found_on_label: true,
       label_value: '45% Alc./Vol. (90 Proof)',
-      application_value: '45% Alc./Vol. (90 Proof)',
+      application_value: null,
       score: null,
-      outcome: 'artwork_derived',
+      outcome: 'present',
       reason:
-        'Alcohol content was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+        'Alcohol content is on the label: 45% Alc./Vol. (90 Proof). 27 CFR 5.63(a)(3) requires it on a distilled spirits label and 27 CFR 4.32(b)(3) on a wine label, and the label carries it. The application declared no value, so this is a check that the required element is present rather than a comparison of two values.',
       source_photo: 1,
-      application_value_source: 'parsed_from_artwork',
+      application_value_source: 'absent',
     },
     {
       name: 'net_contents',
       display_name: 'Net contents',
       found_on_label: true,
       label_value: '750 mL',
-      application_value: '750 mL',
+      application_value: null,
       score: null,
-      outcome: 'artwork_derived',
+      outcome: 'present',
       reason:
-        'Net contents was read from the label artwork inside the application document, and that same artwork is the label being checked here.',
+        'Net contents is on the label: 750 mL. 27 CFR 5.63(b)(2) and 27 CFR 7.63(a)(5) require it on distilled spirits and malt beverage containers and 27 CFR 4.32(b)(2) on a wine label, and the label carries it. The application declared no value, so this is a check that the required element is present rather than a comparison of two values.',
       source_photo: 1,
-      application_value_source: 'parsed_from_artwork',
+      application_value_source: 'absent',
     },
     {
       name: 'government_warning',

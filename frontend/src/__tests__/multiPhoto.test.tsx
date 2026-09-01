@@ -201,7 +201,7 @@ describe('what the result says about the photos', () => {
 
     // Waits on the summary line rather than on a timing line, which came off
     // the panel on 2026-08-31.
-    await screen.findByText(/fields match/, { selector: 'p.summary-line' })
+    await screen.findByText(/checks passed/, { selector: 'p.summary-line' })
     expect(screen.queryByText(/read from photo/i)).not.toBeInTheDocument()
   })
 

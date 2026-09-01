@@ -87,6 +87,18 @@ export function ResultCard({
   // It says so on the row, in its own key-value pair, because that is where an
   // agent is already looking when they wonder why this chip is not a match.
   const isArtworkDerived = field.outcome === 'artwork_derived'
+  /*
+   * A one-sided finding: the label carries an element 27 CFR requires and the
+   * application declared nothing (FR-15, ADR 0018).
+   *
+   * **It has no application row at all**, and that is the presentation half of
+   * the decision rather than tidying. The row used to print the same string in
+   * both columns, because the value had been read off the artwork and written
+   * into the application side, and an agent reading two identical values reads a
+   * comparison. There was none. One value, one column, and the chip says what
+   * kind of finding it is.
+   */
+  const isPresence = field.outcome === 'present'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
   const source = sourceLabel(field.source_photo, photoCount)
@@ -112,15 +124,17 @@ export function ResultCard({
                 : 'Not found on the label'
           }
         />
-        <Value
-          label={
-            isWarning
-              ? 'Required by 27 CFR 16.21'
-              : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
-          }
-          value={field.application_value}
-          missing="Not supplied"
-        />
+        {isPresence ? null : (
+          <Value
+            label={
+              isWarning
+                ? 'Required by 27 CFR 16.21'
+                : `On the application (${sourceChipLabel(field.application_value_source).toLowerCase()})`
+            }
+            value={field.application_value}
+            missing="Not supplied"
+          />
+        )}
         {isArtworkDerived ? (
           <Value label="Source" value={ARTWORK_DERIVED_SOURCE} missing="" />
         ) : null}

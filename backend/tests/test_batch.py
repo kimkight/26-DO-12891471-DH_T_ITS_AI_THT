@@ -472,7 +472,12 @@ class TestWhatTheDocumentSupplied:
             ],
         )
         by_name = {field["name"]: field for field in lines(response)[0]["result"]["fields"]}
-        assert by_name["net_contents"]["outcome"] == "not_compared"
+        # **Amended by ADR 0018.** Not a mismatch, which is what FR-2 forbids
+        # here, and not "nothing to compare" either: the label carries the net
+        # contents 27 CFR requires, so the row reports that one-sided finding
+        # and passes. The application side stays empty, because it is empty.
+        assert by_name["net_contents"]["outcome"] == "present"
+        assert by_name["net_contents"]["application_value"] is None
         assert by_name["net_contents"]["application_value_source"] == "absent"
 
 

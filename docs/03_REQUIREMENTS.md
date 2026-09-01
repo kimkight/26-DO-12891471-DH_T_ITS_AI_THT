@@ -1048,6 +1048,69 @@ information.
   pairs a document with a label image (ADR 0009), so its label side is always an
   independent photograph and no batch row is artwork-derived.
 
+**Amended 2026-09-01 by FR-15 and [ADR 0018](adr/0018-presence-checks.md).** The
+alcohol content and the net contents are no longer compared at all where the
+application declares neither, so they no longer reach the `artwork_derived`
+state and the summary line no longer holds them out of its count. Two criteria
+above are superseded by FR-15's, and they are the two the amendment is about:
+the second, which made such a row `artwork_derived`, and the third, which
+counted the rest. Everything else stands, including the state itself, its word
+and silhouette, its exclusion from the count, and the absence finding.
+
+The state narrows to what it was built for: a value read off the artwork,
+compared against that same artwork, on a field FR-15 does not cover. It should
+be rare, and on the author's own filing it does not arise.
+
+### FR-15 A required element found on the label is a passing presence check
+
+**Priority:** Must
+**Source:** The author, using the deployed build, 2026-09-01: "Alcohol content
+and net content needs to also say 'match' or 'Contains' in green when these
+items are found on the artwork (that is the requirement right? to have the
+volume and alcohol content listed?)"; 27 CFR 5.63, 4.32 and 7.63 as quoted in
+FR-14 and in `backend/app/compare.py`. See
+[ADR 0018](adr/0018-presence-checks.md).
+
+Where the application declares no value for alcohol content or net contents, the
+row is a **presence check**: a one-sided finding about the label alone, reported
+as passing when the label carries the element 27 CFR requires.
+
+**Why this is not the circular thing FR-14 forbids.** FR-14 was right that
+comparing a value against the picture it was read from establishes nothing. It
+was wrong to conclude that nothing had been established. The label carries an
+element the regulation requires; that is a real, positive finding, answerable
+from a picture alone, and it is the question the agent is checking. What was
+circular was presenting it as a comparison and printing the same string in two
+columns.
+
+**Acceptance criteria**
+- Given a label that carries alcohol content or net contents and an application
+  that declares no value for it, then the row reports the outcome `present`, it
+  carries the label's value, and it carries no score.
+- Given such a row, then it has no application side at all: not the value, not a
+  "not supplied" placeholder, and no source chip. There is nothing on that side.
+- Given such a row, then its reason cites the section of 27 CFR the finding
+  answers.
+- Given the `present` outcome, then it is presented as a pass, in the same
+  colour as a match, and is distinguished from a match by its word and by a
+  silhouette no other outcome uses. Colour is never the only carrier (NFR-5).
+- Given a result containing presence checks, then the summary line counts them
+  alongside comparisons, in the shape "5 of 5 checks passed".
+- Given an application that does declare the value, by typing or from a form
+  edition that carries it, then the row is a two-sided comparison reporting
+  match, needs human review or does not match exactly as FR-3 and FR-7 require.
+  FR-11's precedence is unchanged.
+- Given a label that does not carry the element, then the absence is reported as
+  a finding naming the regulation, as FR-14 already requires. Presence and
+  absence are the two answers to one question, and the same section is cited
+  either way.
+- Given a label for a spirit whose stated percentage and proof do not agree,
+  then the FR-7 cross-check reports it as needs human review, and the presence
+  check does not overrule it. A contradiction on the label is the more specific
+  finding.
+- Given a batch row whose paired document declares neither value, then the same
+  rules apply to it unchanged.
+
 ## 5. Requirements deliberately not written
 
 The following were considered and excluded because writing them would require

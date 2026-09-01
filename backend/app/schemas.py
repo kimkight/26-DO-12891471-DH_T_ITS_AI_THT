@@ -157,13 +157,20 @@ class FieldResult(BaseModel):
     )
     outcome: Outcome = Field(
         description=(
-            "match, needs_review, mismatch, not_compared, or artwork_derived. "
-            "The last is not a verdict about agreement (FR-14, ADR 0013): it "
-            "marks a row whose application value was read off the same label "
-            "artwork that supplied the label side, so the two values compared "
-            "are one reading of one picture and could not have disagreed. It is "
-            "excluded from any count of fields that match, and it never carries "
-            "a score."
+            "match, needs_review, mismatch, not_compared, present, or "
+            "artwork_derived. "
+            "present is a passing one-sided finding (FR-15, ADR 0018): 27 CFR "
+            "requires alcohol content and net contents on the label, and where "
+            "the application declared neither, the row reports that the label "
+            "carries the required element. It has a label value and no "
+            "application value, and it carries no score, because a score is a "
+            "similarity between two strings and there is only one here. "
+            "artwork_derived is not a verdict about agreement (FR-14, "
+            "ADR 0013): it marks a row whose application value was read off the "
+            "same label artwork that supplied the label side, so the two values "
+            "compared are one reading of one picture and could not have "
+            "disagreed. It never carries a score either, and ADR 0018 narrows "
+            "it to the fields presence checks do not cover."
         )
     )
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
