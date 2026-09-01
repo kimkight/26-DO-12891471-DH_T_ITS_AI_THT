@@ -12,7 +12,10 @@ in full; the frontend, Terraform, workflows and container files were read in
 full; every test named by the traceability matrix was opened. The suites and
 linters were run in this session, and where a behaviour could be exercised
 rather than reasoned about, it was exercised (section 5). Nothing in the code
-was changed; this document is the only file this branch adds.
+was changed; this document is the only file this branch adds. A second pass
+over the document itself, by eight independent reviewers of the text, corrected
+citations and fixes before it was published; where that pass added a fact, the
+finding says so.
 
 The rule for a finding: it has a file and line, a concrete failure scenario with
 inputs and the wrong output, and a recommended fix. Anything without a
@@ -61,9 +64,10 @@ them first.
    identifier (an RFC) was committed in three commits on 2026-08-31 and taken
    out in a fourth; it is recoverable from the history of `main`. A real
    brand name of a real producer is the default value of a fixture type in
-   `samples/labelmaker.py` and appears in about ninety lines across tests,
-   code and documentation, while `docs/07_TEST_STRATEGY.md` says none of that
-   filing is committed (finding 2).
+   `samples/labelmaker.py` and appears on about sixty lines across tests,
+   code and documentation (about ninety counting the product's other values),
+   while `docs/07_TEST_STRATEGY.md` says none of that filing is committed
+   (finding 2).
 3. **The build tagged v1.2.0 identifies itself as 1.1.0** at `/api/health`, in
    `pyproject.toml`, in `package.json`, and in the OpenAPI document, because
    the version is declared by hand in three files and the release procedure's
@@ -74,8 +78,10 @@ them first.
 
 Below those: the traceability row that cites `TestNothingIsPersisted` for
 NFR-6 cites a test that asserts two identical requests give identical outcomes
-and nothing about disk, while an oversize upload demonstrably does reach a
-temporary file before it is refused; the README, ADR 0003 and NFR-3 describe an
+and nothing about disk, while every Tesseract call writes the image to a
+temporary file and an oversize upload reaches one before it is refused; four
+rows of the Section 508 conformance report say things the code contradicts and
+the tests cited for them cannot fail; the README, ADR 0003 and NFR-3 describe an
 optional Bedrock fallback that does not exist in the code; the interface
 silently drops a value the agent typed when a document uploaded afterwards
 does not carry that field; the single-label handler runs Tesseract on the
@@ -87,9 +93,16 @@ deploy path; and the infrastructure README and the deployment runbook still
 open with "Nothing here has been applied" under a README that reports
 measurements on the deployed target.
 
-**Counts.** 7 high, 13 medium, 12 low findings; 34 observations. Of 78 claims
-audited, 39 are true and evidenced, 9 true but not evidenced by the test or
-document named, 21 stale, 9 false.
+**Counts.** 7 high, 13 medium, 12 low findings; 36 observations. Of 78 claims
+audited, 37 are true and evidenced, 9 true but not evidenced by the test or
+document named, 23 stale, 9 false.
+
+**On the data finding.** `SECURITY.md` asks that a suspected committed secret
+be reported privately rather than in a public issue. The author is the
+repository's owner and sole reviewer and asked for this review as a committed
+document, so the finding is recorded here; the document does not repeat the
+identifier, the line it sat on, or a search that recovers it, and names only
+the commit that removed it.
 
 ---
 
@@ -131,54 +144,59 @@ With the application silent on the field, the same label correctly returns
 `mismatch` with "Alcohol content was not found on the label". A wine whose
 label omits the mandatory statement and mentions the age of the wine, the
 number of months in oak, a vintage fragment or a lot number containing the
-same digits passes 27 CFR 4.32(b)(3) on this tool. Net contents is safe by
-accident: its parser requires a unit, so a bare `750` does not parse and the
-row falls to review.
+same digits passes 27 CFR 4.32(b)(3) on this tool. Net contents does not
+share the defect: `parse_net_contents` reads a bare `750` as a value with no
+unit, and the deliberate missing-unit branch at `compare.py:604-615` routes
+the row to review rather than to a match.
 
 **Why it matters.** This is the one class of error the design forbids: an error
 path returning a match (FR-9's last criterion) and a guess dressed as a reading
 (FR-1). It is also the exact shape of the 2026-08-27 defect, reintroduced by
 the release that fixed the brand-name defect.
 
-**Fix.** Require the rescued hit to satisfy the same marker rule the pattern
-does: search only the units whose line passes `is_alcohol_content_line`, or
-require the declared value to carry a marker before it is searched for, or
-drop alcohol content from `RESCUED_FIELDS` and keep the rescue for net contents,
-where the unit is a marker. Add the test above to `test_verify_by_search.py`;
-today no test exercises the rescue (a grep for "rescue" in `backend/tests`
-finds only docstrings about other things).
+**Fix.** Drop `alcohol_content` from `RESCUED_FIELDS` (`verify.py:94`) and
+keep the rescue for net contents, where the unit is the marker; no test depends
+on the alcohol rescue. The alternative that keeps a rescue for alcohol content
+is to build, at `_Read` construction, a second unit list from only the lines
+that pass `is_alcohol_content_line`, because a `LabelUnit` joins every line of
+a region and the marker rule cannot be applied to it after the fact. Requiring
+a marker in the declared value does not work: the form's shape is a bare number
+(A-12) and `normalize_text` strips `%` anyway. Add the reproduction above to
+`test_verify_by_search.py`; today no test exercises the rescue (a grep for
+"rescue" in `backend/tests` finds only docstrings about other things).
 
 #### 2. Real applicant data: a producer's tax identifier in history, a real brand as a fixture default
 
-**Where.** Commits `1138714`, `244cde2`, `6cef94a` (all 2026-08-31),
-`backend/app/ocr.py:258`; removed in `d8225b1` ("take the applicant's tax
-identifier back out"). `samples/labelmaker.py:210-211`;
-`backend/tests/test_verify_by_search.py:80,84,114`;
+**Where.** Three consecutive commits on `develop` on 2026-08-31, in a
+docstring of `backend/app/ocr.py`, removed by `d8225b1` ("take the applicant's
+tax identifier back out"); the three are its immediate ancestors on that
+branch. `samples/labelmaker.py:210-211`;
+`backend/tests/test_verify_by_search.py:80,114`;
 `backend/tests/test_colour_arm.py:69-70`; `backend/app/search.py:23-28`;
-`backend/app/parse.py:21-23`; `frontend/src/__tests__/reset.test.tsx:37,104,178`;
-`README.md:475,495-496`; `docs/TRACEABILITY_MATRIX.md:57-60`; and about eighty
-further lines across `CHANGELOG.md`, the ADRs, `docs/02_PROJECT_SCOPE.md`,
-`docs/03_REQUIREMENTS.md`, `docs/05_ARCHITECTURE.md` and `docs/ASSUMPTIONS.md`.
+`backend/app/parse.py:21-22`; `frontend/src/__tests__/reset.test.tsx:37,104,178`;
+`README.md:475,495`; `docs/TRACEABILITY_MATRIX.md:57-60`; in all, the brand
+name is on 57 lines of 19 files (`git grep -il`), and the product's class,
+alcohol content and net contents on about thirty more.
 
 **What is wrong.** Three commits reachable from `main` carry a string in Mexican
 RFC format identifying the producer of the author's own filed COLA. The tree at
-`v1.2.0` does not, but `git log -p` does, and `docs/07_TEST_STRATEGY.md:612-616`
+`v1.2.0` does not, but the history does, and `docs/07_TEST_STRATEGY.md:612-616`
 and `backend/tests/test_panel_segmentation.py:42-44` state that the filing
 "carries a real company, a real tax identifier and a real address" and that
-"none of it is committed". Separately, the brand name, fanciful name, class
-designation, alcohol content and net contents of that real product are the
-default field values of `ColourLabelSpec`, are rendered into a test fixture on
-every run, are asserted by name in `test_verify_by_search.py`, are typed into
-the interface by `reset.test.tsx`, and are named in the README as "the real
-COLA for that product". The standing rule (`samples/README.md:38-45`,
-`docs/07_TEST_STRATEGY.md` section 8) forbids real application data in any
-fixture.
+"none of it is committed". Separately, the brand name, class designation,
+alcohol content and net contents of that real product are the four default
+field values of `ColourLabelSpec`, are rendered into a test fixture on every
+run, are asserted by name in `test_verify_by_search.py`, are typed into the
+interface by `reset.test.tsx`, and are named in the README, with the product's
+fanciful name, as "the real COLA for that product". The standing rule
+(`samples/README.md:38-45`, `docs/07_TEST_STRATEGY.md` section 8) forbids real
+application data in any fixture.
 
-**Failure scenario.** A panel member runs
-`git log --all -p -S'RFC:' -- backend/app/ocr.py` and reads the identifier. Or
-reads `samples/labelmaker.py:210` and matches the default against the README's
-"real COLA for that product". Either way the repository contradicts its own
-stated policy on the one axis a Treasury panel is certain to check.
+**Failure scenario.** A panel member reads the history of `ocr.py` around the
+commit that says it is taking an identifier out, and finds it. Or reads
+`samples/labelmaker.py:210` and matches the default against the README's "real
+COLA for that product". Either way the repository contradicts its own stated
+policy on the one axis a Treasury panel is certain to check.
 
 **Fix.** The identifier needs a history rewrite (`git filter-repo` over the
 three commits) and a force-push of `main` and `develop`, then a GitHub support
@@ -186,7 +204,8 @@ request to purge cached views; a further commit cannot remove it. The brand
 name and product values should be replaced by the invented names the rest of
 the sample set uses, in the fixture default, the tests and the prose. The
 measurements taken on the real filing can stay; they are numbers, not the
-filing.
+filing. This document names the removing commit and nothing more precise, so
+that it does not become the index to what it reports.
 
 #### 3. The build tagged v1.2.0 says it is 1.1.0
 
@@ -202,9 +221,10 @@ deriving one from another and no check in CI that they agree with each other
 or with the tag. The 1.1.0 bump was made inside a feature commit on 2026-08-29
 (`dfbc2fc`); the 1.2.0 release (PR #99, tagged 2026-09-01) skipped step 1 of
 the repository's own release procedure, and step 2 (date the CHANGELOG section
-when the tag is cut) was skipped for every release. `README.md:75` shows the
-health response as `"version":"1.1.0"`, which is accurate about the code and
-wrong about the tag.
+when the tag is cut) was skipped for three of the five releases (1.0.0, 1.1.0
+and 1.2.0; 0.1.0 and 1.0.1 are dated). `README.md:71` shows the health
+response as `"version":"1.1.0"`, which is accurate about the code and wrong
+about the tag.
 
 **What derives from the string.** `/api/health` (which the deploy workflow,
 the ALB and the container health check all read, so the deployed v1.2.0 build
@@ -224,22 +244,31 @@ in `__init__.py` with `pyproject.toml` as the source, and a CI step that fails
 when `package.json` disagrees with it or when a `v*` tag does not match. Date
 the three CHANGELOG sections.
 
-#### 4. NFR-6's cited test does not test persistence, and an oversize part does reach disk
+#### 4. NFR-6's cited test does not test persistence; every OCR call writes the image to a temporary file; an oversize part reaches disk before it is refused
 
 **Where.** `docs/TRACEABILITY_MATRIX.md` row 19 and the NFR-6 row of section 2
 ("multipart spool threshold raised so no upload reaches disk", tested by
-`TestNothingIsPersisted`); `backend/tests/test_verify_integration.py:151-156`;
-`backend/app/api.py:72-87,149-162`; `docs/06_SECURITY_AND_COMPLIANCE.md:23,39`;
-`docs/09_DEPLOYMENT.md:140`.
+`TestNothingIsPersisted`); `backend/tests/test_verify_integration.py:151-156`
+(there is a second class of the same name in `test_batch.py:484`, which
+checks the logs; the matrix cites the first); `backend/app/api.py:72-87,149-162`;
+`backend/app/ocr.py:47-48` ("Nothing is written to disk either (NFR-6)");
+`pytesseract/pytesseract.py:208-216` in the installed dependency;
+`docs/06_SECURITY_AND_COMPLIANCE.md:23,39`; `docs/09_DEPLOYMENT.md:140`.
 
 **What is wrong.** `TestNothingIsPersisted.test_two_identical_requests_share_no_state`
 posts the same label twice and asserts the two outcome lists are equal. It
 passes with the uploads written to disk, logged, or held in a module-level
-list; it is a test of determinism. The spool claim the row makes is untested,
-and it is not fully true: `api.py:86` raises Starlette's spool threshold to
+list; it is a test of determinism. Two things it therefore cannot see. First,
+`pytesseract` writes every image it is given to a `NamedTemporaryFile` in the
+container's temp directory and Tesseract writes its output file beside it, on
+every `image_to_data` and `image_to_osd` call (`pytesseract.py:208-216,246-291`;
+both files are removed when the call returns). So the accepted, in-limit
+photograph of every request is written to disk, and `ocr.py:47-48` says the
+opposite in as many words. Second, the spool claim the row makes is untested
+and not fully true: `api.py:86` raises Starlette's spool threshold to
 `max_upload_bytes` (10 MB), so a part under that stays in memory, but a part
 over it rolls over to a real temporary file before `check_size` refuses it
-after parsing. The `api.py:152-153` docstring says such a submission "is read
+after parsing. The `api.py:151-152` docstring says such a submission "is read
 into memory and then refused"; it is read to disk and then refused.
 `docs/09_DEPLOYMENT.md:140` still says the threshold is 1 MiB.
 
@@ -253,20 +282,30 @@ MultiPartParser.spool_max_size = 10485760
 ```
 
 An 11 MB photograph of a label is written to `/tmp` inside the container, then
-refused with the message "Send a smaller image". The file is unlinked when the
-request ends, and the task's ephemeral storage is destroyed with the task, so
-the exposure is small; the written statements "No image ... is written to
-disk" (NFR-6 acceptance criterion 1) and "Nothing is written to disk"
-(`docs/06:23`) are nevertheless not true for every request the service
-accepts, and the test cited as proof could not have found out.
+refused with the message "Send a smaller image"; and a 5 MB photograph that
+is accepted is written to `/tmp` by `pytesseract` before Tesseract reads it.
+Both files are unlinked before the request ends and the task's ephemeral
+storage is destroyed with the task, so the exposure is small; the written
+statements "No image ... is written to disk" (NFR-6 acceptance criterion 1),
+"Nothing is written to disk" (`docs/06:23`) and `ocr.py:47-48` are nevertheless
+not true for any request the service accepts, and the test cited as proof
+could not have found out. The pytesseract write was found by the reviewer of
+this document, not in the first pass; it is in the installed dependency, not
+in the repository's code, which is why a test of the repository's code cannot
+see it.
 
-**Fix.** Either lower the envelope check to refuse any single-part submission
-over `max_upload_bytes` from `Content-Length` (impossible to do exactly for
-multipart, as the docstring says) or accept the rollover and say so in NFR-6,
-`docs/06` and `docs/09`. Replace the cited test with one that monkeypatches
-`SpooledTemporaryFile.rollover` (as above) and asserts zero calls for an
-in-limit upload, and add `readonlyRootFilesystem` with an explicit ephemeral
-`/tmp` to the task definition so the writable surface is stated.
+**Fix.** Rewrite NFR-6, `docs/06`, `docs/09:140`, `SECURITY.md:40-42`,
+`batch.py:30-31` and `ocr.py:47-48` to say what is true: uploads are held in
+memory, the OCR engine reads each image through a temporary file that is
+removed with the call, nothing is written anywhere that outlives the request,
+and the task's storage is ephemeral. Replace the cited test with one that
+asserts that property (monkeypatch `SpooledTemporaryFile.rollover` for the
+spool, and `pytesseract` for the engine, or assert `/tmp` is empty after the
+request). If the engine's temp file is unacceptable, pass the image on stdin
+(`tesseract - -`) through a direct `subprocess` call instead of `pytesseract`.
+`readonlyRootFilesystem` on Fargate needs a `volumes` entry and a `mountPoints`
+bind mount for `/tmp`, which `ecs.tf` does not have; without them every
+Tesseract call fails.
 
 #### 5. The optional Bedrock fallback does not exist
 
@@ -292,8 +331,9 @@ asserts the constant.
 **Why it matters.** ADR 0003 is the decision the whole extraction architecture
 rests on, and its second clause records a component that was never built. A
 reader who trusts the README will believe the tool has a path for the
-photographs Jenny Park describes. It does not, and OQ-2 or an ADR amendment
-should say so.
+photographs Jenny Park describes. It does not, and OQ-11, which still
+reasons about "whether the Bedrock fallback is ever enabled", or an ADR
+amendment should say so.
 
 **Fix.** Amend ADR 0003 ("the fallback was designed and not built"), reword the
 README and NFR-3, and either delete the three settings or make the application
@@ -320,16 +360,23 @@ server compares nothing for the brand and the row reads "The application
 supplied no value for this field (FR-2)" beside a screen that shows the
 agent's value. No test types before uploading a document with a gap.
 
-**Fix.** Merge: keep `'typed'` where `previous[name] === 'typed'` and the box
-is non-empty; add a test in `oneUpload.test.tsx` that types first, uploads a
-brand-only document, and asserts the posted body carries the typed value.
+**Fix.** Start from the helper the component already has,
+`onlyTyped(previous, application)` (`SingleLabelTab.tsx:138-147`, used at
+`:263,:325,:340`), and overlay `documentSource(entry.source)` only for entries
+with `found_on_document`. A plain "keep `'typed'` where the box is non-empty"
+rule would be wrong: `fillFromDocument` first writes every document value into
+the box, over anything typed, so the field would stay `'typed'` and
+`typedValues` would post the document's value as the agent's, which is the
+FR-14 laundering `applicationFields.ts:55-72` describes. Add a test in
+`oneUpload.test.tsx` that types first, uploads a brand-only document, and
+asserts the posted body carries the typed value.
 
 #### 7. Section 508 conformance claims that the code contradicts, and tests that cannot fail
 
 **Where.** `docs/ACCESSIBILITY_CONFORMANCE.md` rows 4.1.3, 3.2.2, 2.4.4 and
 1.4.11; `frontend/src/components/BatchTab.tsx:173,238`;
 `frontend/src/components/ApplicationFields.tsx:154-160`;
-`frontend/tests/a11y.spec.ts:483,571,595`;
+`frontend/tests/a11y.spec.ts:483,571,595,876`;
 `frontend/src/__tests__/contrast.test.ts:115,135,165,251-254`.
 
 **What is wrong.**
@@ -378,7 +425,9 @@ unnamed regions.
 the four tests to assert the thing they name (every region labelled, chips
 present before the role check, a chip locator under text spacing, the ring
 token the stylesheet uses per ground); derive the outcome list in
-`contrast.test.ts` from `PRESENTATIONS`; correct rows 3.2.2, 2.4.4 and 4.1.3.
+`contrast.test.ts` from `PRESENTATIONS`; correct rows 3.2.2, 2.4.4 and 4.1.3,
+and the two smaller stale statements in rows 4.1.1 and 1.3.2 (observations
+35 and 36).
 
 ### Medium
 
@@ -393,7 +442,11 @@ health check (timeout 5 s, three failures) and `infra/terraform/ecs.tf:120-126`
 
 **What is wrong.** Every Tesseract pass on the single-label path blocks the
 only event loop, so `/api/health` cannot be answered until the request
-finishes. The batch path is fine (a thread pool behind a sync generator).
+finishes. The batch path is fine (a thread pool behind a sync generator). The
+repository knows the single path runs OCR on the loop (`ocr.py:62-67`,
+`CHANGELOG.md:2172-2176`, ADR 0006) and records it as the reason that path
+never met the OpenMP problem; what it does not record is the cost to the
+probe.
 
 **Failure scenario, partly run.** In this session a three-photograph
 `POST /api/verify` took 3.35 s against a local uvicorn, and a concurrent
@@ -406,10 +459,17 @@ user had in flight is lost with no resume (`batch.py:33-35`). The stall is
 measured; the task replacement is reasoned from the health-check settings.
 
 **Fix.** Run the classify, parse and verify calls in `_verify` and
-`classify_uploads` through `starlette.concurrency.run_in_threadpool` (the batch
-path already runs OCR in threads, so `OMP_THREAD_LIMIT` covers it), or run
-uvicorn with two workers. Correct the `ocr.py:62-67` comment, which describes
-the loop-blocking as a property that keeps the single path safe.
+`classify_uploads` through `starlette.concurrency.run_in_threadpool` behind an
+`anyio.CapacityLimiter` sized like the batch pool (`effective_batch_workers`).
+The limiter is not optional: anyio's default pool is 40 threads, and forty
+concurrent OCR passes on a 1 vCPU, 8 GiB task would trade the stalled probe
+for an out-of-memory kill. `run_in_threadpool` copies the context, so the
+timing recording still lands in the thread; `_PDFIUM_LOCK` and
+`OMP_THREAD_LIMIT` already cover the rest. Two uvicorn workers is the weaker
+alternative: it doubles the batch pool and the OpenCV footprint in the same
+memory, and two busy workers stall the probe just the same. Correct the
+`ocr.py:62-67` comment, which presents the loop-blocking as a safety
+property.
 
 #### 9. The application's INFO log records are never emitted, and the test that certifies them cannot tell
 
@@ -445,8 +505,9 @@ configuration rather than `caplog`.
 the service is *running* and re-registers it with the new image);
 `infra/terraform/ecs.tf:180-189` (`lifecycle { ignore_changes = [task_definition] }`
 with the comment "change a limit or a size here, apply, then run the deploy
-workflow to put the new shape into service"); `docs/09_DEPLOYMENT.md:163-165`
-and `infra/README.md:70-75` say the same.
+workflow to put the new shape into service"). `docs/09_DEPLOYMENT.md:163-165`
+and `infra/README.md` say where the caps live and do not describe the path; the
+comment in `ecs.tf` is the one place the claim is made.
 
 **Failure scenario (reasoned).** The CloudWatch memory figure section 9 is
 still waiting for shows the batch near 8 GiB. The operator sets
@@ -458,7 +519,7 @@ never ships and nothing in the run summary says so.
 **Fix.** Read the latest revision of the family
 (`aws ecs describe-task-definition --task-definition "$FAMILY"`) rather than the
 service's current one, or drop `ignore_changes` and let Terraform deploy by
-passing the digest in. Correct the three comments.
+passing the digest in. Correct the `ecs.tf` comment.
 
 #### 11. The OIDC trust admits any branch through the `environment:production` subject, and the image push sits outside the environment gate
 
@@ -484,17 +545,26 @@ subject, and the deploy role's `RegisterTaskDefinition` on `*` plus
 `UpdateService` on the one service puts that branch's image behind the
 evaluation URL with no pull request involved.
 
-**Fix.** Remove the `environment:production` subject and put
-`environment: production` on both AWS-touching jobs so the branch-scoped
-subjects decide, or keep it and configure the environment with a branch and
-tag policy and say in `docs/06` that the GitHub setting is load-bearing.
-Tighten `refs/tags/v*` to `refs/tags/v[0-9]*`.
+**Fix.** Two workable shapes, and the document's first draft got this wrong.
+Either keep the `environment:production` subject, put `environment: production`
+on both AWS-touching jobs, and configure the GitHub environment with a
+deployment-branch policy (main and `v*` tags) and required reviewers, stating in
+`docs/06` that the GitHub setting is load-bearing; or remove
+`environment: production` from the deploy job so that both jobs present the
+`ref:` subjects and only `develop`, `main` and `v*` tags can assume the role.
+What does not work is removing the subject while keeping the environment on the
+jobs: a job with an environment always presents the environment-scoped
+subject (`locals.tf:20-22` says so), so every deploy would be refused. IAM
+`StringLike` understands only `*` and `?`, so `v*` cannot be tightened with a
+character class; a tag protection rule on GitHub is the control for that.
 
 #### 12. Actions pinned by mutable tag in the workflow that holds the deploy role; base images pinned by tag past a deadline five releases old
 
-**Where.** `.github/workflows/deploy.yml:112,119,127,148,152,258,270` (seven
-third-party actions at major tags, including the one that receives STS
-credentials); `.github/workflows/ci.yml:288` (`anchore/sbom-action@v0`);
+**Where.** `.github/workflows/deploy.yml:112,119,127,148,152,201,258,270`
+(eight third-party actions at major tags, including both
+`configure-aws-credentials` steps that receive STS credentials, at 119 and
+201); `.github/workflows/ci.yml:288` (`anchore/sbom-action@v0`);
+`CHANGELOG.md:2288` records the tag pinning of the base images;
 `Dockerfile:8-9,33` ("TODO: pin both base images by sha256 digest before the
 first tagged release"); `docs/06_SECURITY_AND_COMPLIANCE.md:50-52,69`
 ("must be closed before the first tagged release ... Acceptable while nothing
@@ -541,11 +611,12 @@ document's section 9, which records the runs; `docs/09_DEPLOYMENT.md:58-60`
 (the provider lock file "is absent from the repository") while
 `infra/terraform/.terraform.lock.hcl` is committed; `docs/06_SECURITY_AND_COMPLIANCE.md:40`
 (`pip-audit --strict`; `ci.yml:214,217` run without it);
-`docs/09_DEPLOYMENT.md:140` (1 MiB spool threshold; the code sets 10 MB);
 `infra/terraform/iam.tf:154-158` ("The condition below is what narrows them";
-the statement at 159-166 has no condition); `infra/terraform/iam.tf:9-10`
-("Pulling the image and creating log streams, nothing else"; the attached
-managed policy is account-wide on `*`).
+the statement at 159-166 has no condition, and the same grant is finding 26's
+subject); `infra/terraform/iam.tf:9-10` ("Pulling the image and creating log
+streams, nothing else"; the attached managed policy is account-wide, also
+finding 26). The spool-threshold sentence at `docs/09_DEPLOYMENT.md:140` is
+finding 4's and is not counted again here.
 
 **Failure scenario.** A panel member opens `infra/README.md`, reads the second
 paragraph, and then reads the README status table two clicks away that says
@@ -559,8 +630,9 @@ document; correct the two `iam.tf` comments or add the condition they describe.
 #### 15. The traceability matrix's coverage summary and the README's document table count things that are no longer there
 
 **Where.** `docs/TRACEABILITY_MATRIX.md:104-118` ("Requirements defined: 22
-(11 functional, 11 non-functional)", "ADRs: 10", "413 backend tests", "252
-component tests", "User stories: 24"); `README.md:217-225` ("FR-1 to FR-10",
+(11 functional, 11 non-functional)", "ADRs: 10", "User stories: 24") and
+`:126,128` ("413 backend tests", "252 component tests"); `README.md:217-225`
+("FR-1 to FR-10",
 "24 stories across 6 epics", "21 questions, 8 still open", "16 inferences");
 row 31 ("11 tests" in `test_orientation_floor.py`), FR-8 row ("34 tests" in
 `test_batch.py`).
@@ -596,10 +668,15 @@ sits beside "1 of 1 labels checked". The same happens for `present` and
 `artwork_derived` rows, which v1.2.0 introduced for exactly the document-only
 submissions the README highlights.
 
-**Fix.** Tally by outcome in `summarize` ("4 of 5 passed; brand name not
-compared") and add a passed bucket (`match` plus `present`) and an
-uncompared bucket to the summary; assert in `batchTable.test.tsx` that the
-buckets sum to the row count, which its comment already claims.
+**Fix.** Have `summarize` call the `summary()` and `announcement()` helpers
+in `outcomes.ts:144-200` that already say "4 of 5 checks passed" and name the
+field that was not compared, rather than a second tally string; and add the
+three missing buckets (`not_compared`, `present`, `artwork_derived`) so the
+buckets partition what `rowOutcome` returns. Do not merge `present` into a
+"passed" bucket with `match`: `rowOutcome:224-227` keeps them apart on
+purpose, because a presence row asserts no agreement (FR-15). Assert in
+`batchTable.test.tsx` that the buckets sum to the row count, which its comment
+already claims.
 
 #### 17. Reset does not cancel an in-flight single-label check
 
@@ -652,18 +729,20 @@ drop-zone hint that focus will move (see finding 7, 3.2.2).
 
 #### 20. The service is public, unauthenticated and plain HTTP while it now accepts real filings
 
-**Where.** `infra/terraform/alb.tf:220-229` (one HTTP listener, no 443, no
-certificate, no redirect); `infra/terraform/variables.tf:167-180`
-(`ingress_cidr_blocks` defaults to `0.0.0.0/0`);
-`docs/06_SECURITY_AND_COMPLIANCE.md:25,62,79-82` (acknowledged). The
-acknowledgement rests on "handles no sensitive data" (`docs/06:8`), written
-before ADR 0008 made a filed TTB F 5100.31, with the applicant's signature
-image on page 2, the primary input.
+**Where.** `infra/terraform/alb.tf:78-81` (one HTTP listener on port 80; no
+443, no certificate, no redirect, and no `access_logs` block anywhere in the
+file); `infra/terraform/variables.tf:167-180` (`ingress_cidr_blocks` defaults
+to `0.0.0.0/0`); acknowledged at `docs/06_SECURITY_AND_COMPLIANCE.md:25,62,79-82`,
+OQ-13 items 1 and 2 and `CHANGELOG.md:1683-1688`, with the production fix
+(an ACM certificate and an HTTPS listener) already named. What is new here is
+only the premise: the acknowledgement rests on "handles no sensitive data"
+(`docs/06:8`), written before ADR 0008 made a filed TTB F 5100.31, with the
+applicant's signature image on page 2, the primary input.
 
 **Failure scenario (reasoned).** An evaluator on shared Wi-Fi posts their own
 COLA PDF to the HTTP address. A passive observer on the path captures the
 filing, the signature image and the result, and no access log records that it
-happened (`alb.tf:183-186`).
+happened.
 
 **Fix.** An ACM certificate on a subdomain the author controls, a 443 listener,
 and a 301 from 80; failing that, narrow `ingress_cidr_blocks`, which the
@@ -676,10 +755,12 @@ real filings must not be submitted over the evaluation URL.
 
 `frontend/src/lib/pairing.ts:30` uses `toLowerCase()`; `backend/app/batch.py:81`
 uses `casefold()`; the comment at `pairing.ts:11` says they "must stay
-identical", and no test exercises `pairingStem`. **Scenario.** `Straße.png` and
-`STRASSE.pdf`: the server pairs them and checks the row; the page says "0
-pairs ready to check, 1 image with no matching document, 1 document with no
-matching image". **Fix.** The same fold on both sides and a shared vector list.
+identical". `batchTable.test.tsx:252-263` exercises `pairingStem` through the
+pairing sentence; no test covers the case fold. **Scenario (reasoned from the
+code; not run).** `Straße.png` and `STRASSE.pdf`: the server pairs them and
+checks the row; the page says "0 pairs ready to check, 1 image with no matching
+document, 1 document with no matching image". **Fix.** The same fold on both
+sides and a shared vector list.
 
 #### 22. Three server error codes have no plain-language line
 
@@ -711,8 +792,11 @@ stands. A label whose type is too small to read at 800 px scores 0 words and
 0.0 confidence both ways, the tie leaves a verdict OSD reported at 0.03
 confidence in place, and the full-resolution read that follows is of the wrong
 way up. **Scenario (reasoned, not run).** Fine-print-only artwork filed upside
-down with OSD answering 0 degrees at 0.03: read upside down. **Fix.** Treat a
-tie at zero words as "unavailable" and leave the image as it arrived.
+down with OSD answering 0 degrees at 0.03: read upside down. **Fix.** When both
+candidates score zero words at `ORIENTATION_CHECK_SCALE`, score them again at
+full resolution before deciding; leaving the image as it arrived changes only
+the reported method, not the outcome, because a tie already keeps the OSD
+answer and "unavailable" also means 0 degrees.
 
 #### 25. The PDFium lock is held over PNG encoding of every embedded image, not only the four that are read
 
@@ -761,15 +845,17 @@ copy `src`, `index.html` and the config files explicitly.
 not compared"; `SingleLabelTab.tsx:243-248` marks a cleared field `'absent'`,
 `typedValues` sends `''`, and the document is still posted, so the server
 re-derives the value. **Scenario.** Clear the brand name the document filled;
-the result row still compares `DEL MAGUEY`. **Fix.** Send an explicit override
+the result row still compares the document's brand name. **Fix.** Send an explicit override
 for cleared document fields, or change the hint.
 
 #### 30. `file_too_large` always says "image"
 
 `frontend/src/lib/plainLanguage.ts:17` against three distinct server messages
-at `backend/app/api.py:643-658`. **Scenario.** Four 9 MB files trip the 40 MB
-envelope; the headline says "That image is too large. Send a smaller one."
-**Fix.** Key the line on the `limit` string.
+at `backend/app/api.py:643-658`. **Scenario.** Three photographs and one
+document, each a few bytes under the 10 MiB per-file limit, so that the
+multipart overhead carries the envelope over 40 MiB: the middleware refuses it
+with the envelope message, and the headline says "That image is too large.
+Send a smaller one." **Fix.** Key the line on the `limit` string.
 
 #### 31. Two files with the same name share one classification chip
 
@@ -797,7 +883,7 @@ types browsers decode, and say so for the rest.
    returns for an empty label value and the presence branch returns for an
    empty application value before it, so its two `NOT_COMPARED` branches are
    reachable only through `compare_text`. Dead code from the ADR 0018 change.
-2. `backend/app/api.py:152-153`: "a 25 MB single-photograph submission is read
+2. `backend/app/api.py:151-152`: "a 25 MB single-photograph submission is read
    into memory and then refused" describes the pre-`spool_max_size` behaviour
    wrongly (finding 4); it is read to disk and then refused.
 3. `backend/app/batch.py:122-142`: a document whose stem is empty after
@@ -838,7 +924,9 @@ types browsers decode, and say so for the rest.
     so `docker inspect` does not show it, and the repository's own explanation
     of *why* it is needed (an OpenMP deadlock off the main thread) describes a
     subprocess boundary as a thread boundary; the effect is right, the story is
-    approximate.
+    approximate. That subprocess is also where the temporary file of finding 4
+    is written: `pytesseract` saves the image to disk and hands Tesseract the
+    path.
 12. The PDFium lock: every PDFium call is inside `_read_pdf_with_pdfium` under
     `_PDFIUM_LOCK` and the document is closed inside it; Tesseract reads run
     outside. The batch is not serialised on the measured (text-layer) path.
@@ -849,8 +937,9 @@ types browsers decode, and say so for the rest.
 
 **Tests**
 
-14. `backend/tests/test_batch.py:484-496` `TestNothingIsPersisted` checks the
-    logs, not persistence; a misnamed but useful test.
+14. `backend/tests/test_batch.py:484-496` is a second class named
+    `TestNothingIsPersisted`, not the one the matrix cites (finding 4); it
+    checks the logs, not persistence, and is a misnamed but useful test.
 15. `TestEgressBlocked` (`test_verify_integration.py:228-283`) is a real test
     of the image path with sockets refused; it does not exercise a PDF
     submission, and `external_call_made` is a constant.
@@ -869,8 +958,8 @@ types browsers decode, and say so for the rest.
     (tests a function nothing in the UI calls), `contrast.test.ts:270-274`
     (stale, names removed viewfinder brackets), `batchTable.test.tsx:217-244`
     (asserts absence of a part name no code ever wrote),
-    `warningNearMiss.test.tsx:205-208` (the outcome is passed in by the
-    fixture).
+    `warningNearMiss.test.tsx:43,89` (the outcome the test asserts is passed
+    in by the `renderWarning` fixture's default).
 19. `batchTable.test.tsx:109-112` says a chunk "deliberately falls
     mid-record"; every chunk is a whole line, so the partial-line buffer in
     `api.ts:197-206` is never exercised.
@@ -884,7 +973,8 @@ types browsers decode, and say so for the rest.
     checked class-to-token, and `#b9c6da` at `index.css:1022` (drop-zone dashed
     border, about 1.6:1) is the one hard-coded colour outside the tokens.
 22. `branding.test.tsx:144-150` would miss `import x from './seal.svg?url'`,
-    `<img src="/seal.svg">` and a favicon link.
+    `<img src="/seal.svg">` and an SVG favicon link; a `.ico` favicon is
+    caught by the first regex.
 23. `branding.test.tsx:30` and `contrast.test.ts:23` resolve paths from
     `process.cwd()`, so vitest launched from the repository root fails.
 24. `helpTab.test.tsx:129-133` runs a full upload-and-check six times through
@@ -915,7 +1005,7 @@ types browsers decode, and say so for the rest.
     single and batch paths share `verify_photos` through `verify_image`, so
     the duplication the review looked for is not there; what differs is that
     the single path classifies and the batch path pairs.
-29. Comments that describe a behaviour the code no longer has: `api.py:152-153`
+29. Comments that describe a behaviour the code no longer has: `api.py:151-152`
     (observation 2), `ocr.py:62-67` (the single path "never hit this" is true
     and is presented as a safety property rather than as the loop-blocking it
     is), `ecs.tf:185-187` (finding 10), `iam.tf:154-158` (finding 14),
@@ -935,6 +1025,14 @@ types browsers decode, and say so for the rest.
     file content). Authorship, not a finding.
 34. `docs/05_ARCHITECTURE.md:661` names the Bedrock fallback as "the one
     portability risk" of a component that does not exist (finding 5).
+35. `docs/ACCESSIBILITY_CONFORMANCE.md` row 4.1.1 says "component-scoped ids
+    come from `useId`"; `ApplicationFields.tsx:189,227,232` use static ids.
+    One instance of the component exists today, so no duplicate id results;
+    the row overstates the mechanism.
+36. `docs/ACCESSIBILITY_CONFORMANCE.md` row 1.3.2 says "no absolute
+    positioning except the skip link"; `.visually-hidden` (`index.css:207-208`)
+    is also `position: absolute`. It is the standard off-screen pattern and
+    harmless to reading order; the row is inexact.
 
 ---
 
@@ -964,7 +1062,7 @@ document named; **S** stale (true of an earlier build); **F** false.
 | 17 | Row 28: orientation by `TestExifOrientation`, `TestCardinalOrientation`, `TestWhyOrientationUsesOsd` | Matrix row 28 | E | `test_ocr.py:132-211,230-288,436-465` |
 | 18 | Row 31: `test_orientation_floor.py` "11 tests" | Matrix row 31 | S | 13 collected |
 | 19 | Row 31: `test_colour_arm.py` "19 tests" | Matrix row 31 | E | 19 collected |
-| 20 | Row 31: signature tests "7 tests" | Matrix row 31 | E | `test_embedded_artwork.py:249-369`, 7 |
+| 20 | Row 31: signature tests "7 tests" | Matrix row 31 | S | `test_embedded_artwork.py:249-369` holds the two named classes and 6 collected tests |
 | 21 | Row 32: `test_verify_by_search.py` "35 tests" incl. "a value inside a longer word" | Matrix row 32 | E for the count; T for coverage | 35 collected; `TestInsideALongerWord` covers the exact pass, not the rescue (finding 1) |
 | 22 | Row 33: `test_product_type_boxes.py` "27 tests" | Matrix row 33 | E | 27 collected; text layer, image, rasterised PDF, none, two, margin, precedence |
 | 23 | Row 35: `test_read_once.py` "12 tests" | Matrix row 35 | E | 12 collected; prefill reads no picture, check still fills both values |
@@ -982,7 +1080,7 @@ document named; **S** stale (true of an earlier build); **F** false.
 | 35 | "FR-1 to FR-10" | README:217 | S | FR-1 to FR-15 |
 | 36 | "21 questions, 8 still open" | README:224 | S | 28 questions |
 | 37 | "16 inferences" | README:225 | S | 17 |
-| 38 | Health response `"version":"1.1.0"` | README:75 | E about the code, S about the tag | Finding 3 |
+| 38 | Health response `"version":"1.1.0"` | README:71 | E about the code, S about the tag | Finding 3 |
 | 39 | "An optional vision-model fallback on Amazon Bedrock exists" | README:128; ADR 0003:42; NFR-3 AC 2-3; 05_ARCHITECTURE:535,661 | **F** | No implementation (finding 5) |
 | 40 | "Bundled as a variable font ... never fetched from a CDN" | README tools table | E | `index.css:64`; seven woff2 files in `dist/assets`; `a11y.spec.ts:712-734` |
 | 41 | "No outbound network calls on the default path" | README:124; NFR-3 | E | No client, no URL in `backend/app`; same-origin `fetch` only in `api.ts`; sockets refused in `TestEgressBlocked` |
@@ -995,7 +1093,7 @@ document named; **S** stale (true of an earlier build); **F** false.
 | 48 | Session-container before/after tables (2.19 to 1.12 s, 1518 to 216 ms) | README | T | Named as session-container figures; not reproducible here |
 | 49 | In-process accuracy on the sample set: 100 percent precision and recall | README (implied by 300 of 300) | E | Reproduced in this session: 100 percent on every field, median 1104 ms |
 | 50 | "Container base images are pinned by tag, not digest" | README known limitations | E | `Dockerfile:9,33`; contradicts `docs/06:69` "acceptable while nothing is released" (finding 12) |
-| 51 | "No authentication and no persistence" | README | E | No auth anywhere; persistence per finding 4 |
+| 51 | "No authentication and no persistence" | README | S (partly) | No auth anywhere is true; persistence is graded as row 64 is, per finding 4 |
 | 52 | "Section 508 conformance is claimed and evidenced" | README status table | T, with finding 7 | Report exists; four rows contradict the code |
 | 53 | "Four polite `role="status"` regions" | Conformance 4.1.3 | **F** | Five; two unlabelled (finding 7) |
 | 54 | "Choosing a file ... a change of content, not of context" | Conformance 3.2.2 | **F** | Focus moves (finding 7) |
@@ -1008,7 +1106,7 @@ document named; **S** stale (true of an earlier build); **F** false.
 | 61 | "Nothing here has been applied ... No plan or apply has been run" | `infra/README.md:8-12`; `docs/09:7-14` | S | Contradicted by README, 09 section 9, `locals.tf:27-31` |
 | 62 | `.terraform.lock.hcl` "is absent from the repository" | `docs/09:58-60` | S | Committed |
 | 63 | `pip-audit --strict` | `docs/06:40` | **F** | `ci.yml:214,217` without `--strict` |
-| 64 | "Nothing is written to disk" | `docs/06:23,39`; `SECURITY.md:40-42`; `batch.py:30-31` | S (partly) | Finding 4 |
+| 64 | "Nothing is written to disk" | `docs/06:23,39`; `SECURITY.md:40-42`; `batch.py:30-31`; `ocr.py:47-48` | S (partly) | Finding 4: every OCR call writes a temp file, and an oversize part is spooled |
 | 65 | "SBOM generated for every image" | `docs/06:27,42,179` | **F** | CI build only, different from the deployed build (finding 13) |
 | 66 | "Write access to develop or main is write access to the deployment" | `docs/06:28` | S | Any branch via the environment subject (finding 11) |
 | 67 | "Change a limit here, apply, then run the deploy workflow" | `ecs.tf:185-187`; `docs/09:163-165` | **F** | Finding 10 |
@@ -1024,7 +1122,7 @@ document named; **S** stale (true of an earlier build); **F** false.
 | 77 | ADR 0009 amendment: a batch row still requires its image | ADR 0009:228 | E | `batch.py:158-173` enumerates rows from images |
 | 78 | ADR 0010, 0011, 0012, 0013 (as amended by 0018), 0014, 0015, 0017, 0018: the decision each records is the one the code implements | The ADRs | E | `application_form.py` (0010, 0017 `read_artwork=False` on the classify route only, no cache), `classify.py` (0011), `warning.py` and `config.py:129` (0012), `verify.py:707-733,957-965` (0013 narrowed, 0018), `ocr.py:935-947` (0014), `search.py` (0015; see finding 1 for what decision 5 did not foresee) |
 
-**Tally.** E 39, T 9, S 21, F 9.
+**Tally.** E 37, T 9, S 23, F 9.
 
 ---
 
@@ -1046,7 +1144,7 @@ Tesseract 5.3.4 with `osd`, DejaVu fonts), from a clean checkout of `a6279e2`.
 | Python audit | `pip-audit -r backend/requirements.lock --no-deps` | No known vulnerabilities |
 | Node audit | `npm audit --audit-level=high` | 0 vulnerabilities |
 | Accuracy | `python samples/generate_samples.py && python scripts/measure.py` | 100 percent precision and recall on all five fields over the twelve labels; review rate 1 of 12 on alcohol content and net contents (the seeded cross-unit and inconsistent-proof cases); median 1104 ms; mean OCR confidence 95.2 |
-| Probe: spool to disk | `SpooledTemporaryFile.rollover` counted around `POST /api/verify` | 5 MB: 0 rollovers; 11 MB: 1 rollover then 413 (finding 4) |
+| Probe: spool to disk | `SpooledTemporaryFile.rollover` counted around `POST /api/verify` | 5 MB: 0 rollovers; 11 MB: 1 rollover then 413 (finding 4). The pytesseract temp file in the same finding was read in the installed source, not counted |
 | Probe: INFO logging | uvicorn subprocess with `TTB_LOG_LEVEL=INFO`, one verification | No `app.*` INFO record in the process output (finding 9) |
 | Probe: event loop | Concurrent `GET /api/health` during a three-photograph `POST /api/verify` | Verify 3.35 s; the health probe waited 3.34 s (finding 8) |
 | Probe: rescue false pass | Rendered label with no alcohol statement, application declaring `12` and `12%` | `alcohol_content: match, score 100.0` both times (finding 1) |
@@ -1088,7 +1186,7 @@ was not attempted; CI's own container job is the evidence for it).
   the omitted OIDC thumbprint was not checked.
 - **The contents of `AmazonECSTaskExecutionRolePolicy`** (finding 26) are
   cited from memory, not fetched.
-- **The author's real mezcal filing.** Every v1.1.0 and v1.2.0 defect was
+- **The author's real filing.** Every v1.1.0 and v1.2.0 defect was
   found on it and it is not (and should not be) in the repository, so none of
   the "reads correctly now" claims about that document were reproduced. The
   synthetic fixtures that stand in for it pass.
