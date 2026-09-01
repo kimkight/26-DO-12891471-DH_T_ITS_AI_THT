@@ -1300,3 +1300,88 @@ the subject here and the device will capture it. By the time that panel renders,
 the file has been chosen, uploaded and read. The preview itself stays, because
 the reason it exists is good and unrelated: before it, an agent who chose the
 wrong file could not tell until the results came back.
+
+### US-28 Take the words off the check screen and give me a place to look them up
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, FR-9 (unchanged and protected) |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author, using the deployed build, 2026-09-01: "this has way too many words on the screen. create a help me tab and put all of the text you are removing plus some FAQs on that tab." |
+
+**As a** compliance agent checking a label,
+**I want** the screen I work on to carry the work and nothing else,
+**So that** I can read a result at a glance, and still find out what any of it
+means when I want to.
+
+**Acceptance criteria**
+
+```
+Given the single-label view
+When  I look at anything between the top of the upload card and the last result row
+Then  no explanatory paragraph on it runs to more than one sentence
+```
+
+```
+Given the six paragraphs named in the source
+When  the single-label view renders, before and after a check
+Then  none of them appears on it
+```
+
+```
+Given the Help tab
+When  I open it
+Then  it carries what those paragraphs said, rewritten for a reader
+And   it answers the questions an agent asks rather than listing caveats
+And   no requirement identifier appears anywhere on it
+```
+
+```
+Given the Help tab
+When  I look for something to operate
+Then  there is nothing on it but text and links
+```
+
+```
+Given the submit control with nothing uploaded
+When  it renders
+Then  it carries a short label saying why it is inert
+And   the label is not absent
+```
+
+```
+Given the prototype banner, the footer, and any FR-9 error message
+When  anything above is applied
+Then  they are unchanged and they have not moved to Help
+```
+
+```
+Given the Help tab
+When  the accessibility gates run
+Then  axe reports no violation on it
+And   it is reachable from the tab strip by arrow key
+And   its headings are one level deep under the panel's own heading
+```
+
+**Why this is a story rather than a copy tweak.** Every sentence taken off the
+check screen was true, and each was added for a reason that is written down in
+the file it came from. The problem is not any one of them; it is that they are
+all on at once, on every check, forever. A caveat printed on every check is read
+on none of them, and an agent reading five results does not need to be told for
+the fifth hundred time what a search hit does and does not prove.
+
+The split is between a working screen and a reading page. On a working screen a
+sentence has to earn its place against the thing the agent came to do; on a
+reading page the reader came to read, so the same sentence is worth more there
+than it ever was in the middle of somebody's work.
+
+**What does not move, and why it is stated as an acceptance criterion.** The
+persistent prototype banner, the footer, and FR-9's error messages. Cutting
+words is not licence to drop a message that names a real problem: an agent whose
+file could not be read has to be told where they are, and the banner is the
+standing statement of what this tool is and is not. A quieter screen that
+achieved itself by hiding a failure would be worse than the wordy one.
+

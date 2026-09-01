@@ -243,11 +243,17 @@ describe('the source of a value that was read', () => {
     await waitFor(() => expect(screen.getByText('DEL MAGUEY')).toBeVisible())
     expect(screen.getByText('Application form')).toBeVisible()
     expect(screen.getAllByText('Label artwork in the application')).toHaveLength(3)
-    // The chip is the whole of it. The sentence that used to sit under each
-    // value said the same thing at length, and the upload card says it once
-    // above (2026-08-31); see quietScreen.test.tsx for the budget that keeps it
-    // from coming back.
-    expect(screen.queryAllByText(/not from its text/i)).toHaveLength(1)
+    /*
+     * The chip is the whole of it, and since US-28 it is the whole of it on the
+     * screen rather than the shorter of two tellings. The sentence that used to
+     * sit under each value went first (2026-08-31), and the one line in the
+     * upload card that survived it went to Help, under "Why does it sometimes
+     * say a value came from the label artwork inside the application?".
+     *
+     * See quietScreen.test.tsx for the word budget and helpTab.test.tsx for the
+     * sentence rule that between them keep either from coming back.
+     */
+    expect(screen.queryAllByText(/not from its text/i)).toHaveLength(0)
   })
 })
 

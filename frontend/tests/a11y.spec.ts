@@ -85,6 +85,51 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     expect(report(found)).toBe('')
   })
 
+  /*
+   * The Help tab (US-28). A whole page of prose is where heading structure and
+   * reading order either hold or do not, and neither is visible in a unit test.
+   */
+  test('the help tab', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('tab', { name: 'Help' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Help', level: 2 })).toBeVisible()
+    // The moved copy is on the page, in the shape of answers to questions.
+    await expect(page.getByRole('heading', { name: 'What do I upload?' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'What happens to my files?' })).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
+  test('the help tab is reached by keyboard and reads as one level of headings', async ({
+    page,
+  }) => {
+    await page.goto('/')
+
+    // Arrow keys move along the strip, which is the ARIA tabs pattern, and the
+    // third segment is reachable that way like the second (WCAG 2.1.1).
+    await page.getByRole('tab', { name: 'Check one label' }).focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect(page.getByRole('tab', { name: 'Help' })).toBeFocused()
+    await expect(page.getByRole('tab', { name: 'Help' })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.locator('#panel-help')).toBeVisible()
+
+    /*
+     * Info and relationships (WCAG 1.3.1): the panel's own h2, then section
+     * headings and question headings at h3, and nothing skipped. Asserted as
+     * the sequence of levels rather than as a count, because a page whose
+     * headings jump from h2 to h4 is exactly what a screen reader user cannot
+     * see and a colour test cannot catch.
+     */
+    const levels = await page
+      .locator('#panel-help :is(h1, h2, h3, h4, h5, h6)')
+      .evaluateAll((nodes) => nodes.map((node) => Number(node.tagName.slice(1))))
+    expect(levels[0]).toBe(2)
+    expect(new Set(levels.slice(1))).toEqual(new Set([3]))
+  })
+
   test('the batch pickers and the pairing count are reachable by keyboard', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('tab', { name: 'Check many labels' }).click()
@@ -593,7 +638,7 @@ test.describe('what axe cannot check', () => {
     await panel.getByRole('button', { name: 'Review the values' }).click()
     await expect(panel.getByLabel('Brand name', { exact: true })).toHaveValue("STONE'S THROW")
     await expect(
-      panel.getByText('Read from the application form. Change it if it is wrong.').first(),
+      panel.getByText('Read from the application form; change it if it is wrong.').first(),
     ).toBeVisible()
     await expect(panel.getByRole('button', { name: 'Remove application.pdf' })).toBeVisible()
 

@@ -216,18 +216,23 @@ export function ApplicationFields({
     return (
       <div className="field">
         <label htmlFor="beverage_type">Beverage type</label>
-        <p className="field__hint" id="beverage_type-hint">
-          {processed && !beverageRead
-            ? 'Item 5\u2019s boxes were read from the page and none of them stood out. '
-            : ''}
-          Not compared against the label. It says which numeric rule to expect: the proof
-          cross-check for spirits, range handling for wine.
-        </p>
+        {/*
+          What the beverage type is for went to Help (US-28), under "Where does
+          beverage type come from?". The sentence that stays is the one that is
+          about *this* document rather than about the field: item 5's boxes were
+          looked at and did not settle it, so the agent chooses. On a document
+          that did settle it there is nothing to say and nothing is said.
+        */}
+        {processed && !beverageRead ? (
+          <p className="field__hint" id="beverage_type-hint">
+            Item 5&rsquo;s boxes were read from the page and none of them stood out.
+          </p>
+        ) : null}
         <select
           id="beverage_type"
           name="beverage_type"
           value={application.beverage_type}
-          aria-describedby="beverage_type-hint"
+          aria-describedby={processed && !beverageRead ? 'beverage_type-hint' : undefined}
           onChange={(event) => onChange('beverage_type', event.target.value)}
         >
           {BEVERAGE_TYPES.map((option) => (
@@ -267,8 +272,8 @@ export function ApplicationFields({
             {gaps.length === 1 ? 'One value was not read' : `${gaps.length} values were not read`}
           </h3>
           <p className="field__hint">
-            Enter it here, or upload a clearer file and we will try again. Leave it empty and that
-            field is reported as not compared rather than as a mismatch.
+            Enter it here, or upload a clearer file; an empty box is reported as not compared rather
+            than as a mismatch.
           </p>
           {gaps.map((field, index) => textField(field, index === 0))}
         </div>
@@ -321,8 +326,8 @@ export function ApplicationFields({
 
         <div className="disclosure__panel" id={TYPED_FIELDS_PANEL} hidden={!open}>
           <p className="field__hint">
-            The check runs on whatever is in these boxes. A value you type here is used instead of
-            the one read off the application. Leave a box empty and that field is not compared.
+            The check runs on whatever is in these boxes; a value you type wins, and an empty box is
+            not compared.
           </p>
 
           {(processed ? editable : TEXT_FIELDS).map((field) => textField(field))}

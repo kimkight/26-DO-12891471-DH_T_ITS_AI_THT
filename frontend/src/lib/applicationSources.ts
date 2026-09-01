@@ -58,18 +58,22 @@ export function documentSource(source: DocumentValueSource | undefined): Applica
 /**
  * The mark on a filled field, saying where its value came from.
  *
- * Kept in the wording it has had since FR-11 ("Read from the application form.
- * Change it if it is wrong.") because the second sentence is the working half:
- * an agent who cannot tell whether they are allowed to edit a filled field will
- * not edit it. What is added is the artwork case, which is the one an agent
- * should look at hardest.
+ * Kept in the wording it has had since FR-11 because the second half is the
+ * working half: an agent who cannot tell whether they are allowed to edit a
+ * filled field will not edit it. What is added is the artwork case, which is
+ * the one an agent should look at hardest.
+ *
+ * One sentence rather than two since 2026-09-01 (US-28), joined by a semicolon.
+ * Nothing is lost by that and it is not a cosmetic change: the check screen's
+ * rule is one sentence per paragraph, and a mark that broke it would be the
+ * first exception, after which there would be a second.
  */
 const FIELD_MARKS: Record<ApplicationSource, string | null> = {
   typed: null,
-  parsed_from_form: 'Read from the application form. Change it if it is wrong.',
+  parsed_from_form: 'Read from the application form; change it if it is wrong.',
   parsed_from_artwork:
-    'Read from the label artwork inside the application. Change it if it is wrong.',
-  read_from_tick: 'Read from the ticked box in item 5. Change it if it is wrong.',
+    'Read from the label artwork inside the application; change it if it is wrong.',
+  read_from_tick: 'Read from the ticked box in item 5; change it if it is wrong.',
   absent: null,
 }
 

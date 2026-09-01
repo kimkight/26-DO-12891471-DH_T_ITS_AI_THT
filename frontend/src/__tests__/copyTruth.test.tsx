@@ -78,7 +78,11 @@ describe('the upload copy describes files rather than photography', () => {
   })
 
   it('says PDFs and images, because a label export is not a photo', () => {
-    expect(landingText()).toContain('PDFs and images, one file or several')
+    // On the drop zone since US-28, which is where an agent is looking when the
+    // question is what this control takes. The paragraph that used to say it
+    // above the control went to Help, where it also says it.
+    expect(landingText()).toContain('PDF, JPEG, PNG, WebP or TIFF')
+    expect(landingText()).not.toContain('take a photo')
   })
 
   it('names a file classified as the label side without calling it a picture taken', () => {

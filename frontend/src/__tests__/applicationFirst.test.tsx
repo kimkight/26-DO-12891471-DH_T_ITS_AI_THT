@@ -109,17 +109,22 @@ describe('what greets the agent on the single-label view', () => {
     const heading = screen.getByRole('heading', {
       name: /Upload the label application, an image of the label, or both/i,
     })
+    // The heading is what says it now. The paragraph under it that explained
+    // the one-control idea in four sentences went to Help on 2026-09-01
+    // (US-28), under "What do I upload?".
     expect(heading).not.toHaveTextContent(/instead/i)
-    expect(screen.getByText(/One place for everything/i)).toBeInTheDocument()
+    expect(screen.queryByText(/One place for everything/i)).not.toBeInTheDocument()
   })
 
   it('tells the flow in the empty state: upload, then check', () => {
+    // Shorter since US-28, and still both verbs: what to do, and where the
+    // answer will appear. What each kind of file is for is a Help entry.
     render(<SingleLabelTab />)
-    const placeholder = screen.getByText(
-      /Upload the label application, an image of the label, or both, then select/i,
-    )
+    const placeholder = screen.getByText(/Upload a file and select/i)
+
     expect(placeholder).toBeInTheDocument()
     expect(placeholder).toHaveTextContent(/Check this label/i)
+    expect(placeholder).toHaveTextContent(/the results appear here/i)
   })
 })
 
@@ -322,17 +327,25 @@ describe('beverage type is demoted (A-12, A-13)', () => {
     expect(brand.compareDocumentPosition(beverage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('says it is not compared, and what it does instead', async () => {
+  it('carries no standing caveat on the control itself', async () => {
+    /*
+     * **Amended by US-28.** The control used to carry two sentences saying that
+     * the beverage type is never compared and which numeric rule it selects.
+     * Both are true and neither is about the document in front of the agent: it
+     * is the same sentence on every check, which is the definition of something
+     * that belongs on Help. It is there, under "Where does beverage type come
+     * from?", and `helpTab.test.tsx` asserts it.
+     *
+     * What stays on the control is the sentence that *is* about this document,
+     * and it appears only when it applies: item 5's boxes were read and none of
+     * them stood out.
+     */
     const user = userEvent.setup()
     render(<SingleLabelTab />)
     await user.click(screen.getByRole('button', { name: TOGGLE }))
 
-    expect(screen.getByLabelText('Beverage type')).toHaveAccessibleDescription(
-      /Not compared against the label/i,
-    )
-    expect(
-      screen.getByText(/proof cross-check for spirits, range handling for wine/i),
-    ).toBeVisible()
+    expect(screen.getByLabelText('Beverage type')).not.toHaveAccessibleDescription()
+    expect(screen.queryByText(/Not compared against the label/i)).not.toBeInTheDocument()
   })
 
   it('still fills from the document when the document states it', async () => {

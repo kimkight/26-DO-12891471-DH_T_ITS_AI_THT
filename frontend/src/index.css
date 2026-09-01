@@ -1703,3 +1703,99 @@ main {
   color: var(--accent);
   text-decoration-thickness: 2px;
 }
+
+/*
+ * The Help tab (US-28).
+ *
+ * A reading page, so it is set for reading: a measure that stops well short of
+ * the panel's full width, generous space between questions, and nothing on it
+ * that looks like a control. The check screen is a working surface with cards
+ * and chips on it; this deliberately does not look like that, so an agent who
+ * lands here knows at a glance that there is nothing to do.
+ *
+ * It carries no colour tokens of its own. Everything here is --text,
+ * --text-muted, --page and --border, which the contrast test already covers
+ * against both surfaces, so this page adds nothing new to check.
+ */
+.help {
+  max-width: 42rem;
+  padding: 1.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--page);
+  box-shadow: var(--shadow-card);
+}
+
+.help > h2 {
+  margin: 0 0 0.375rem;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+.help__lead {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted);
+  font-size: 1rem;
+}
+
+.help section + section {
+  margin-top: 2rem;
+}
+
+/* The three group headings, set apart by a rule rather than by size alone. */
+.help__section {
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.help__entry + .help__entry {
+  margin-top: 1.5rem;
+}
+
+.help__question {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.help p {
+  margin: 0 0 0.625rem;
+  line-height: 1.65;
+}
+
+.help p:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * The outcome list. A description list because that is what it is: each term
+ * is a word an agent will see on a chip, and each description says what that
+ * chip claims. The term is set in the weight the chip uses so the two read as
+ * the same thing.
+ */
+.help__outcomes {
+  margin: 0;
+}
+
+.help__outcomes dt {
+  margin-top: 0.75rem;
+  font-weight: 700;
+}
+
+.help__outcomes dt:first-child {
+  margin-top: 0;
+}
+
+.help__outcomes dd {
+  margin: 0.125rem 0 0;
+  line-height: 1.65;
+}

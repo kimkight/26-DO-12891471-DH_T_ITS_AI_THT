@@ -194,12 +194,12 @@ describe('the form', () => {
     // server's judgement, made on files it has read, and comes back as an FR-9
     // message naming the missing piece; guessing at it here would mean the
     // interface classifying files it has not read.
+    //
+    // Shorter since US-28, and still a label rather than nothing: the agent has
+    // to know why the button is inert, and the reason is one word long. What the
+    // control takes is a Help entry.
     render(<SingleLabelTab />)
     expect(screen.getByRole('button', { name: 'Check this label' })).toBeDisabled()
-    expect(
-      screen.getByText(
-        /Upload something to turn on the check: the label application, an image of the label, or both/i,
-      ),
-    ).toBeInTheDocument()
+    expect(screen.getByText('Upload a file to check.')).toBeInTheDocument()
   })
 })

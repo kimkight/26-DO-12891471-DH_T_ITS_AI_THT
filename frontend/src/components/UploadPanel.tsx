@@ -62,6 +62,23 @@ interface Props {
   onCleared: () => void
 }
 
+/**
+ * One value the form states that the check does not use, as a line.
+ *
+ * The chip is the whole of the explanation on this screen. Why it is not
+ * compared is a question, and questions are answered on the Help tab; here an
+ * agent only has to see that we read it and are not using it.
+ */
+function ValueNote({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="value-line">
+      <span className="value-line__label">{label}</span>
+      <span className="value-line__value">{value}</span>
+      <span className="chip">Not compared</span>
+    </div>
+  )
+}
+
 /** Two files are the same file when their name, size and modified time agree. */
 function sameFile(one: File, other: File): boolean {
   return (
@@ -123,17 +140,13 @@ export function UploadPanel({
 
   const document = result?.application_document ?? null
   const found = document?.fields.filter((entry) => entry.found_on_document) ?? []
+
   // A value the artwork is about to supply is not a value the agent has to
   // enter (ADR 0017), so it is not listed as one. The check reads the pictures
   // and fills it in.
   const pending = new Set<string>(pendingFromArtwork(document))
   const missing =
     document?.fields.filter((entry) => !entry.found_on_document && !pending.has(entry.name)) ?? []
-  const fromArtwork = found.filter((entry) => entry.source === 'embedded_artwork')
-  // The document carries pictures, and they are read by the check rather than
-  // here. That is what makes the next line true without the artwork having been
-  // read yet.
-  const artworkPending = document ? document.artwork_read === false && pending.size > 0 : false
 
   return (
     <section className="upload-panel" aria-labelledby={headingId}>
@@ -142,16 +155,9 @@ export function UploadPanel({
           Upload the label application, an image of the label, or both
         </h3>
       </TileHeading>
-      <p className="field__hint" id={`${headingId}-hint`}>
-        One place for everything. PDFs and images, one file or several. We work out what each one
-        is: an application tells us what the label should say, an image of the label shows us what
-        it does say. An application that carries its own label artwork is enough on its own. Files
-        are read here and are not sent to TTB or kept.
-      </p>
-
       <DropZone
         label="Files for this label"
-        hint="Drag files here, or choose them. PDF, JPEG, PNG, WebP or TIFF."
+        hint="Drag files here, or choose them: PDF, JPEG, PNG, WebP or TIFF."
         accept={ACCEPTED_UPLOADS}
         multiple
         files={[]}
@@ -227,38 +233,23 @@ export function UploadPanel({
             {document.pages_read > 1 ? ` over ${document.pages_read} pages` : ''}.
           </p>
           {/*
-            One line per thing, said once (2026-08-31). This is where a value
-            that came off a picture is first shown, so this is where it is said
-            that it did; the chip on each value carries the same fact in four
-            words and nothing repeats it under the results.
+            Two values the form states and the check does not use, as lines
+            rather than as sentences (US-28). Each is one row: the name, the
+            value, and a chip saying it is not compared. The paragraphs they
+            replace explained the same thing in two sentences each, on a screen
+            the author said had too many words on it.
+
+            The fanciful name is kept rather than moved to Help entirely, and
+            this is the quieter of the two options the brief offered: it is a
+            real value the parser read off the document in front of the agent,
+            and an agent who wants to know why it is not compared has one place
+            to look. The explanation is the Help entry; this is the datum.
           */}
-          {fromArtwork.length ? (
-            <p className="field__hint">
-              {fromArtwork.map((entry) => entry.display_name).join(', ')}{' '}
-              {fromArtwork.length === 1 ? 'was' : 'were'} read from the label artwork inside this
-              application, not from its text. Check {fromArtwork.length === 1 ? 'it' : 'them'}.
-            </p>
-          ) : null}
-          {/*
-            The bottle caveat is not repeated here. The results panel states it
-            once, where the check it qualifies is being read.
-          */}
-          {(document.label_artwork_available || artworkPending) && !result?.label_images ? (
-            <p className="field__hint">
-              This application carries its own label artwork, so you do not have to add an image.
-            </p>
-          ) : null}
           {document.class_type_code ? (
-            <p className="field__hint">
-              The form gives the class or type code as {document.class_type_code}. The description
-              is what gets compared.
-            </p>
+            <ValueNote label="Class or type code" value={document.class_type_code} />
           ) : null}
           {document.fanciful_name ? (
-            <p className="field__hint">
-              Fanciful name on the application: {document.fanciful_name}. It is not one of the
-              fields we compare.
-            </p>
+            <ValueNote label="Fanciful name" value={document.fanciful_name} />
           ) : null}
           {missing.length ? (
             <>
