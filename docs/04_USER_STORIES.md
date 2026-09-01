@@ -1470,3 +1470,90 @@ screen reader gets silence and focus on the document body, which is the worst
 place focus can be and is a failure of WCAG 2.4.3 rather than a rough edge. So
 focus lands on the thing they do next, and the live region says what happened.
 
+### US-30 Tell me, honestly, whether this is 508 conformant
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Must |
+| Requirements | NFR-5 |
+| Points | |
+| Issue | [#13](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/13) |
+| Source | The author, 2026-09-01: "this entire project needs to be 508 compliant; ensure that it is." |
+
+**As a** reviewer deciding whether this could be used by agency staff,
+**I want** a conformance claim I can check rather than a badge,
+**So that** I know what was tested, how, and what is still open.
+
+**Acceptance criteria**
+
+```
+Given the accessibility requirement
+When  I read it
+Then  it names Section 508 and the standard Section 508 adopts for web content
+And   it says which WCAG version was actually verified, which is not the same thing
+```
+
+```
+Given the conformance report
+When  I read it
+Then  every applicable Success Criterion has a result and a line of evidence
+And   the criteria no automated tool evaluates are among them
+```
+
+```
+Given a criterion the product does not meet, or does not cover
+When  I look for it
+Then  it is in the report, said plainly, with what it does and does not leave open
+```
+
+```
+Given that no screen reader was used
+When  I read the report
+Then  it says so, in those words, as a limitation rather than as an omission
+```
+
+```
+Given the pill control
+When  assistive technology reads it
+Then  it is a tab set: correct roles, arrow-key navigation, the selected tab
+      reported, and each panel associated with its tab
+```
+
+```
+Given two outcomes that share a colour
+When  every colour is removed
+Then  they still differ by word and by shape
+```
+
+```
+Given a colour token introduced by a later change
+When  the contrast test runs
+Then  it is checked, because the list is derived from the outcome definitions
+      rather than kept beside them
+```
+
+**Why the standard has to be named precisely.** Section 508 of the
+Rehabilitation Act, as revised in 2017, adopts WCAG 2.0 Levels A and AA for web
+content at 36 CFR Part 1194, Appendix A, E205.4. NFR-5 targeted WCAG 2.1 AA,
+which is a superset and therefore satisfies it, but a requirement that never
+names Section 508 is a requirement a federal reviewer cannot check against the
+thing they are actually asking about. Naming both is the honest statement: the
+first is what is required, the second is what was done.
+
+**Why "ensure that it is" is mostly verification rather than building.** The
+gap between WCAG 2.1 AA, which was already the target and already gated in CI,
+and WCAG 2.0 AA, which is what 508 requires, is nothing: 2.1 contains all of
+2.0. What was missing was not conformance; it was the evidence that conformance
+had been checked rather than assumed, especially for the criteria no automated
+tool evaluates. Automated tools catch a minority of accessibility failures, and
+a green axe run presented as a conformance claim is the same kind of false
+assurance as a match chip on a comparison that could not have failed.
+
+**Why the report states its exceptions.** A blanket claim is worth nothing to a
+reviewer who has read one before. The report says that no screen reader was
+used, what that does and does not leave open, and what should be run before any
+use beyond this assessment. That is more useful than a claim of full support,
+and it is the same posture the tool itself takes: it recommends, and the person
+decides.
+
