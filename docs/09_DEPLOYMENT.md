@@ -387,6 +387,14 @@ what the last one bought. The
 `ocr_passes` is the figure to look at first: a document-only submission should
 read one picture once.
 
+**Read it from the response, not from the screen.** The panel stopped printing
+the elapsed time and the phase disclosure in v1.2.0, on the author's own
+instruction, because an agent checking a label is not measuring the tool
+(NFR-1, NFR-4). Nothing about the measurement changed: every phase is still
+timed by a timer around the work it names, `timings` still carries them all, and
+this step is now the only place they are read. `item_five_ocr_ms` is new in
+v1.2.0 and should be 0 on any document with a text layer (ADR 0016).
+
 **8.4 The stream is a stream, and this is the step that cannot be skipped.**
 
 `X-Accel-Buffering: no` is a hint to intermediaries, not a guarantee. If

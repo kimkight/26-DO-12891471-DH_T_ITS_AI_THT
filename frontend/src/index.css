@@ -1432,68 +1432,6 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
-.timing {
-  margin: 0 0 1.25rem;
-  font-weight: 600;
-  font-size: 0.9375rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.timing__detail {
-  font-weight: 400;
-  color: var(--text-muted);
-  font-size: 0.875rem;
-}
-
-/*
- * The phase breakdown (NFR-1). Closed by default, because an agent checking a
- * label is not debugging the tool; on the page at all, because the person who
- * is debugging it has nowhere else to look. `<details>` rather than a scripted
- * toggle: it is keyboard operable and announced with no ARIA of our own.
- */
-.timing-detail {
-  margin: -0.75rem 0 1.25rem;
-  font-size: 0.875rem;
-}
-
-.timing-detail > summary {
-  cursor: pointer;
-  color: var(--accent);
-  font-weight: 600;
-  padding: 0.25rem 0;
-  border-radius: var(--radius-control);
-}
-
-.timing-detail > summary:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 2px;
-}
-
-.timing-detail__list {
-  margin: 0.5rem 0;
-  padding: 0.75rem 0.875rem;
-  background: var(--surface);
-  border-radius: var(--radius-control);
-}
-
-.timing-detail__row {
-  display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.1875rem 0;
-}
-
-.timing-detail__row dt {
-  color: var(--text-muted);
-}
-
-.timing-detail__row dd {
-  margin: 0;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 /* ------------------------------------------------------------------ tables */
 
 /* Wide content scrolls inside its own box so the page never scrolls sideways. */
@@ -1720,12 +1658,6 @@ main {
 .value-line__value {
   font-weight: 600;
   word-break: break-word;
-}
-
-.value-line__caveat {
-  flex: 1 1 100%;
-  font-size: 0.8125rem;
-  color: var(--text-muted);
 }
 
 /*

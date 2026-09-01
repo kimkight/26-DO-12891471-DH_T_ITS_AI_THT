@@ -10,8 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - unreleased until tagged
 
 The author's use of the released v1.1.0 build on 2026-08-30, with the same real
-mezcal COLA document uploaded alone. Everything upstream worked and two of the
-four compared fields still came back as defects.
+mezcal COLA document uploaded alone. Everything upstream worked, two of the four
+compared fields still came back as defects, item 5 was still blank, and the
+screen said far too much about all of it.
 
 ### The evidence
 
@@ -74,8 +75,105 @@ application to the picture of the label."
   the same reading the API does. Its accuracy figures are for the code an agent
   runs rather than for a fallback path.
 
+### Added
+
+- **Item 5's product type is read off the rendered page**
+  ([ADR 0016](docs/adr/0016-product-type-from-the-page.md), FR-11, A-17 amended).
+  The author asked whether beverage type is a field on the application. It is:
+  item 5 on TTB F 5100.31 (04/2023), "TYPE OF PRODUCT (Required)", three check
+  boxes. The tool left it blank on every filing that was not an unflattened
+  AcroForm copy, because it read only the text layer, where all three captions
+  print and no tick can be seen. The tick is in the pixels, and the tool renders
+  the pages already. On the author's own filing, at scale 2.0:
+
+  | item 5 option | mean luminance |
+  | --- | --- |
+  | WINE | 239.9 |
+  | **DISTILLED SPIRITS** | **217.5** |
+  | MALT BEVERAGE | 241.8 |
+
+  - **The boxes are located from their own captions, never from a pixel
+    coordinate.** The form has editions and this tool renders at a scale derived
+    from the page size and a setting, so a coordinate would be right once. The
+    captions come out of the text layer exactly where the file has one, and are
+    recognized only on a page that has none.
+  - **The margin is 12.0 luminance points** between the darkest box and the next,
+    and it is set from both ends of the measurement: the signal is 20 to 22 points
+    across the author's filing and three fixtures, and the noise between two boxes
+    that are both empty is 0.5 to 2.8. Two boxes too close to separate, and no box
+    filled, both come back as not determined and the agent chooses.
+  - **The sample window is deliberately loose.** A tight crop gives a bigger
+    number when it lands exactly and a wrong answer when it does not: at twelve
+    pixels of caption height, a one pixel difference in a caption's left edge put
+    fifteen points between two boxes that were both empty.
+  - The value is surfaced for confirmation and stays editable like every other
+    parsed value, with a provenance chip of its own, "Ticked box on the form". It
+    is still never compared against the label; it selects which numeric rule runs
+    (A-12 for spirits, A-13 for wine) and the result already names the rule.
+  - A new `item_five_ocr_ms` phase reports what this costs. It is zero on every
+    document that carries a text layer.
+
+### Fixed
+
+- **A scanned form with nothing ticked stops being answered wrongly.** The
+  "document names exactly one product type" rule is an inference from absence: it
+  is sound on a Registry printout and unsound on a scan whose OCR lost two of the
+  three captions, which looks identical. Sampling the boxes is direct evidence of
+  the thing being inferred, so it now supersedes that inference in both
+  directions, filling the value where a box stands out and clearing it where the
+  boxes were sampled and none did. An AcroForm radio group still wins over both.
+
+### Removed
+
+- **The timing line and the "Where the time went" disclosure are off the screen**
+  (NFR-1 amended, NFR-4). The author: "I don't need the time listed on the screen
+  think about what a regular application looks like do not put all these extra
+  words on the screen that should not be there." An agent checking a label is not
+  measuring the tool. The number was also not measuring what she experienced: her
+  run showed 7.8 seconds of which 2334 ms was her own browser and network.
+  - **Nothing about the measurement changes.** Every phase is still timed by a
+    timer around the work it names and every figure is still in the API response,
+    where `docs/09_DEPLOYMENT.md` section 8.3a reads them. This is a presentation
+    change.
+  - The live region drops the seconds with it, so a screen reader is not read a
+    number nobody can see. It says no less about what changed.
+  - `frontend/src/lib/timing.ts` and `honestTiming.test.tsx` go with the panel
+    they existed for.
+
+### Changed, on the screen
+
+- **One sentence per row, at most.** The artwork-derived rows carried a paragraph
+  above the reason and a ninety-word reason under it, saying the same thing
+  twice. The outcome chip already reads "Read from the artwork" and the row
+  already carries "Label artwork (same source as the label)"; what is left is the
+  one sentence neither of those states.
+- **One notice per screen, not four.** The self-consistency explanation appeared
+  in the upload card, in the results header and on every affected row, and the
+  "this came off a picture" caveat appeared under every read value and again
+  under every result row. Each is now said once, where it is first relevant.
+- **A word budget, asserted.** Measured on the same fixtures before and after:
+
+  | measurement | before | after |
+  | --- | --- | --- |
+  | clean five-row panel | 246 | 157 |
+  | one row that matched | 26 | 26 |
+  | the author's own submission, whole panel | 584 | 253 |
+  | one artwork-derived row on it | 159 | 51 |
+
+  159 words on one row is the "about 150 words explaining a single row" the
+  author was looking at. `quietScreen.test.tsx` holds the ceilings, and
+  `a11y.spec.ts` holds her own target: a clean single-label result fits one
+  screen at 1280 by 800, its last element ending at 412 px against 535 px before.
+
 ### Unchanged, deliberately
 
+- **The prototype banner, the author attribution, the FR-9 error messages, and
+  the sentence that says who decides.** Cutting words is not licence to drop a
+  message that names a real problem, and each of those is asserted separately.
+- **Accessibility.** axe green on the built page, the contrast test green, the
+  keyboard walk unchanged, outcomes still carrying text and shape before colour,
+  and every live-region announcement still saying what changed. Shorter copy did
+  not become vaguer copy.
 - **FR-5, the government warning.** It already searches the label for a known
   statutory string, it is exact rather than fuzzy by requirement, and it returns
   an exact match on the author's own document. Nothing here touches it and it
@@ -90,6 +188,8 @@ application to the picture of the label."
 - **FR-14 and ADR 0013.** A row whose two sides are one reading of one picture is
   still reported as read from the artwork rather than as a match, and searching
   that picture for a value read off it is circular in exactly the same way.
+- The beverage type is still never compared against the label, and the embedded
+  label artwork still cannot supply it: a label does not print a form answer.
 
 ### Added
 

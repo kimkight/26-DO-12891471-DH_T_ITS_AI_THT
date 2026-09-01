@@ -18,14 +18,19 @@
  * the start of the line rather than at the end of it. The two values under it
  * are key-value rows: the label muted on the left, the value in bold on the
  * right, which is the shape a reader compares two things in.
+ *
+ * **One sentence per row, and no note under it (2026-08-31).** The card used to
+ * carry a paragraph about provenance above the reason as well as the reason
+ * itself, and on an artwork-derived row the two said the same thing twice at
+ * length. Everything that paragraph said is already on the row in fewer words:
+ * the outcome chip reads "Read from the artwork", the application value is
+ * labelled with the source it came from, and the artwork-derived row carries
+ * "Label artwork (same source as the label)" in its own key-value pair. The
+ * paragraph was the third telling, and `quietScreen.test.tsx` holds the budget
+ * that keeps a fourth from arriving.
  */
 import { OutcomeBadge } from './OutcomeBadge'
-import {
-  ARTWORK_DERIVED_CAVEAT,
-  ARTWORK_DERIVED_SOURCE,
-  sourceCaveat,
-  sourceChipLabel,
-} from '../lib/applicationSources'
+import { ARTWORK_DERIVED_SOURCE, sourceChipLabel } from '../lib/applicationSources'
 import { reasonWithoutLimit } from '../lib/labelSearch'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
@@ -120,19 +125,6 @@ export function ResultCard({
           <Value label="Source" value={ARTWORK_DERIVED_SOURCE} missing="" />
         ) : null}
       </dl>
-
-      {/*
-        The one caveat that is worth a line of its own: this application value
-        was recognized off a picture of the label inside the document rather
-        than read out of the document's text, so it can be misread in a way the
-        others cannot (ADR 0010). Text, not colour, so it survives greyscale
-        (NFR-5).
-      */}
-      {isArtworkDerived ? (
-        <p className="card__detail--note">{ARTWORK_DERIVED_CAVEAT}</p>
-      ) : !isWarning && sourceCaveat(field.application_value_source) ? (
-        <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
-      ) : null}
 
       {/*
         The limit of a search hit comes off here for the same reason the

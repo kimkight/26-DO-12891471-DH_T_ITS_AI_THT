@@ -61,13 +61,13 @@ describe('the count says what is true rather than five of five', () => {
 
 describe('what a screen reader hears matches what the panel prints', () => {
   it('opens with the same summary and then explains the derived rows', () => {
-    const spoken = announcement(ARTWORK_ONLY, 1.4)
+    const spoken = announcement(ARTWORK_ONLY)
     expect(spoken).toContain('2 of 2 verifiable fields match; 3 read from the artwork only')
     expect(spoken).toContain('nothing independent to check it against')
   })
 
   it('never announces an artwork-derived field as matching', () => {
-    expect(announcement(ARTWORK_ONLY, 1.4)).not.toContain('5 of 5')
+    expect(announcement(ARTWORK_ONLY)).not.toContain('5 of 5')
   })
 })
 
@@ -85,9 +85,17 @@ describe('the row says why it is different, on the row', () => {
     expect(screen.getByText('Label artwork (same source as the label)')).toBeInTheDocument()
   })
 
-  it('says what that means without making the agent look anything up', () => {
-    render(<ResultCard field={derived} warning={warningDetail()} />)
-    expect(screen.getByText(/one reading of one picture/)).toBeInTheDocument()
+  it('says what that means in one sentence, and only once', () => {
+    /*
+     * The row used to carry a paragraph above the reason as well as the reason,
+     * and the two said the same thing twice at length. The chip, the source
+     * line and one sentence are what is left (2026-08-31); see
+     * quietScreen.test.tsx for the budget.
+     */
+    const { container } = render(<ResultCard field={derived} warning={warningDetail()} />)
+    expect(screen.getByText(derived.reason)).toBeInTheDocument()
+    expect(container.querySelectorAll('p.card__reason')).toHaveLength(1)
+    expect(container.querySelectorAll('p.card__detail--note')).toHaveLength(0)
   })
 
   it('carries the word, not the colour alone, and its own silhouette', () => {

@@ -791,6 +791,15 @@ Single-label verification returns in about 5 seconds.
   target, with the hardware and sample set stated.
 - The measurement is published in the README. It is measured, not asserted.
 - If the target is not met, the shortfall is reported rather than omitted.
+- The phase breakdown is in the API response, where an operator and the
+  deployment runbook can read it.
+- **It is not on the screen.** Amended 2026-08-31 on the author's instruction:
+  "I don't need the time listed on the screen think about what a regular
+  application looks like do not put all these extra words on the screen that
+  should not be there." An agent checking a label is not measuring the tool, and
+  a latency figure above their results is the tool talking about itself in the
+  middle of their work (NFR-4). Nothing about the measurement changes; only
+  where it is read.
 
 This is the requirement that killed the previous pilot: "The system would take
 30, 40 seconds sometimes to process a single label... If we can't get results
@@ -855,6 +864,23 @@ the photograph picker, the application upload and the check button are all on
 screen on load. What moved behind the disclosure is a fallback for the case
 where the agent does not have the document, and NFR-4 is better served by five
 fewer boxes in front of the primary path than it was by having them there.
+
+**A word budget, asserted (2026-08-31).** The panel accumulated wordiness one
+honest sentence at a time: every paragraph added over four sessions was true and
+was added for a reason, and the sum of them was 584 words on the author's own
+submission and 159 on a single row of it. A rule saying "keep it short" is obeyed
+by whoever reads it and by nobody who does not, so the ceiling is a number in a
+test. `frontend/src/__tests__/quietScreen.test.tsx` holds it, and
+`frontend/tests/a11y.spec.ts` holds the author's own target: the single-label
+result for a clean document fits one screen at 1280 by 800 without scrolling.
+
+- One sentence per row, at most. Where a chip or a value's own label already says
+  something, the row does not say it again in prose.
+- One notice per screen, said once where it is first relevant, rather than in the
+  upload card and the results header and every affected row.
+- Cutting words is not licence to drop the assessment-prototype banner, the
+  author attribution, an FR-9 message that names a real problem, or the sentence
+  that says who decides. Those are asserted separately and stay.
 
 ### NFR-5 Accessibility
 

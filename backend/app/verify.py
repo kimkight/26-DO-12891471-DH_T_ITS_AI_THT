@@ -744,17 +744,18 @@ def _artwork_derived(name: str, comparison: Comparison) -> Comparison:
     return Comparison(
         outcome=Outcome.ARTWORK_DERIVED,
         score=None,
+        # **One sentence, and the shortening is a decision rather than tidying.**
+        # This reason ran to ninety words and said the same thing three times:
+        # that both sides came off one picture, that the agreement establishes
+        # nothing, and what to upload instead. The chip on the row already reads
+        # "Read from the artwork" and the row already carries "Label artwork
+        # (same source as the label)", so the prose was the third telling. What
+        # is left is the one fact neither of those states: that the row shows the
+        # artwork carries the value and nothing about what was declared.
         reason=(
-            f"{FIELD_LABELS[name]} was read from the label artwork inside the "
-            "application document, and that same artwork is the label being "
-            "checked here, because no photograph was uploaded. Both sides of "
-            "this row are one reading of one picture, so they can only agree "
-            "and the agreement establishes nothing. It is reported as read from "
-            "the artwork rather than as a match. What has been established is "
-            "that the artwork carries the value; what has not is that it agrees "
-            "with anything the applicant declared. Upload a photograph of the "
-            "bottle, or type the value from the filing, to make this a real "
-            "comparison."
+            f"{FIELD_LABELS[name]} was read from the artwork that is also the "
+            "label side here, so this shows the artwork carries the value and "
+            "nothing about what the applicant declared."
         ),
     )
 
