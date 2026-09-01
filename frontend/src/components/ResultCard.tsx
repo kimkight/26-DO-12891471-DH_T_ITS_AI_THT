@@ -26,6 +26,7 @@ import {
   sourceCaveat,
   sourceChipLabel,
 } from '../lib/applicationSources'
+import { reasonWithoutLimit } from '../lib/labelSearch'
 import { presentation } from '../lib/outcomes'
 import { sourceLabel } from '../lib/photos'
 import type { FieldResult, WarningResult } from '../types'
@@ -133,7 +134,15 @@ export function ResultCard({
         <p className="card__detail--note">{sourceCaveat(field.application_value_source)}</p>
       ) : null}
 
-      <p className="card__reason">{reasonWithout(field.reason, warning?.bold_type_note)}</p>
+      {/*
+        The limit of a search hit comes off here for the same reason the
+        bold-type note does: the API appends it to every searched row because a
+        caller with no interface has nowhere else to read it (OOS-4), and this
+        interface says it once above the rows instead of five times inside them.
+      */}
+      <p className="card__reason">
+        {reasonWithoutLimit(reasonWithout(field.reason, warning?.bold_type_note))}
+      </p>
 
       {isWarning && warning ? <WarningDetail warning={warning} /> : null}
     </article>

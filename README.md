@@ -218,7 +218,7 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, and the government warning near miss |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, the government warning near miss, and verification by search |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -235,8 +235,9 @@ and the first figures measured on the deployed target are below.**
 | `POST /api/classify` (sort an upload, read the application side, compare nothing) | Works: what each uploaded file was taken to be and why, plus the application values, so the interface can show both before a check runs. |
 | `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
 | `POST /api/read-application` (read one COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, including the label artwork embedded in it ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)), so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
-| Field extraction from label artwork | Works: `backend/app/ocr.py`, `backend/app/parse.py` |
-| Comparison against application data | Works: `backend/app/compare.py` |
+| Verification by search: is the declared value on the label? | Works: `backend/app/search.py`. The label is searched for the value the application declares, rather than a value being extracted from the label and compared. The row says where on the sheet it was found and shows the label's own printing of it. A hit shows the value is on the label; it does not show it is there as the brand, in the required type size, or on the required panel (OOS-5). See [ADR 0015](docs/adr/0015-verify-by-search.md) |
+| Field extraction from label artwork, as the fallback | Works: `backend/app/ocr.py`, `backend/app/parse.py`. Runs where the application supplied no value to search for |
+| Comparison against application data | Works: `backend/app/compare.py`. The numeric rules of FR-7, A-12 and A-13 are unchanged |
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py`. The comparison is exact; a difference of one or two characters is routed to human review with the character-level difference shown rather than reported as a mismatch, and is never a pass ([ADR 0012](docs/adr/0012-warning-near-miss.md)). |
 | Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and a note saying what was read and how |
 | Verification interface, values that were read | Works: each is a read-only line with where it came from, typed or the application form or the label artwork inside it. If every value was read, no editable field is shown at all; one collapsed disclosure holds them. A gap takes focus and is announced |
@@ -452,9 +453,14 @@ five fields did not come back at all.
   a degraded read. And the real COLA for that product gives Brand `DEL MAGUEY`
   and Fanciful `VIDA` while the largest text on the label is "Vida Clasico", so
   even a perfect transcription could not attribute the brand under the type-size
-  heuristic. Since v1.1.0 that heuristic declines rather than guessing on such a
-  label and the field reports not found (FR-1), which turns a confident wrong
-  answer into an honest absence and solves nothing about the attribution. **Bottle photography stays in the prototype as a
+  heuristic. v1.1.0 made that heuristic decline rather than guess, which turned a
+  confident wrong answer into an honest absence and solved nothing about the
+  attribution. **v1.2.0 stops needing the attribution**: the application declares
+  the brand, so the label is searched for it and found
+  ([ADR 0015](docs/adr/0015-verify-by-search.md)). What that establishes is that
+  the declared text is on the label, and not that it is on it as the brand, in the
+  required type size, or on the required panel; type size and prominence are
+  OOS-5 and are still not checked. **Bottle photography stays in the prototype as a
   best-effort path with honest failure reporting and is not claimed as a
   capability**; the input that works, and that every measured figure came from,
   is flat label artwork. The full statement, and what each of the four possible
