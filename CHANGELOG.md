@@ -244,6 +244,58 @@ application to the picture of the label."
 - The beverage type is still never compared against the label, and the embedded
   label artwork still cannot supply it: a label does not print a form answer.
 
+### Changed: alcohol content and net contents are presence checks, and they pass
+
+The author, on the released build: "Alcohol content and net content needs to
+also say 'match' or 'Contains' in green when these items are found on the
+artwork (that is the requirement right? to have the volume and alcohol content
+listed?)"
+
+It is the requirement, and the tool was throwing the finding away. 27 CFR
+5.63(a)(3), 4.32(b)(3) and 7.63(a)(3) put alcohol content on the label;
+5.63(b)(2), 4.32(b)(2) and 7.63(a)(5) put net contents there. When the artwork
+carried `42% ALC BY VOL`, the tool had established something real: the label
+carries an element the regulation requires. It reported that nothing had been
+established, because it was comparing the value against the picture it was read
+from. The circular part was the comparison, not the finding.
+
+- **A sixth outcome, `present`, and it is a pass**
+  ([ADR 0018](docs/adr/0018-presence-checks.md), FR-15). Where the application
+  declares no value, the row is a one-sided presence check: it carries the
+  label's value, no score, and a reason citing the section of 27 CFR it answers.
+- **The chip reads Contains, in the same green as Match, with its own shape.**
+  "Contains" is the stronger claim, not a hedge: Match says two things agreed,
+  and here one thing was found. Sharing a colour with Match is what makes the
+  word and the silhouette load-bearing rather than decorative, so Contains uses
+  a ring holding a dot, which no other outcome uses and which is nothing like a
+  tick in greyscale. If the author prefers the word "Match", it is one constant:
+  `label` on the `present` entry in `frontend/src/lib/outcomes.ts`.
+- **No application side on the row at all**, not even a "not supplied"
+  placeholder. The row used to print the identical string in both columns,
+  because the value had been read off the artwork and written into the
+  application side, and an agent reading two identical values reads a
+  comparison. There was none.
+- **Both paths exist and both are tested.** Where the application does declare
+  the value, by typing or from a form edition that carries it, the row is a
+  two-sided comparison reporting match or does not match exactly as before.
+  FR-11's precedence is unchanged.
+- **Absence is still a finding**, reported against the regulation with both
+  container carve-outs in the reason, and a spirits label whose percentage and
+  proof disagree is still the A-12 review: a contradiction is the more specific
+  finding and the presence check does not overrule it.
+- **The summary line reads "5 of 5 checks passed"**, counting comparisons and
+  presence checks together. It replaces "3 of 3 verifiable fields match; 2 read
+  from the artwork only", which was the honest line while those rows were
+  circular comparisons.
+- **ADR 0013 is amended, not deleted.** The `artwork_derived` state narrows to
+  what it was built for: a field with no presence rule, read off the artwork, on
+  a submission carrying no photograph. It should be rare, and on the author's own
+  filing it does not arise, because that form states the class or type in item 9.
+  Whether the class or type should become a presence check too is
+  [OQ-28](docs/OPEN_QUESTIONS.md#oq-28), open rather than guessed: the citations
+  have not been fetched, and a presence check for it would rest on the type-size
+  ranking ADR 0015 exists to work around.
+
 ### Performance: the artwork is read once, in one request
 
 The author measured the deployed build on 2026-09-01 with her own mezcal COLA

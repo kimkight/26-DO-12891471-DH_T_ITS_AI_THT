@@ -72,14 +72,14 @@ describe('the live region', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('status', { name: 'Check result' })).toHaveTextContent(
-        '5 of 5 fields match',
+        '5 of 5 checks passed',
       )
     })
   })
 
   it('names what needs attention and stays silent about counts that are zero', () => {
     const spoken = announcement(['match', 'match', 'needs_review', 'mismatch', 'match'])
-    expect(spoken).toContain('3 of 5 fields match.')
+    expect(spoken).toContain('3 of 5 checks passed.')
     expect(spoken).toContain('1 needs your review.')
     expect(spoken).toContain('1 does not match.')
     expect(spoken).not.toContain('was not compared')
@@ -108,7 +108,7 @@ describe('the timing is off the screen (2026-08-31)', () => {
     render(<SingleLabelTab />)
     await submitOneLabel(user)
 
-    await waitFor(() => expect(screen.getByText('5 of 5 fields match')).toBeVisible())
+    await waitFor(() => expect(screen.getByText('5 of 5 checks passed')).toBeVisible())
     expect(document.querySelector('p.timing')).toBeNull()
     expect(screen.queryByText(/Checked in/)).not.toBeInTheDocument()
     expect(screen.queryByText(/Where the time went/)).not.toBeInTheDocument()

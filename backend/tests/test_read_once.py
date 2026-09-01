@@ -145,12 +145,22 @@ class TestTheCheckStillReadsTheArtwork:
         assert document["artwork_images_read"] == 1
 
     def test_alcohol_content_and_net_contents_are_filled_by_the_check(self, with_artwork):
-        """The two values A-17 says the form does not carry (ADR 0017)."""
-        fields = {entry["name"]: entry for entry in verify(with_artwork)["fields"]}
+        """The two values A-17 says the form does not carry (ADR 0017).
+
+        They arrive on the label side of the row, which is where they belong:
+        the form declared neither, so ADR 0018 reports each as a presence check
+        against 27 CFR rather than as a comparison against nothing. What matters
+        for this decision is that the check read them at all, from artwork the
+        prefill pass deliberately left alone.
+        """
+        body = verify(with_artwork)
+        fields = {entry["name"]: entry for entry in body["fields"]}
+        parsed = {entry["name"]: entry for entry in body["application_document"]["fields"]}
 
         for name in ("alcohol_content", "net_contents"):
-            assert fields[name]["application_value"], f"{name} should be filled by the check"
-            assert fields[name]["application_value_source"] == "parsed_from_artwork"
+            assert fields[name]["label_value"], f"{name} should be read by the check"
+            assert fields[name]["outcome"] == "present"
+            assert parsed[name]["source"] == "embedded_artwork"
 
     def test_the_artwork_is_still_the_label_side(self, with_artwork):
         assert verify(with_artwork)["label_source"] == "application_artwork"

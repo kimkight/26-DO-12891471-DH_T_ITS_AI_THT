@@ -17,7 +17,19 @@
  * label side, so the two values compared are one reading of one picture. It is
  * excluded from every count of fields that match, and it never carries a score.
  */
-export type Outcome = 'match' | 'needs_review' | 'mismatch' | 'not_compared' | 'artwork_derived'
+export type Outcome =
+  | 'match'
+  | 'needs_review'
+  | 'mismatch'
+  | 'not_compared'
+  /**
+   * A passing one-sided finding (FR-15, ADR 0018): 27 CFR requires this element
+   * on the label and the label carries it. The row has a label value and no
+   * application value, because the application declared none, and no score,
+   * because a score is a similarity between two strings.
+   */
+  | 'present'
+  | 'artwork_derived'
 
 /**
  * Where an application value came from (FR-11, ADR 0008, ADR 0010).

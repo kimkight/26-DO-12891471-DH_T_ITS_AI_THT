@@ -102,12 +102,18 @@ def printout_with_artwork(**spec_overrides) -> bytes:
 class TestTheFormIsSilentAndTheArtworkIsNot:
     """The author's own case, and the one SC-3's batch path is made of."""
 
-    def test_both_values_are_filled_and_neither_is_called_a_match(self):
-        """The decision, in one assertion each way.
+    def test_the_two_presence_fields_are_presence_checks_and_they_pass(self):
+        """**Amended by ADR 0018, and this is the amendment.**
 
-        The values arrive, so no agent is asked to type what the tool already
-        read; and neither row claims agreement, because both sides of it are one
-        reading of one picture.
+        These two rows used to be `artwork_derived`: the value was read off the
+        artwork, written into the application column, and compared with itself.
+        ADR 0013 was right that such a comparison establishes nothing, and wrong
+        to keep presenting it as a comparison at all.
+
+        27 CFR requires alcohol content and net contents on the label. The label
+        carries both, which is a real, positive, non-circular finding, and it is
+        reported as one: a one-sided presence check with no application side,
+        and a passing outcome.
         """
         body = submit(document_only())
         by_name = rows(body)
@@ -115,49 +121,65 @@ class TestTheFormIsSilentAndTheArtworkIsNot:
         assert body["label_source"] == "application_artwork"
         for name in ("alcohol_content", "net_contents"):
             entry = by_name[name]
-            assert entry["application_value"], f"{name} was not filled from the artwork"
             assert entry["label_value"], f"{name} was not read off the label"
-            assert entry["outcome"] == "artwork_derived"
-            # Never a match, and never a score. A similarity of 100 between a
-            # string and itself would read as evidence of the one thing that
-            # was not established.
+            assert entry["outcome"] == "present"
+            # No application side, because there is nothing on that side. A row
+            # printing the same string twice is what invited the confusion.
+            assert entry["application_value"] is None
+            assert entry["application_value_source"] == "absent"
+            # No score. A score is a similarity between two strings and there is
+            # only one string here.
             assert entry["score"] is None
-            assert entry["application_value_source"] == "parsed_from_artwork"
 
-    def test_the_row_says_where_the_value_came_from_without_a_footnote(self):
-        """An agent must see why this row is different, from the row itself.
+    def test_the_presence_row_cites_the_regulation_it_answers(self):
+        """The row says which requirement it just satisfied, from the row itself.
 
-        In one sentence since v1.2.0. The reason ran to ninety words and said the
-        same thing three times, and two of the three tellings are already on the
-        row without prose: the outcome chip reads "Read from the artwork" and the
-        row carries "Label artwork (same source as the label)". What is asserted
-        here is the one thing neither of those states.
+        An agent has to be able to see, without reading anything else on the
+        page, that this is a check of the label against 27 CFR rather than a
+        comparison against the form.
         """
         by_name = rows(submit(document_only()))
         reason = by_name["alcohol_content"]["reason"]
-        assert "artwork that is also the label side" in reason
-        assert "nothing about what the applicant declared" in reason
-        # One sentence, and short enough to read at a glance (NFR-4).
-        assert reason.count(".") == 1
-        assert len(reason.split()) < 40
 
-    def test_the_tally_counts_only_the_fields_that_could_have_disagreed(self):
-        """The summary line stops saying five of five.
+        assert "27 CFR 5.63(a)(3)" in reason
+        assert "The application declared no value" in reason
+        assert "rather than a comparison" in reason
 
-        The brand name comes off the form's own text layer and the warning is
-        checked against 27 CFR 16.21, so both are real comparisons. The three
-        the artwork supplied are not, and the count says so rather than
-        absorbing them.
+    def test_the_tally_counts_presence_checks_alongside_comparisons(self):
+        """The summary line counts both kinds of check.
+
+        It used to read "3 of 3 verifiable fields match; 2 read from the artwork
+        only", which was the honest thing to say while the two presence rows were
+        circular comparisons. They are not comparisons any more, so they count.
         """
         body = submit(document_only())
         outcomes = [entry["outcome"] for entry in body["fields"]]
-        verifiable = [outcome for outcome in outcomes if outcome != "artwork_derived"]
-        derived = [outcome for outcome in outcomes if outcome == "artwork_derived"]
 
         assert len(outcomes) == 5
-        assert derived, "nothing was reported as read from the artwork"
-        assert verifiable.count("match") == len(verifiable)
-        assert len(verifiable) + len(derived) == 5
+        assert outcomes.count("present") == 2
+        # The brand name off the form's text layer and the warning against
+        # 27 CFR 16.21: two real comparisons, both matching.
+        assert outcomes.count("match") == 2
+
+    def test_the_artwork_derived_state_survives_where_it_still_applies(self):
+        """ADR 0013 is narrowed by ADR 0018, not deleted.
+
+        This fixture's class or type designation is not on the printout's text
+        layer, so it is read off the artwork and compared against that same
+        artwork. That is exactly the case ADR 0013 was built for, and it is not a
+        presence field: 27 CFR requires alcohol content and net contents on the
+        label, which is what makes those two answerable one-sidedly, and this
+        tool asserts no such rule for the class or type.
+
+        It should be rare after ADR 0018, and on the author's own filing it does
+        not arise at all, because that form states the class or type in item 9.
+        Rare is not never, and the state has to keep working.
+        """
+        entry = rows(submit(document_only()))["class_type"]
+
+        assert entry["outcome"] == "artwork_derived"
+        assert entry["score"] is None
+        assert entry["application_value_source"] == "parsed_from_artwork"
 
     def test_a_photograph_makes_the_same_row_a_real_comparison_again(self):
         """The rule keys on provenance, not on a field name (ADR 0013).
@@ -189,8 +211,9 @@ class TestATypedOrStatedValueStillWins:
         assert entry["application_value"] == "45"
         assert entry["outcome"] == "match"
         # And the field beside it, which the form still does not state, is not
-        # dragged along with it.
-        assert by_name["net_contents"]["outcome"] == "artwork_derived"
+        # dragged along with it: it is the presence check ADR 0018 makes it.
+        assert by_name["net_contents"]["outcome"] == "present"
+        assert by_name["net_contents"]["application_value"] is None
 
     def test_a_typed_value_beats_the_artwork_and_is_compared_normally(self):
         """A value the agent typed is independent evidence, so it is compared."""
@@ -266,10 +289,18 @@ class TestTheLabelOnlyChecksNeedNoApplicationValue:
         assert result.outcome is Outcome.NEEDS_REVIEW
         assert "contradicts itself" in result.reason
 
-    def test_a_consistent_proof_with_no_application_value_is_still_not_compared(self):
-        """FR-2 is untouched where the label says nothing contradictory."""
+    def test_a_consistent_proof_with_no_application_value_is_a_presence_check(self):
+        """**Amended by ADR 0018.** It used to report "not compared".
+
+        Nothing about the proof cross-check changes: it ran, it found no
+        contradiction, and it said nothing. What changes is the row underneath
+        it, which used to report FR-2's "the application supplied no value" and
+        now reports the finding that was there all along, that the label carries
+        the alcohol content 27 CFR requires.
+        """
         result = compare_abv("45% Alc./Vol. (90 Proof)", None)
-        assert result.outcome is Outcome.NOT_COMPARED
+        assert result.outcome is Outcome.PRESENT
+        assert result.score is None
 
     @pytest.mark.parametrize(
         ("compare", "section"),

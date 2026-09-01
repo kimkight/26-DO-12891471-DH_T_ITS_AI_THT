@@ -18,7 +18,7 @@
 import type { BatchLine, Outcome } from '../types'
 
 /** The shapes. Deliberately different silhouettes, not one shape recoloured. */
-export type Glyph = 'check' | 'triangle' | 'cross' | 'dash' | 'artwork'
+export type Glyph = 'check' | 'triangle' | 'cross' | 'dash' | 'artwork' | 'carried'
 
 export interface OutcomePresentation {
   /** The word an agent reads. Plain language, no jargon (NFR-4). */
@@ -55,6 +55,31 @@ const PRESENTATIONS: Record<Outcome, OutcomePresentation> = {
     spoken: 'was not compared',
   },
   /*
+   * FR-15, ADR 0018. A passing one-sided finding, and the word carries the
+   * whole of the difference from a match.
+   *
+   * **"Contains" is the stronger claim, not the weaker one.** "Match" says two
+   * things agreed. Here one thing was found, and what it establishes is that the
+   * label carries an element 27 CFR requires it to carry, which is exactly what
+   * the agent is checking. Calling that a match would claim an agreement that
+   * was never tested, on a row that has only one side.
+   *
+   * It is styled like a pass, in the same green as Match, because it is one. So
+   * the shape has to do the separating, and it does: a ring with a dot inside
+   * says "the label carries this", and no other outcome uses it. Under a
+   * greyscale check Contains and Match differ by both word and silhouette,
+   * which is what NFR-5 asks and what a shared colour makes load-bearing.
+   *
+   * If the author prefers the word "Match" here, this `label` is the one
+   * constant to change; nothing else keys on the word.
+   */
+  present: {
+    label: 'Contains',
+    glyph: 'carried',
+    tone: 'match',
+    spoken: 'is on the label, as the regulation requires',
+  },
+  /*
    * FR-14, ADR 0013. Not a verdict, and worded so that it cannot be read as
    * one: "Read from the artwork" says what happened rather than how it went.
    * Its own silhouette, a picture frame, because it is a statement about where
@@ -83,6 +108,7 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
     needs_review: 0,
     mismatch: 0,
     not_compared: 0,
+    present: 0,
     artwork_derived: 0,
   }
   for (const outcome of outcomes) {
@@ -92,35 +118,38 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
 }
 
 /**
- * The summary line, which stops claiming a denominator it does not have
- * (FR-14, ADR 0013).
+ * The summary line: how many checks passed, out of how many were made
+ * (FR-15, ADR 0018; FR-14, ADR 0013).
  *
- * **"5 of 5 fields match" was the false half of the old line.** On a submission
- * where the agent uploaded only the application document, some of those five
- * rows compared a value read off the label artwork against that same artwork.
- * Counting them alongside the rows that were genuinely checked inflates the
- * denominator with fields that could not have come out any other way, which is
- * exactly the false assurance the artwork-derived state exists to prevent.
+ * **It counts two kinds of check together, because there are two kinds.** A
+ * comparison passes when the label agrees with what the application declared. A
+ * presence check passes when the label carries an element 27 CFR requires and
+ * the application declared nothing to compare it against. Both establish
+ * something; neither is worth more than the other on the face of a summary
+ * line; and an agent reading "5 of 5 checks passed" can see which row was which
+ * from the chips underneath.
  *
- * So the count is over the verifiable rows only, and the rows that were merely
- * read are stated beside it rather than hidden: "3 of 3 verifiable fields
- * match; 2 read from the artwork only". Where nothing was artwork-derived,
- * which is every submission carrying a photograph, the second clause is absent
- * and the word "verifiable" with it: the line reads as it always did, because
- * there is nothing to qualify.
+ * It replaces "3 of 3 verifiable fields match; 2 read from the artwork only",
+ * which was the honest line while those two rows were circular comparisons.
+ * They are presence checks now, so they count, and the denominator is the whole
+ * result again.
+ *
+ * **The artwork-derived clause survives, narrowed.** A row that really is one
+ * reading of one picture compared with itself still establishes nothing, and it
+ * still may not be counted as a check that passed. After ADR 0018 that is rare:
+ * it needs a field with no presence rule, read off the artwork, on a submission
+ * with no photograph. Where it happens the line says so rather than absorbing
+ * it.
  */
 export function summary(outcomes: Outcome[]): string {
   const counts = tally(outcomes)
   const derived = counts.artwork_derived
-  const verifiable = outcomes.length - derived
-  if (derived === 0) {
-    return `${counts.match} of ${outcomes.length} fields match`
-  }
-  const noun = verifiable === 1 ? 'verifiable field' : 'verifiable fields'
-  const verb = verifiable === 1 ? 'matches' : 'match'
-  return (
-    `${counts.match} of ${verifiable} ${noun} ${verb}; ` + `${derived} read from the artwork only`
-  )
+  const passed = counts.match + counts.present
+  const checks = outcomes.length - derived
+  const noun = checks === 1 ? 'check' : 'checks'
+  const line = `${passed} of ${checks} ${noun} passed`
+  if (derived === 0) return line
+  return `${line}; ${derived} read from the artwork only`
 }
 
 /**
@@ -150,6 +179,16 @@ export function announcement(outcomes: Outcome[]): string {
   }
   if (counts.not_compared > 0) {
     parts.push(`${counts.not_compared} was not compared.`)
+  }
+  if (counts.present > 0) {
+    // Said in full, because the chip's one word is not on offer to a listener.
+    // What a presence check establishes is different from what a comparison
+    // establishes, and an agent hearing the result is entitled to the
+    // difference (FR-15, NFR-5).
+    parts.push(
+      `${counts.present} ${counts.present === 1 ? 'is' : 'are'} on the label as the ` +
+        'regulation requires, with nothing declared on the application to compare against.',
+    )
   }
   if (counts.artwork_derived > 0) {
     parts.push(
@@ -182,7 +221,10 @@ export function rowOutcome(line: BatchLine): Outcome | 'error' {
   // evidence at all, and this is a field with evidence that could not disagree.
   // A row carrying one is never reported as fully matching (FR-14, ADR 0013).
   if (outcomes.includes('artwork_derived')) return 'artwork_derived'
-  return 'match'
+  // Every row passed. The chip says which kind of pass it was: a row of nothing
+  // but presence checks did not compare anything, and claiming "Match" for it
+  // would be the row asserting an agreement it never tested (FR-15, ADR 0018).
+  return outcomes.includes('match') ? 'match' : 'present'
 }
 
 /** How many of a row's fields carry one outcome, for the table's count columns. */

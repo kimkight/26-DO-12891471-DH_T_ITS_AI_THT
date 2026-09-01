@@ -1478,3 +1478,39 @@ not.
 **What would reopen it:** a Tesseract release that changes how word confidence
 behaves under downsampling, or a real filing on which the check answers
 backwards at 0.50. Either means re-running the sweep before trusting the scale.
+
+## OQ-28
+
+**Should the class or type designation also be a presence check?**
+
+**Status: Open, raised 2026-09-01 by [ADR 0018](adr/0018-presence-checks.md).**
+
+**Why it is worth asking.** 27 CFR requires a class or type designation on the
+label as surely as it requires alcohol content and net contents, so the argument
+FR-15 makes for those two runs the same way for this one: where the application
+declares nothing, whether the label carries the designation is still a real,
+answerable, non-circular question.
+
+**Why it was not decided with FR-15.** Two things are missing that the other two
+fields have. The regulation citations were fetched, quoted and checked for those
+two on 2026-08-30 and no equivalent work has been done here; a section number
+written from memory is exactly what CONTRIBUTING.md forbids. And more
+substantially, "the label carries a class or type designation" is not a question
+this tool can currently answer. Alcohol content and net contents are recognized
+by pattern, and a pattern either matches or does not. A class or type
+designation is recognized by type size, which is the ranking that
+[ADR 0015](adr/0015-verify-by-search.md) exists to work around because it read
+the fanciful name as the brand on the author's own artwork. A presence check
+built on a ranking that declines would report "the label does not carry a class
+or type" about a label that plainly does.
+
+**What would answer it:** the citation work, plus a way of establishing that a
+class or type designation is present that does not depend on the type-size
+ranking. The second is the harder half and it is the same problem OOS-5 and
+ADR 0015 circle.
+
+**Who can answer:** the author, with the regulation text; the recognition half
+needs a measurement over real artwork, which is OQ-21's territory.
+**Blocks:** nothing. The field is compared normally wherever the application
+declares it, and reports "not compared" where it does not, which is what it did
+before FR-15 and is not wrong, only incomplete.

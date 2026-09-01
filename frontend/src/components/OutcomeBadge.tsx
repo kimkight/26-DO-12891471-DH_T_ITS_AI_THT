@@ -23,6 +23,18 @@ function Icon({ glyph }: { glyph: Glyph }) {
     // A picture in a frame: the one shape that says "this came off the
     // artwork" rather than saying how a comparison went (FR-14, ADR 0013).
     artwork: <path d="M2.5 3.5h11v9h-11z M2.5 11 6 7.5l2.5 2.5L10.5 8l3 3 M5.5 6.4v.01" />,
+    /*
+     * A ring with a dot in it: the label carries this (FR-15, ADR 0018).
+     *
+     * **This shape is load-bearing in a way the others are not.** Contains is
+     * styled in the same green as Match, because both are passes, so colour
+     * cannot separate them and the silhouette has to. A ring holding something
+     * is nothing like a tick, at 16 pixels or in greyscale, which is the test
+     * NFR-5 sets.
+     */
+    carried: (
+      <path d="M8 2.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 1 0 0-11.6 M8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 1 0 0-4.2" />
+    ),
   }
   return (
     <svg
