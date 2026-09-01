@@ -21,6 +21,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import App from '../App'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import {
   applicationDocument,
@@ -124,9 +125,22 @@ describe('one control for everything', () => {
     expect(input).toHaveAttribute('multiple')
   })
 
-  it('says the files are read here and not sent to TTB', () => {
-    render(<SingleLabelTab />)
-    expect(screen.getByText(/not sent to TTB or kept/i)).toBeInTheDocument()
+  it('says the files are not stored, above the masthead and in the footer', () => {
+    /*
+     * **Amended by US-28.** The upload card used to say it too, in the fourth
+     * sentence of a four-sentence paragraph. It is said in the two places the
+     * brief keeps exactly as they are, the persistent banner and the footer, and
+     * answered in full on the Help tab under "What happens to my files?".
+     *
+     * `<App />` rather than `<SingleLabelTab />`, because the two places that
+     * carry it are the page's own chrome, which is what makes them persistent.
+     */
+    render(<App />)
+
+    // Twice, deliberately: the banner above the masthead and the footer. Both
+    // are named in the brief as staying exactly as they are.
+    expect(screen.getAllByText(/Nothing you upload is stored/)).toHaveLength(2)
+    expect(screen.getByText(/results live in this page until you leave it/)).toBeInTheDocument()
   })
 
   it('sends what was uploaded to the classify endpoint, not to the check', async () => {
@@ -309,7 +323,11 @@ describe('what the form does not carry', () => {
     stubDocument(FULL_DOCUMENT)
     render(<SingleLabelTab />)
     await attachApplication(user)
-    await waitFor(() => expect(screen.getByText(/class or type code as 141/i)).toBeInTheDocument())
+    // A line rather than a sentence since US-28: the name, the value, and a chip
+    // saying it is not compared. Why it is not compared is a Help entry.
+    await waitFor(() => expect(screen.getByText('Class or type code')).toBeInTheDocument())
+    expect(screen.getByText('141')).toBeInTheDocument()
+    expect(screen.queryByText(/The description is what gets compared/i)).not.toBeInTheDocument()
   })
 })
 

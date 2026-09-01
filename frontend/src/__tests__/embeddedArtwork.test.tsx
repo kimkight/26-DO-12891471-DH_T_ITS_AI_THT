@@ -103,7 +103,7 @@ const ARTWORK_CLASSIFICATION = classification({
 })
 
 describe('the upload tells the agent what came out of the pictures', () => {
-  it('names the artwork values and says no photo is needed', async () => {
+  it('says nothing standing about the pictures, because both lines went to Help', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) =>
@@ -117,12 +117,24 @@ describe('the upload tells the agent what came out of the pictures', () => {
 
     await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
 
-    await waitFor(() =>
-      expect(
-        screen.getByText(/were read from the label artwork inside this application/i),
-      ).toBeInTheDocument(),
-    )
-    expect(screen.getByText(/you do not have to add an image/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/values were filled in/i)).toBeInTheDocument())
+
+    /*
+     * **Amended by US-28.** Two sentences used to appear here: which values came
+     * off the pictures, and that the application carries its own artwork so no
+     * image is needed. Both are answers to standing questions rather than
+     * statements about this document, and both are on the Help tab, under "What
+     * do I upload?" and "Why does it sometimes say a value came from the label
+     * artwork inside the application?".
+     *
+     * What tells an agent that a value came off a picture on this screen is the
+     * chip beside the value, which says it in four words, and the result row's
+     * own source line. Neither is prose.
+     */
+    expect(
+      screen.queryByText(/were read from the label artwork inside this application/i),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/you do not have to add an image/i)).not.toBeInTheDocument()
     // The bottle caveat is not repeated here. The results panel states it once,
     // where the check it qualifies is being read (2026-08-31).
     expect(screen.queryByText(/photo of a bottle/i)).not.toBeInTheDocument()
@@ -150,7 +162,7 @@ describe('a result checked against the application’s own artwork', () => {
     render(<SingleLabelTab />)
 
     await user.upload(screen.getByLabelText('Files for this label'), pdfFile())
-    await waitFor(() => expect(screen.getByText(/you do not have to add an image/i)).toBeVisible())
+    await waitFor(() => expect(screen.getByText(/values were filled in/i)).toBeVisible())
     await user.click(screen.getByRole('button', { name: /check this label/i }))
 
     await waitFor(() => expect(screen.getByText(ARTWORK_LABEL_LINE)).toBeInTheDocument())

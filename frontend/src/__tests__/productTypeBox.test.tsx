@@ -59,7 +59,7 @@ describe('a value read from a ticked box says so', () => {
   it('tells the agent they may change it, like every other parsed value', () => {
     const mark = fieldSourceMark('read_from_tick')
     expect(mark).toContain('item 5')
-    expect(mark).toContain('Change it if it is wrong')
+    expect(mark).toContain('change it if it is wrong')
   })
 
   it('shows the chip beside the value that was read', () => {

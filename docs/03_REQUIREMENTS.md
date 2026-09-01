@@ -894,6 +894,30 @@ result for a clean document fits one screen at 1280 by 800 without scrolling.
   author attribution, an FR-9 message that names a real problem, or the sentence
   that says who decides. Those are asserted separately and stay.
 
+**A sentence rule, and a place for the sentences to go (2026-09-01, US-28).** The
+author, on the build that word budget produced: "this has way too many words on
+the screen. create a help me tab and put all of the text you are removing plus
+some FAQs on that tab." A word budget stops the panel growing back in bulk; it
+does not stop one long paragraph replacing three short ones, and the budget was
+being met by a screen that still explained itself at every control.
+
+- From the top of the upload card to the last result row, no explanatory
+  paragraph runs to more than one sentence.
+  `frontend/src/__tests__/helpTab.test.tsx` asserts it on the empty screen and
+  on a completed check, and names its exemptions: FR-9's messages, the
+  government warning card's own detail, and "This tool recommends. You decide."
+- A third segment of the tab strip, **Help**, carries what came off. It is a
+  reading page: headings, short paragraphs, no controls except links, and no
+  requirement identifier anywhere on it. A caveat printed on every check is read
+  on none of them; the same sentence, answered as a question on a page a reader
+  came to read, is worth more than it ever was in the middle of somebody's work.
+- A control that is inert says why in a few words rather than in a paragraph or
+  in silence. An agent still has to know that the button is off because there is
+  no file.
+- The banner, the footer and FR-9's messages do not move to Help. See the
+  criterion above; a quieter screen that achieved itself by hiding a failure
+  would be worse than the wordy one.
+
 ### NFR-5 Accessibility
 
 **Priority:** Must

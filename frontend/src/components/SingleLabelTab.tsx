@@ -109,7 +109,6 @@ import type { SingleOutcome } from '../lib/api'
 import { typedValues } from '../lib/applicationFields'
 import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
-import { PRESENCE_LIMIT, anySearched } from '../lib/labelSearch'
 import { announcement, summary } from '../lib/outcomes'
 import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { EMPTY_APPLICATION } from '../types'
@@ -380,12 +379,14 @@ export function SingleLabelTab() {
           <button className="button button--primary" type="submit" disabled={!canCheck}>
             {checking ? 'Checking...' : 'Check this label'}
           </button>
-          {!canCheck ? (
-            <p className="field__hint">
-              Upload something to turn on the check: the label application, an image of the label,
-              or both.
-            </p>
-          ) : null}
+          {/*
+            A short label, not nothing (US-28). The agent still has to know why
+            the button is inert, and the reason it is inert is one word long:
+            there is no file. What the button takes, and why either kind of file
+            is enough on its own, is a question, and questions are answered on
+            the Help tab.
+          */}
+          {!canCheck ? <p className="field__hint">Upload a file to check.</p> : null}
         </form>
       </section>
 
@@ -420,14 +421,18 @@ export function SingleLabelTab() {
             */}
             <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
             {/*
-              The limit of what a search establishes, said once (ADR 0015). Each
-              row that was decided by searching says where on the label the
-              declared value was found; this says what that does and does not
-              prove. Once, above the rows, rather than on each of them.
+              The limit of what a search establishes is on the Help tab now
+              (US-28), under "Why is the brand name found but not judged for
+              type size or placement?". It is a true and important sentence and
+              it is not a sentence an agent needs in the middle of reading five
+              results; it is the same sentence every time, on every check, and a
+              caveat printed on every check is read on none of them.
+
+              `reasonWithoutLimit` still runs on each row. The API appends the
+              limit to every searched reason because a caller with no interface
+              has nowhere else to read it (OOS-4), and stripping it here is what
+              keeps it from arriving on the row by the back door.
             */}
-            {anySearched(result.fields.map((field) => field.reason)) ? (
-              <p className="footnote footnote--search">{PRESENCE_LIMIT}</p>
-            ) : null}
             {result.label_source === 'application_artwork' ? (
               <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
             ) : null}
@@ -448,10 +453,7 @@ export function SingleLabelTab() {
 
         {!result && !outcome?.error && !checking ? (
           <p className="placeholder">
-            Upload the label application, an image of the label, or both, then select
-            <strong> Check this label</strong>. The five results appear here. Nothing to upload for
-            the application side? Open <strong>Or type the application values</strong> and type them
-            instead.
+            Upload a file and select <strong>Check this label</strong>; the results appear here.
           </p>
         ) : null}
       </section>

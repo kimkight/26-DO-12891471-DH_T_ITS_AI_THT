@@ -244,6 +244,44 @@ application to the picture of the label."
 - The beverage type is still never compared against the label, and the embedded
   label artwork still cannot supply it: a label does not print a form answer.
 
+### Added: a Help tab, and the check screen gets quiet
+
+The author, on the build the word budget produced: "this has way too many words
+on the screen. create a help me tab and put all of the text you are removing plus
+some FAQs on that tab."
+
+The budget added earlier in this release stops the panel growing back in bulk. It
+does not stop one long paragraph replacing three short ones, and it was being met
+by a screen that still explained itself at every control: six paragraphs of
+standing caveat, each true, each on every check an agent ever runs.
+
+- **A third segment of the tab strip, Help** (US-28). A reading page: headings,
+  short paragraphs, no controls except links, and no requirement identifier
+  anywhere on it. It answers what to upload, what each outcome means including
+  the new Contains, why a value can come from the artwork inside the application,
+  why the brand name is found but not judged for type size, why a bottle photo
+  reads worse than filed artwork, where beverage type comes from, what happens to
+  your files, and what this tool is not.
+- **Six paragraphs come off the check screens** and are rewritten for a reader
+  rather than pasted across. `helpTab.test.tsx` asserts each one absent from the
+  check screen and its replacement present on Help.
+- **The empty-state prompt becomes a short label**, "Upload a file to check.",
+  rather than nothing. The agent still has to know why the button is inert.
+- **The fanciful name and the class or type code become lines, not sentences.**
+  Each is now the name, the value, and a chip reading "Not compared". They are
+  real values the parser read off the document in front of the agent, so they
+  stay as data; why they are not compared is a Help entry. That is the quieter of
+  the two options the brief offered.
+- **A sentence rule, asserted.** From the top of the upload card to the last
+  result row, no explanatory paragraph runs to more than one sentence. Its
+  exemptions are listed in the test and each is something that stays exactly as
+  it is: FR-9's messages, the government warning card's own detail, and "This
+  tool recommends. You decide."
+- **Nothing that names a real problem moved.** The persistent prototype banner,
+  the footer and the FR-9 error messages are unchanged and are not on Help. A
+  quieter screen that achieved itself by hiding a failure would be worse than the
+  wordy one.
+
 ### Changed: alcohol content and net contents are presence checks, and they pass
 
 The author, on the released build: "Alcohol content and net content needs to
