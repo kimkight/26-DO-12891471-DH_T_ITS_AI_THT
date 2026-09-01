@@ -244,6 +244,31 @@ application to the picture of the label."
 - The beverage type is still never compared against the label, and the embedded
   label artwork still cannot supply it: a label does not print a form answer.
 
+### Added: a reset, on both views that hold state
+
+The author: "add a reset option that clears the information so another
+application can be uploaded." An agent working through a stack of applications
+had no way back to the empty state but to reload the page.
+
+- **One control on the single-label view** (US-29), labelled "Clear and start
+  another label", beside the results rather than at the top of the form. It
+  clears the uploaded files, the parsed values, every typed field and the results
+  together, closes the disclosure if it was open, and is offered only when there
+  is something to clear.
+- **Focus moves to the file picker and the live region says the form was
+  cleared.** Not polish: this control removes the element that had focus, which
+  is itself, and one that left focus on the document body would fail exactly the
+  agent who could not see that the screen had emptied.
+- **No confirmation dialog.** Nothing is stored, so nothing is lost that cannot
+  be re-uploaded, and a dialog is one more thing in the way.
+- **The batch view got one too**, because it holds state: both pickers, the rows
+  and any error, with a running stream stopped first so that a reset cannot leave
+  a table filling itself back up.
+- **The picker is remounted rather than emptied by hand.** A file input's value
+  is not React's to clear, and choosing a file identical to the one already in it
+  fires no event, so an agent who cleared by mistake could not re-choose the file
+  they had.
+
 ### Added: a Help tab, and the check screen gets quiet
 
 The author, on the build the word budget produced: "this has way too many words

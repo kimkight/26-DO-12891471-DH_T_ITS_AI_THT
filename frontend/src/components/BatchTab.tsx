@@ -23,7 +23,7 @@
  * Rows are appended as they arrive. A batch that fails halfway keeps every row
  * it received, because discarding completed work is the failure NFR-2 names.
  */
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BatchTable } from './BatchTable'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
@@ -42,7 +42,45 @@ export function BatchTab() {
   const [total, setTotal] = useState(0)
   const [running, setRunning] = useState(false)
   const [error, setError] = useState<UiError | null>(null)
+  /*
+   * A remount key for the two pickers (US-29). The batch view holds state, so
+   * it gets a reset like the single-label view; the pickers are remounted for
+   * the same reason the single-label one is, because a file input's own value
+   * is not React's to clear and an agent choosing the same file again has to
+   * get an event.
+   */
+  const [generation, setGeneration] = useState(0)
+  const [cleared, setCleared] = useState('')
   const abortRef = useRef<AbortController | null>(null)
+  const pickerRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Clear the batch and go back to the empty state (US-29).
+   *
+   * Stops a running stream first. A reset that left one open would keep
+   * appending rows to a table the agent has just emptied, which is the one way
+   * this control could do something worse than nothing.
+   *
+   * No confirmation, for the reason the single-label one has none: nothing is
+   * stored, and the CSV button beside it is how results leave this page. The
+   * footnote above it already says so.
+   */
+  function reset() {
+    abortRef.current?.abort()
+    setImages([])
+    setDocuments([])
+    setLines([])
+    setTotal(0)
+    setRunning(false)
+    setError(null)
+    setCleared('The batch was cleared. Choose the next set of files.')
+    setGeneration((previous) => previous + 1)
+  }
+
+  useEffect(() => {
+    if (generation === 0) return
+    pickerRef.current?.focus()
+  }, [generation])
 
   async function submit(event: React.FormEvent) {
     event.preventDefault()
@@ -54,6 +92,7 @@ export function BatchTab() {
     setError(null)
     setLines([])
     setTotal(0)
+    setCleared('')
 
     const failure = await verifyBatch(
       images,
@@ -73,6 +112,9 @@ export function BatchTab() {
   const pairing = pair(images, documents)
   const chosen = images.length > 0 || documents.length > 0
   const pairingSentence = describePairing(pairing)
+
+  /* Anything a reset would clear, derived rather than tracked. */
+  const clearable = images.length > 0 || documents.length > 0 || lines.length > 0 || error !== null
 
   const done = lines.length
   const counts = {
@@ -102,6 +144,8 @@ export function BatchTab() {
 
         <form onSubmit={submit} noValidate>
           <DropZone
+            key={`images-${generation}`}
+            inputRef={pickerRef}
             label="Label images"
             hint="Drag files here, or choose several at once. One image for each label."
             accept="image/jpeg,image/png,image/webp,image/tiff"
@@ -110,6 +154,7 @@ export function BatchTab() {
             onFiles={setImages}
           />
           <DropZone
+            key={`documents-${generation}`}
             label="COLA documents"
             hint="One for each label image, named to match it. A PDF, or a scan or photograph of the form."
             accept="application/pdf,image/jpeg,image/png,image/webp,image/tiff"
@@ -195,7 +240,7 @@ export function BatchTab() {
             ? `Checked ${done} of ${total || images.length} labels.`
             : done > 0
               ? `Finished. ${done} labels checked. ${counts.review} need review, ${counts.mismatch} do not match, ${counts.failed} could not be checked.`
-              : ''}
+              : cleared}
         </div>
 
         {/*
@@ -287,6 +332,13 @@ export function BatchTab() {
               the CSV if you need them.
             </p>
           </>
+        ) : null}
+
+        {/* The same control as the single-label view, for the same reason. */}
+        {clearable ? (
+          <button className="button button--quiet reset" type="button" onClick={reset}>
+            Clear and start another batch
+          </button>
         ) : null}
 
         {done === 0 && !running && !error ? (

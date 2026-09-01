@@ -29,6 +29,16 @@ interface Props {
   preview?: boolean
   files: File[]
   onFiles: (files: File[]) => void
+  /**
+   * A handle on the input itself, for a caller that has to move focus to it.
+   *
+   * The reset control is the one caller (US-29): after it clears the form,
+   * focus has to land somewhere deliberate, and the first thing an agent does
+   * next is choose a file. Passed down rather than found by id, because the id
+   * comes from `useId` and is not a string anything outside this component
+   * should be constructing.
+   */
+  inputRef?: React.RefObject<HTMLInputElement | null>
 }
 
 export function DropZone({
@@ -39,10 +49,12 @@ export function DropZone({
   preview = false,
   files,
   onFiles,
+  inputRef: externalRef,
 }: Props) {
   const inputId = useId()
   const describedBy = `${inputId}-hint`
-  const inputRef = useRef<HTMLInputElement>(null)
+  const ownRef = useRef<HTMLInputElement>(null)
+  const inputRef = externalRef ?? ownRef
   const [dragging, setDragging] = useState(false)
 
   function accepted(list: FileList | null): File[] {

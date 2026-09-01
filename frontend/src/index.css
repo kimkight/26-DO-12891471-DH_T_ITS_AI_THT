@@ -1799,3 +1799,24 @@ main {
   margin: 0.125rem 0 0;
   line-height: 1.65;
 }
+
+/*
+ * The reset control (US-29).
+ *
+ * Quiet, because it is not the primary action on either view and an agent who
+ * has finished a check is looking for it rather than being offered it. Set
+ * apart from the row of result cards above by its own top margin and a rule, so
+ * it does not read as a sixth card or as something attached to the last one.
+ *
+ * It carries the same focus ring every other control gets from `:focus-visible`
+ * globally, which is what makes it keyboard reachable in the sense NFR-5 means:
+ * reachable and visibly focused, not merely tabbable.
+ */
+.reset {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  width: 100%;
+  justify-content: center;
+}
