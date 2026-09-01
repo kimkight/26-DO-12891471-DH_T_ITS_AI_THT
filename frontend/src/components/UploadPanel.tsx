@@ -60,6 +60,8 @@ interface Props {
   onUnreadable: () => void
   /** Called when the last file is taken back off. */
   onCleared: () => void
+  /** Passed through to the picker, so the reset control can focus it (US-29). */
+  pickerRef?: React.RefObject<HTMLInputElement | null>
 }
 
 /**
@@ -92,6 +94,7 @@ export function UploadPanel({
   onClassified,
   onUnreadable,
   onCleared,
+  pickerRef,
 }: Props) {
   const headingId = useId()
   const [reading, setReading] = useState(false)
@@ -162,6 +165,7 @@ export function UploadPanel({
         multiple
         files={[]}
         onFiles={add}
+        inputRef={pickerRef}
       />
 
       {files.length ? (

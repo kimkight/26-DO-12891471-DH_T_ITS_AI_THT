@@ -130,6 +130,46 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     expect(new Set(levels.slice(1))).toEqual(new Set([3]))
   })
 
+  /*
+   * The reset (US-29). Its keyboard behaviour is the half a unit test cannot
+   * see: a real focus ring, operability by Space as well as Enter, and where
+   * focus actually lands in a browser once the element that had it is gone.
+   */
+  test('the reset control is keyboard operable and leaves focus somewhere', async ({ page }) => {
+    await page.route('**/api/classify', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(CLASSIFIED_PHOTO),
+      })
+    })
+    await page.goto('/')
+    await page.getByLabel('Files for this label').setInputFiles({
+      name: 'cola.pdf',
+      mimeType: 'application/pdf',
+      buffer: Buffer.from('%PDF'),
+    })
+
+    const reset = page.getByRole('button', { name: 'Clear and start another label' })
+    await expect(reset).toBeVisible()
+
+    // A visible focus ring, computed rather than assumed (WCAG 2.4.7).
+    await reset.focus()
+    const outline = await reset.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return `${style.outlineStyle} ${style.outlineWidth}`
+    })
+    expect(outline).not.toContain('none')
+
+    // Space, which is what a button does and an anchor does not (WCAG 2.1.1).
+    await page.keyboard.press('Space')
+
+    await expect(page.getByLabel('Files for this label')).toBeFocused()
+    await expect(reset).toHaveCount(0)
+    const found = await violations(page)
+    expect(report(found)).toBe('')
+  })
+
   test('the batch pickers and the pairing count are reachable by keyboard', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('tab', { name: 'Check many labels' }).click()

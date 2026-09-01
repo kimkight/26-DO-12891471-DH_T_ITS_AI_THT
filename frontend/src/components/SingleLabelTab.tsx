@@ -97,7 +97,7 @@
  * the disclosure otherwise, and the rule that ran is named in the result's own
  * reason line rather than inferred from this control.
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ApplicationFields } from './ApplicationFields'
 import { ErrorMessage } from './ErrorMessage'
 import { PhotoNotes } from './PhotoNotes'
@@ -184,6 +184,61 @@ export function SingleLabelTab() {
   const [fieldsNews, setFieldsNews] = useState('')
   const [checking, setChecking] = useState(false)
   const [outcome, setOutcome] = useState<SingleOutcome | null>(null)
+  /*
+   * The reset (US-29). The author: "add a reset option that clears the
+   * information so another application can be uploaded."
+   *
+   * `generation` is a remount key for the upload panel, not a counter anyone
+   * reads. That panel holds the classification, its own error and its own
+   * announcement, and the file input holds a value of its own that React does
+   * not control: an agent who clears the form and then chooses the same file
+   * again has to get an event, and a `<input type="file">` whose value is
+   * unchanged does not fire one. Remounting settles all of that in one move,
+   * where clearing each piece by hand would settle most of it and leave the
+   * input.
+   */
+  const [generation, setGeneration] = useState(0)
+  const [cleared, setCleared] = useState('')
+  const pickerRef = useRef<HTMLInputElement>(null)
+
+  /**
+   * Clear everything and go back to the empty state (US-29, NFR-4, NFR-5).
+   *
+   * **No confirmation dialog.** Nothing is stored, so nothing is lost that
+   * cannot be re-uploaded, and a dialog is one more thing between an agent who
+   * has finished one label and the next one. That is a decision rather than an
+   * omission; it is written down in the story and asserted in the test.
+   *
+   * Focus moves to the file picker, because that is what the agent does next
+   * and because a control that removes the thing it was inside has to say where
+   * focus went. The announcement is the other half of the same obligation: a
+   * screen reader user who presses this gets no visual confirmation that five
+   * result cards have gone.
+   */
+  function reset() {
+    setFiles([])
+    setApplication(EMPTY_APPLICATION)
+    setSources({})
+    setProcessed(false)
+    setGaps([])
+    setPending([])
+    setFieldsOpen(false)
+    setFieldsNews('')
+    setOutcome(null)
+    setChecking(false)
+    setCleared('The form was cleared. Upload the next label.')
+    setGeneration((previous) => previous + 1)
+  }
+
+  /*
+   * Focus lands after the remount, not before it: the input the ref points at
+   * during the click is about to be replaced, and focusing it would leave focus
+   * on a detached node and the page's focus on <body>.
+   */
+  useEffect(() => {
+    if (generation === 0) return
+    pickerRef.current?.focus()
+  }, [generation])
 
   function update(name: keyof ApplicationData, value: string) {
     setApplication((previous) => ({ ...previous, [name]: value }))
@@ -315,12 +370,26 @@ export function SingleLabelTab() {
     if (!canCheck || checking) return
     setChecking(true)
     setOutcome(null)
+    // The clearing announcement is spent. Leaving it would have the region say
+    // the form is empty at the moment it fills with results.
+    setCleared('')
     // What the agent typed, and nothing the interface filled in from the
     // document (FR-14). See `typedValues` for what posting the rest back does
     // to a document-only submission.
     setOutcome(await verifyLabel(files, typedValues(application, sources)))
     setChecking(false)
   }
+
+  /*
+   * Whether there is anything a reset would clear. Derived rather than tracked,
+   * because every part of it is already state and a second copy of the answer
+   * would be a second thing to keep in step.
+   */
+  const clearable =
+    files.length > 0 ||
+    outcome !== null ||
+    processed ||
+    APPLICATION_FIELDS.some((name) => application[name].trim())
 
   const result = outcome?.result ?? null
   // The live region text. Empty while checking so that the "Checking" line and
@@ -342,6 +411,8 @@ export function SingleLabelTab() {
 
         <form onSubmit={submit} noValidate>
           <UploadPanel
+            key={generation}
+            pickerRef={pickerRef}
             files={files}
             onFilesChange={setFiles}
             onClassified={fillFromClassification}
@@ -404,7 +475,7 @@ export function SingleLabelTab() {
           at the same moment as its text is not reliably announced.
         */}
         <div className="visually-hidden" role="status" aria-live="polite" aria-label="Check result">
-          {checking ? 'Checking this label.' : spoken}
+          {checking ? 'Checking this label.' : cleared || spoken}
         </div>
 
         {outcome?.error ? <ErrorMessage error={outcome.error} /> : null}
@@ -449,6 +520,28 @@ export function SingleLabelTab() {
             </div>
             <p className="footnote">This tool recommends. You decide.</p>
           </>
+        ) : null}
+
+        {/*
+          The reset (US-29), beside the results rather than at the top of the
+          form. An agent who has finished one label is looking here, at the last
+          row of what they just read, and that is where the control to go on to
+          the next one belongs.
+
+          It is shown whenever there is anything to clear, not only after a
+          check: an agent who chose the wrong file has the same thing to undo as
+          one who read a whole result.
+
+          A button, not a link. It performs an action on this page rather than
+          going anywhere, which is what the element means, and it is what makes
+          it operable by Space as well as Enter and reachable in the tab order
+          with a focus ring, none of which a styled anchor gets for free
+          (NFR-5).
+        */}
+        {clearable ? (
+          <button className="button button--quiet reset" type="button" onClick={reset}>
+            Clear and start another label
+          </button>
         ) : null}
 
         {!result && !outcome?.error && !checking ? (

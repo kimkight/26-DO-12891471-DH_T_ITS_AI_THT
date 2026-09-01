@@ -1385,3 +1385,88 @@ file could not be read has to be told where they are, and the banner is the
 standing statement of what this tool is and is not. A quieter screen that
 achieved itself by hiding a failure would be worse than the wordy one.
 
+### US-29 Clear the form so I can check the next label
+
+| | |
+| --- | --- |
+| Epic | Usability and accessibility |
+| Priority | Should |
+| Requirements | NFR-4, NFR-5, NFR-6 (the reason no confirmation is needed) |
+| Points | |
+| Issue | [#74](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/74) |
+| Source | The author, using the deployed build, 2026-09-01: "add a reset option that clears the information so another application can be uploaded." |
+
+**As a** compliance agent working through a stack of applications,
+**I want** one control that empties the form,
+**So that** I can start the next label without reloading the page or picking
+values out of the last one.
+
+**Acceptance criteria**
+
+```
+Given a completed check
+When  I select the reset control
+Then  the uploaded files, the parsed values, every typed field and the results are gone
+And   the view is in the state it was in when the page loaded
+```
+
+```
+Given files chosen and no check run
+When  I select the reset control
+Then  the same thing happens
+```
+
+```
+Given the reset control
+When  I look for it
+Then  it is beside the results rather than at the top of the form
+And   it is offered only when there is something to clear
+```
+
+```
+Given the reset control
+When  I reach it with the keyboard
+Then  it is a button, it is in the tab order, its focus is visible,
+And   it is operable by Space as well as by Enter
+```
+
+```
+Given I have selected it
+When  it has run
+Then  focus is on the file picker
+And   the live region says the form was cleared and is ready for the next label
+```
+
+```
+Given I have selected it
+When  it runs
+Then  nothing asks me to confirm
+```
+
+```
+Given the batch view, which holds state of its own
+When  I select its reset control
+Then  both pickers, the rows and any error are cleared, and a running stream is stopped first
+```
+
+**Where it is, and why.** Beside the results. An agent who has finished one label
+is looking at the last row of what they just read, and that is where the control
+to go on to the next one belongs; at the top of the form it would be a thing to
+scroll back to, and next to the check button it would be a thing to press by
+mistake.
+
+**Why there is no confirmation dialog.** Nothing is stored (NFR-6), so nothing is
+lost that cannot be re-uploaded, and the files are still on the agent's own
+machine. A dialog would be one more thing between an agent who has finished one
+label and the next one, which is the opposite of what this story is for. The
+batch view's results are the one thing that cannot be re-derived without
+re-running the check, and the CSV download beside the reset is how they leave the
+page; the footnote above both already says so.
+
+**Why focus and the announcement are acceptance criteria rather than polish.**
+This control removes everything on the screen, including the element that had
+focus, which is itself. A sighted agent sees an empty form. An agent using a
+screen reader gets silence and focus on the document body, which is the worst
+place focus can be and is a failure of WCAG 2.4.3 rather than a rough edge. So
+focus lands on the thing they do next, and the live region says what happened.
+

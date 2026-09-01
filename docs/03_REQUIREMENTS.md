@@ -918,6 +918,23 @@ being met by a screen that still explained itself at every control.
   criterion above; a quieter screen that achieved itself by hiding a failure
   would be worse than the wordy one.
 
+**A way back to the empty state (2026-09-01, US-29).** The author: "add a reset
+option that clears the information so another application can be uploaded." An
+agent working through a stack of applications had no way to start the next one
+but to reload the page.
+
+- One clearly labelled control on each view that holds state, beside the results
+  rather than at the top of the form, offered only when there is something to
+  clear. It empties the uploaded files, the parsed values, every typed field and
+  the results together.
+- No confirmation dialog. Nothing is stored (NFR-6), so nothing is lost that
+  cannot be re-uploaded, and a dialog is one more thing in the way.
+- Focus moves to the file picker and a live region says the form was cleared and
+  is ready for the next label. That is NFR-5's obligation rather than a
+  refinement: the control removes the element that had focus, and a control that
+  leaves focus on the document body has failed for the agent who most needs it
+  to work.
+
 ### NFR-5 Accessibility
 
 **Priority:** Must
