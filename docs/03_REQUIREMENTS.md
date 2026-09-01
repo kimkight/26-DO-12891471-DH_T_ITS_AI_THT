@@ -800,6 +800,18 @@ Single-label verification returns in about 5 seconds.
   a latency figure above their results is the tool talking about itself in the
   middle of their work (NFR-4). Nothing about the measurement changes; only
   where it is read.
+- **What is measured is what the agent waits for, across every request one
+  submission makes.** Added 2026-09-01 from the author's measurement of the
+  deployed build: a COLA document submitted alone cost `POST /api/classify` at
+  5492 and 5410 ms and then `POST /api/verify` at 5331 to 5498 ms, about eleven
+  seconds for one document, while each request on its own was inside the target.
+  A target met per request and missed per submission is a target reported
+  wrongly. So no picture is read in more than one request for one submission
+  ([ADR 0017](adr/0017-read-the-artwork-once.md)).
+- **The saving is never bought with a store.** A cache of parsed documents would
+  breach NFR-6, which is an acceptance criterion of this system and a promise
+  printed on every screen of the interface. Recorded on FR-1 and NFR-1 alike so
+  that it is not rediscovered as a good idea.
 
 This is the requirement that killed the previous pilot: "The system would take
 30, 40 seconds sometimes to process a single label... If we can't get results

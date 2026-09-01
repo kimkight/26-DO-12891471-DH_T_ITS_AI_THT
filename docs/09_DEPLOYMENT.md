@@ -368,13 +368,40 @@ and name the remainder.
 
 **8.3a The application-document path, which is the one that missed NFR-1.**
 
+**Both requests, because a submission is both.** An agent picking a file waits
+for `POST /api/classify`, and then, when they press the button, for
+`POST /api/verify`. Measuring only the second reported a target met per request
+and missed per submission: the author's measurement of 2026-09-01 was 5492 and
+5410 ms for the first and 5331 to 5498 ms for the second, about eleven seconds
+for one document, with each request on its own inside the target
+([ADR 0017](adr/0017-read-the-artwork-once.md)). So the figure to record is the
+sum, and the two parts beside it.
+
 ```bash
-curl -s -o /tmp/verify.json -w 'total %{time_total}s\n' \
+curl -s -o /tmp/classify.json -w 'classify %{time_total}s\n' \
+  -F 'files=@/path/to/your-cola-application.pdf' \
+  "$URL/api/classify"
+
+curl -s -o /tmp/verify.json -w 'verify   %{time_total}s\n' \
   -F 'files=@/path/to/your-cola-application.pdf' \
   "$URL/api/verify"
 
 python -c "import json;t=json.load(open('/tmp/verify.json'))['timings'];print(json.dumps(t,indent=2))"
 ```
+
+The prefill request should now be about the time the file takes to upload rather
+than about five seconds, because it reads the document's text layer and none of
+the pictures inside it. Check that it says so rather than inferring it from the
+clock:
+
+```bash
+python -c "import json;d=json.load(open('/tmp/classify.json'))['application_document'];print('artwork_read', d['artwork_read'], 'found', d['artwork_images_found'], 'read', d['artwork_images_read'])"
+```
+
+`artwork_read` false with a non-zero `artwork_images_found` is the expected
+reading: the pictures were located, counted, and left for the check. False with a
+zero count means this document carries no artwork at all, which is a different
+thing and is why the two are reported separately.
 
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while

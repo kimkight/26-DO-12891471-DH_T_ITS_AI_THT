@@ -47,6 +47,7 @@ from app import ocr  # noqa: E402
 from app.ocr import (  # noqa: E402
     CARDINAL_ROTATIONS,
     LOW_ORIENTATION_CONFIDENCE,
+    ORIENTATION_CHECK_SCALE,
     decode,
     extract_text,
     preprocess,
@@ -221,3 +222,44 @@ class TestTheOverrideItself:
 
         assert prepared.orientation.method == "unavailable"
         assert prepared.orientation.check is None
+
+
+@requires_tesseract
+@requires_fonts
+class TestTheCheckIsScoredSmall:
+    """The two candidate passes run at ORIENTATION_CHECK_SCALE (OQ-27).
+
+    Scoring is not reading. These two passes exist to separate two numbers that
+    are fifty points and more apart, and the measurement in ``app.ocr`` puts
+    half resolution right in as many of the forty-eight cases as full
+    resolution, for about half the time.
+
+    What must not change is the picture the pipeline goes on to read, so both
+    halves are asserted: the scoring reads are small, and the image handed to
+    the threshold afterwards is not.
+    """
+
+    def test_both_candidates_are_read_at_the_reduced_scale(self, monkeypatch):
+        monkeypatch.setattr(ocr, "detect_orientation", lambda _: (180, 0.03, "osd"))
+        long_edges: list[int] = []
+        real_read = ocr._read
+
+        def spy(image):
+            long_edges.append(max(image.shape[:2]))
+            return real_read(image)
+
+        monkeypatch.setattr(ocr, "_read", spy)
+
+        preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
+
+        assert len(long_edges) == 2
+        expected = round(ocr.settings.ocr_long_edge_px * ORIENTATION_CHECK_SCALE)
+        assert long_edges == [expected, expected]
+
+    def test_the_image_the_pipeline_reads_is_not_reduced(self, monkeypatch):
+        """The winning turn is applied to the full-resolution image."""
+        monkeypatch.setattr(ocr, "detect_orientation", lambda _: (180, 0.03, "osd"))
+
+        prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
+
+        assert max(prepared.gray.shape[:2]) == ocr.settings.ocr_long_edge_px

@@ -111,6 +111,7 @@ import type { SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { PRESENCE_LIMIT, anySearched } from '../lib/labelSearch'
 import { announcement, summary } from '../lib/outcomes'
+import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { EMPTY_APPLICATION } from '../types'
 import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
@@ -172,6 +173,12 @@ export function SingleLabelTab() {
    * two sections mid-edit would remount under them and drop focus.
    */
   const [gaps, setGaps] = useState<(keyof ApplicationData)[]>([])
+  /*
+   * The values the check will read off the artwork (ADR 0017). Neither read nor
+   * missing: the prefill pass counted the pictures and left them, so there is
+   * nothing to summarise and nothing to ask for.
+   */
+  const [pending, setPending] = useState<(keyof ApplicationData)[]>([])
   // The disclosure. Collapsed on load; opened by the agent, or by a document
   // that failed to parse, and never closed by anything but the agent.
   const [fieldsOpen, setFieldsOpen] = useState(false)
@@ -201,6 +208,7 @@ export function SingleLabelTab() {
       // because nothing supplied it.
       setSources((previous) => onlyTyped(previous, application))
       setGaps(APPLICATION_FIELDS.filter((name) => !application[name].trim()))
+      setPending([])
       return
     }
     fillFromDocument(result.application_document)
@@ -238,10 +246,24 @@ export function SingleLabelTab() {
 
     // A gap is a compared value neither the document nor the agent supplied.
     // Something already typed is not a gap: the agent answered it.
+    //
+    // Nor is a value the artwork is about to supply (ADR 0017). The prefill
+    // pass reads the document's text layer and leaves the pictures to the
+    // check, so alcohol content and net contents are commonly still to come
+    // rather than absent. Opening a box and moving focus into it for a value
+    // the next click fills in would be the tool asking the agent to do its own
+    // work, one second before doing it.
     const supplied = new Set(
       filled.map((entry) => entry.name).filter((name) => name in EMPTY_APPLICATION),
     )
-    setGaps(APPLICATION_FIELDS.filter((name) => !supplied.has(name) && !application[name].trim()))
+    const owed = pendingFromArtwork(document)
+    const stillComing = new Set(owed)
+    setPending(owed.filter((name) => !application[name].trim()))
+    setGaps(
+      APPLICATION_FIELDS.filter(
+        (name) => !supplied.has(name) && !stillComing.has(name) && !application[name].trim(),
+      ),
+    )
   }
 
   /** Taking every file back off returns the view to its unprocessed state. */
@@ -249,6 +271,7 @@ export function SingleLabelTab() {
     setSources((previous) => onlyTyped(previous, application))
     setProcessed(false)
     setGaps([])
+    setPending([])
   }
 
   /**
@@ -263,6 +286,7 @@ export function SingleLabelTab() {
     setSources((previous) => onlyTyped(previous, application))
     setProcessed(false)
     setGaps([])
+    setPending([])
     setFieldsOpen(true)
     setFieldsNews('The application values are open below so you can type them in yourself.')
   }
@@ -331,6 +355,7 @@ export function SingleLabelTab() {
             sources={sources}
             processed={processed}
             gaps={gaps}
+            pending={pending}
             open={fieldsOpen}
             onToggle={toggleFields}
             onChange={update}

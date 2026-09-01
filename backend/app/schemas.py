@@ -355,6 +355,18 @@ class ApplicationDocumentResult(BaseModel):
             "on than a document that carries no pictures at all."
         ),
     )
+    artwork_read: bool = Field(
+        default=True,
+        description=(
+            "Whether the embedded pictures were put through OCR on this "
+            "reading (ADR 0017). False on the prefill pass, which takes the "
+            "document's text layer alone and leaves the pictures to the check "
+            "that reads them anyway. A caller has to be able to tell that from "
+            "a document carrying no pictures, because artwork_images_read is "
+            "zero in both cases and only one of them is a gap the agent has to "
+            "fill."
+        ),
+    )
     artwork_images_rejected: list[RejectedImageDetail] = Field(
         default_factory=list,
         description=(

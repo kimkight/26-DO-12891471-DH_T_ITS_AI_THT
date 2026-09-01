@@ -98,6 +98,18 @@ export interface ApplicationDocumentResult {
   artwork_images_found: number
   artwork_images_read: number
   /**
+   * Whether the pictures were put through OCR on this reading (ADR 0017).
+   *
+   * False on the prefill pass, which takes the document's text layer alone so
+   * that the boxes fill as fast as the file uploads. It is not the same as
+   * "there was no artwork": `artwork_images_read` is zero in both cases, and
+   * only one of them is a gap the agent has to fill by typing.
+   *
+   * Optional so that a response from a server that predates ADR 0017 reads as
+   * what it was, a reading that did include the artwork.
+   */
+  artwork_read?: boolean
+  /**
    * Every embedded picture that was not big enough, or was the wrong shape, to
    * be label artwork, with the reason (v1.1.0). The commonest one on a filed
    * application is the applicant's own signature. The picture itself never

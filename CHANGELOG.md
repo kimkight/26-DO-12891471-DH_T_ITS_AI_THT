@@ -244,6 +244,83 @@ application to the picture of the label."
 - The beverage type is still never compared against the label, and the embedded
   label artwork still cannot supply it: a label does not print a form answer.
 
+### Performance: the artwork is read once, in one request
+
+The author measured the deployed build on 2026-09-01 with her own mezcal COLA
+document, 382 KB, submitted alone:
+
+| request | when it runs | measured |
+| --- | --- | --- |
+| `POST /api/classify` | the moment she picks the file | 5492 ms, 5410 ms |
+| `POST /api/verify` | when she selects **Check this label** | 5331 ms to 5498 ms |
+
+About eleven seconds of waiting for one document, with each request on its own
+inside NFR-1's target. Both were reading the same pictures: the prefill request
+came back with `artwork_images_read: 1`, and the document's own text layer takes
+277 ms, so the rest of it was a full Tesseract pass over artwork that
+`POST /api/verify` was about to read again for the label side.
+
+- **`POST /api/classify` reads the document's text layer and stops**
+  ([ADR 0017](docs/adr/0017-read-the-artwork-once.md), NFR-1, NFR-6). It counts
+  the pictures it found without reading them and says which of the two readings
+  it did, in a new `artwork_read` on the parsed block. The five boxes fill as
+  fast as the file uploads.
+- **The artwork is read once, at check time**, where the check needs it anyway.
+  What it yields fills alcohol content and net contents in the result.
+- **A value the artwork is about to supply is not reported as a gap.** A gap
+  opens a box inline, moves focus into it and announces that the value was not
+  found in the upload. Saying that about a value the next click reads off the
+  artwork would be the tool asking an agent to do work it is one second from
+  doing itself. The two stay editable behind the disclosure, because FR-11's
+  precedence still makes a typed value win.
+- **`POST /api/read-application` still reads everything.** It is FR-11's route
+  for a caller that wants the parsed values without verifying, and there is no
+  second request behind it to do the reading.
+- **Not a cache, and the ADR says so in as many words.** A server-side store of
+  parsed documents would breach NFR-6, which is an acceptance criterion of this
+  system and a promise printed above the masthead on every screen: "Nothing you
+  upload is stored." The second read is gone because there is no second read.
+
+Measured on a session container, which is not production hardware and is
+reported only as a before-and-after on one machine, with a synthetic 155 KB
+filing carrying one embedded label image, three runs each:
+
+| Request | Before | After |
+| --- | --- | --- |
+| `POST /api/classify` | 1463 / 1518 / 1594 ms, median **1518** | 160 / 216 / 245 ms, median **216** |
+| `POST /api/verify` | 1459 / 1472 / 1606 ms, median **1472** | 1370 / 1394 / 1425 ms, median **1394** |
+| Both together | **2990 ms** | **1610 ms** |
+
+### Performance: the 180-degree check is scored at half resolution
+
+[OQ-27](docs/OPEN_QUESTIONS.md#oq-27) is closed. It was costed on one image on
+2026-08-30 and deliberately not built on it, because one image is not a
+measurement of a decision rule. The measurement that answered it is the one
+ADR 0003 was decided on: the twelve sample labels at all four cardinal
+rotations, forty-eight cases, with the check forced to run on every one of them,
+run over the clean renderings and again over the same set degraded into
+something shaped like a phone photograph. The degraded run is the one that
+decides, because the clean set is right at every scale and so separates nothing:
+
+| scale | long edge | right | both candidates, per case |
+| --- | --- | --- | --- |
+| 1.00 | 1600 px | 48 of 48 | 1504 ms |
+| 0.60 | 960 px | 48 of 48 | 957 ms |
+| 0.50 | 800 px | 48 of 48 | 781 ms |
+| 0.40 | 640 px | 48 of 48 | 649 ms |
+| 0.30 | 480 px | **44 of 48** | 381 ms |
+| 0.25 | 400 px | 48 of 48 | 312 ms |
+
+- **`ORIENTATION_CHECK_SCALE` is 0.5**, and the scale sits one measured step
+  above the first failure rather than at the last passing value. A rule whose
+  accuracy is not monotone in its own parameter has started reading noise, and
+  OQ-27's single-image table has 0.25 answering backwards on the author's own
+  artwork.
+- **Scoring is not reading.** The two candidate passes exist to separate two
+  numbers that on real artwork are fifty points and more apart. The winning
+  rotation is applied to the full-resolution image, which is what the pipeline
+  goes on to read, and `test_orientation_floor.py` asserts both halves.
+
 ## [1.1.0] - unreleased until tagged
 
 The author's own use of the deployed v1.0.1 build on 2026-08-29, with a real
