@@ -188,10 +188,11 @@ export function ApplicationFields({
    *
    * Its hint changes with the situation, and the change is the ADR 0008 truth
    * rather than a rewording: before anything is processed it says what the
-   * field is for, and after a document has been read without stating a type it
-   * says why the document could not say. Item 5 is three check marks, and a
-   * text layer prints the caption of an unticked box exactly as it prints the
-   * caption of a ticked one.
+   * field is for, and after a document has been read without settling the type
+   * it says why. Item 5 is three check boxes; a text layer prints the caption of
+   * an unticked box exactly as it prints the caption of a ticked one, so the
+   * boxes are sampled off the rendered page instead (ADR 0016). Where that did
+   * not separate one box from the other two, the agent chooses.
    */
   function beverageField() {
     return (
@@ -199,7 +200,7 @@ export function ApplicationFields({
         <label htmlFor="beverage_type">Beverage type</label>
         <p className="field__hint" id="beverage_type-hint">
           {processed && !beverageRead
-            ? 'Not read from the form: the product-type boxes are check marks, which the text layer cannot report. '
+            ? 'Item 5\u2019s boxes were read from the page and none of them stood out. '
             : ''}
           Not compared against the label. It says which numeric rule to expect: the proof
           cross-check for spirits, range handling for wine.

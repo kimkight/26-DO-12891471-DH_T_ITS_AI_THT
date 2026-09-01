@@ -75,10 +75,16 @@ class TestThePaperFormsTextLayer:
         assert "alcohol content is not an item" in joined
         assert "net contents is an item" in joined
 
-    def test_a_ticked_box_cannot_be_read_from_text_so_the_type_is_not_found(self, parsed):
-        """Item 5 prints all three options whichever one was ticked."""
+    def test_a_ticked_box_is_not_in_the_text_so_the_type_is_not_found(self, parsed):
+        """Item 5 prints all three options whichever one was ticked.
+
+        This fixture draws no boxes at all, only the captions, so there is
+        nothing on the page to sample either and the honest answer is still not
+        found. ``test_product_type_boxes.py`` covers the page that does carry
+        them (ADR 0016).
+        """
         assert parsed.values["beverage_type"] is None
-        assert any("ticked box cannot be read" in note for note in parsed.notes)
+        assert any("ticked box is not in a document's text" in note for note in parsed.notes)
 
     def test_item_15_is_not_read_as_a_net_contents_statement(self):
         """Item 15 is free text, and reading it as a net contents is a guess.

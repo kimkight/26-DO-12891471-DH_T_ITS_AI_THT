@@ -187,6 +187,7 @@ _DOCUMENT_SOURCES: dict[str, ApplicationSource] = {
     "form_fields": "parsed_from_form",
     "embedded_text": "parsed_from_form",
     "embedded_artwork": "parsed_from_artwork",
+    "product_type_box": "read_from_tick",
 }
 
 
@@ -1039,6 +1040,7 @@ def _timings(recorded: timing.Recording | None) -> PhaseTimings | None:
         document_ocr_ms=recorded.get("document_ocr"),
         page_ocr_ms=recorded.get("page_ocr"),
         artwork_ocr_ms=recorded.get("artwork_ocr"),
+        item_five_ocr_ms=recorded.get("item_five_ocr"),
         label_ocr_ms=recorded.get("label_ocr"),
         compare_ms=recorded.get("compare"),
         ocr_ms=recorded.ocr_ms,

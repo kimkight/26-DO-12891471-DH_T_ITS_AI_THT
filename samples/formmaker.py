@@ -170,6 +170,188 @@ def registry_printout_lines(spec: ApplicationSpec, *, captions: str = "compact")
     return lines
 
 
+# --------------------------------------------------------------------------
+# Item 5's three check boxes, drawn (v1.2.0).
+# --------------------------------------------------------------------------
+#
+# The three captions ``paper_form_lines`` already prints, with a square drawn to
+# the left of each and one of them optionally filled. That is the shape of the
+# real item 5, and it is the shape ``app.product_type`` samples: a box about a
+# cap height and a half on a side, set a fraction of a cap height clear of the
+# caption's first letter.
+#
+# **Nothing here is a coordinate the application knows.** The boxes are drawn
+# from the same caption geometry the reader derives them from, so the fixture and
+# the reader agree about where a box is for the same reason a real form and the
+# reader do, rather than by sharing a constant.
+PRODUCT_TYPE_OPTIONS = ("WINE", "DISTILLED SPIRITS", "MALT BEVERAGES")
+
+# How dark a ticked box is drawn, on the 0 to 255 scale.
+#
+# **Chosen to reproduce the author's own measurement rather than to pass.** A
+# real tick is a pen stroke or a printed cross covering part of the box, not a
+# filled square, and a fixture that filled it solid black would clear a margin no
+# real document has to clear. At 110 the reader measures the ticked box at 212
+# against 233 and 235 for the two empty ones, which is within a few points of the
+# 217.5 against 239.9 and 241.8 the author measured on her own filing.
+TICK_GREY = 110
+
+
+def _checkbox_geometry(
+    caption_left: float, caption_top: float, cap_height: float
+) -> tuple[float, float, float, float]:
+    """The square to the left of one caption, as (left, top, right, bottom)."""
+    size = cap_height * 1.4
+    right = caption_left - cap_height * 0.4
+    centre_y = caption_top + cap_height / 2
+    return right - size, centre_y - size / 2, right, centre_y + size / 2
+
+
+def as_pdf_with_product_type_boxes(
+    lines: list[str],
+    *,
+    ticked: str | None,
+    also_ticked: str | None = None,
+    grey: int = TICK_GREY,
+    font_size: int = 9,
+) -> bytes:
+    """A text-layer PDF whose item 5 boxes are drawn, with at most two ticked.
+
+    ``ticked`` is one of ``PRODUCT_TYPE_OPTIONS`` or None for a form with no box
+    filled. ``also_ticked`` fills a second one, which is the ambiguous document
+    the reader has to refuse to answer from. ``grey`` is how dark the tick is
+    drawn, so a test can put one either side of the reader's margin.
+    """
+    content = _content_stream(lines, font_size)
+    boxes = _product_type_box_stream(lines, font_size, ticked, also_ticked, grey)
+    return _assemble(
+        [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
+                "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+            ).encode("ascii"),
+            _stream_object(content + b"\n" + boxes),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>",
+        ],
+        root=1,
+    )
+
+
+def _product_type_box_stream(
+    lines: list[str], font_size: int, ticked: str | None, also_ticked: str | None, grey: int
+) -> bytes:
+    """Draw one square per item 5 option, filling the ticked ones.
+
+    The caption positions are recomputed from the same leading and origin
+    ``_content_stream`` lays the text out with, in PDF user space with the origin
+    at the bottom left.
+    """
+    leading = font_size + 4
+    parts: list[str] = []
+    filled = {name for name in (ticked, also_ticked) if name}
+    for index, line in enumerate(lines):
+        if line not in PRODUCT_TYPE_OPTIONS:
+            continue
+        # _content_stream starts at PAGE_HEIGHT - 50 and moves down one leading
+        # per line, so line n sits with its baseline at that origin minus n
+        # leadings. The caption box top is one cap height above the baseline.
+        baseline = PAGE_HEIGHT - 50 - index * leading
+        cap_height = font_size * 0.7
+        left, top, right, bottom = _checkbox_geometry(40, -(baseline + cap_height), cap_height)
+        # Back into PDF space, where y grows upward.
+        top, bottom = -top, -bottom
+        parts.append("0 0 0 RG 0.6 w")
+        parts.append(f"{left:.2f} {bottom:.2f} {right - left:.2f} {top - bottom:.2f} re S")
+        if line in filled:
+            inset = (right - left) * 0.15
+            parts.append(f"{grey / 255:.3f} g")
+            parts.append(
+                f"{left + inset:.2f} {bottom + inset:.2f} "
+                f"{right - left - 2 * inset:.2f} {top - bottom - 2 * inset:.2f} re f"
+            )
+            parts.append("0 g")
+    return "\n".join(parts).encode("ascii")
+
+
+def as_scanned_pdf_bytes(png: bytes) -> bytes:
+    """One page that is nothing but the given image, at the image's own aspect.
+
+    This is a scanned form: no text layer anywhere, one raster page. It differs
+    from ``as_pdf_bytes(..., images=[...])`` in two ways that matter to a reader
+    which samples pixels. There is no text page in front of it, so page 1 is the
+    scan; and the image is fitted to the page rather than stretched across it, so
+    a square drawn on the scan is still square on the render. A fixture that
+    stretched it would be testing how the reader copes with a distortion a
+    scanner does not produce.
+    """
+    jpeg, width, height = _as_jpeg(png)
+    scale = min(PAGE_WIDTH / width, PAGE_HEIGHT / height)
+    drawn_width, drawn_height = width * scale, height * scale
+    left = (PAGE_WIDTH - drawn_width) / 2
+    bottom = (PAGE_HEIGHT - drawn_height) / 2
+    content = (
+        f"q\n{drawn_width:.2f} 0 0 {drawn_height:.2f} {left:.2f} {bottom:.2f} cm\n/Im0 Do\nQ"
+    ).encode("ascii")
+    return _assemble(
+        [
+            b"<< /Type /Catalog /Pages 2 0 R >>",
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
+                "/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>"
+            ).encode("ascii"),
+            _stream_object(content),
+            (
+                f"<< /Type /XObject /Subtype /Image /Width {width} /Height {height} "
+                "/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length "
+                f"{len(jpeg)} >>\nstream\n"
+            ).encode("ascii")
+            + jpeg
+            + b"\nendstream",
+        ],
+        root=1,
+    )
+
+
+def as_png_with_product_type_boxes(
+    lines: list[str], *, ticked: str | None, grey: int = TICK_GREY, font_size: int = 22
+) -> bytes | None:
+    """The same page drawn as pixels, with no text layer. None if no font.
+
+    This is the scan: the captions have to be recognized before the boxes can be
+    placed, which is the one path item 5 costs a Tesseract read on.
+    """
+    fonts = available_fonts()
+    if fonts is None:
+        return None
+    _, regular = fonts
+    font = ImageFont.truetype(regular, font_size)
+    margin = 60
+    leading = int(font_size * 1.6)
+    height = margin * 2 + leading * len(lines)
+    image = Image.new("RGB", (1700, max(height, 400)), "white")
+    draw = ImageDraw.Draw(image)
+    cap_height = font_size * 0.72
+    for index, line in enumerate(lines):
+        top = margin + index * leading
+        draw.text((margin, top), line, font=font, fill="black")
+        if line not in PRODUCT_TYPE_OPTIONS:
+            continue
+        left, box_top, right, bottom = _checkbox_geometry(margin, top, cap_height)
+        draw.rectangle((left, box_top, right, bottom), outline="black", width=2)
+        if line == ticked:
+            inset = (right - left) * 0.15
+            draw.rectangle(
+                (left + inset, box_top + inset, right - inset, bottom - inset),
+                fill=(grey, grey, grey),
+            )
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def as_pdf_bytes(
     lines: list[str], *, font_size: int = 9, images: list[bytes] | None = None
 ) -> bytes:
