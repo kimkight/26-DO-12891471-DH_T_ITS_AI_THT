@@ -253,8 +253,8 @@ original form, unchanged and unsolved, and it is the
 realized for the third time.
 
 **3. Even with perfect OCR, the semantics do not fall out of the pixels.** The
-real COLA for that product gives the brand name as `DEL MAGUEY` and the fanciful
-name as `VIDA`. The largest text on the label is `Vida Clasico`. `parse.py`
+real COLA for that product declares a brand name and a fanciful name, and the
+largest text on the label is the fanciful name's display line. `parse.py`
 locates the brand name by type size, because no source states a layout rule and
 type size is a property of the artwork rather than an assumption about it; on
 this real product that heuristic cannot get the right answer, and it could not

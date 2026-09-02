@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; decision 5 narrowed on 2026-09-01, see the amendment |
 | Date | 2026-08-31 |
 | Author | Kimberly D. Kight |
 | Decision reference | Rewrites FR-1 through FR-4; leaves FR-5, FR-6, FR-7 and FR-14 unchanged; supersedes the type-size half of [ADR 0004](0004-fuzzy-matching-with-review-band.md)'s pipeline while keeping its thresholds |
@@ -233,6 +233,39 @@ is full of text.
 **Type size is no longer load-bearing for a supplied value**, and the sample-label
 accuracy figures `scripts/measure.py` reports change meaning accordingly: they now
 measure the search, because the script hands it the same reading the API does.
+
+## Amendment, 2026-09-01: alcohol content leaves the rescue
+
+**Decision 5 said the search would supply the label side for alcohol content
+where the pattern found nothing. It no longer does.** The v1.2.0 code review
+(`docs/CODE_REVIEW_2026-09.md`, finding 1) reproduced a false pass: a label
+printing no alcohol statement and the line `AGED 12 MONTHS IN OAK`, submitted
+with the application declaring `12` or `12%`, returned `alcohol_content: match`
+with the reason "Label 12 percent and application 12 percent are numerically
+equal". The declared value normalizes to a bare number, a bare number is one
+word, one word matches anywhere on the sheet with a score of 100, and
+`compare_abv` parses a bare number as a percentage. The presence finding FR-15
+would have made never ran, because the rescue had filled the label side.
+
+That is the defect class this tool must never produce: a mandatory element
+missing from the label and reported as present (FR-9, last criterion), by the
+same route as the `7%` defect of 2026-08-27 that FR-7's marker rule closed.
+
+**What changed.** `RESCUED_FIELDS` in `app/verify.py` is `("net_contents",)`.
+Net contents keeps the rescue because its unit is the marker: `parse_net_contents`
+reads a bare number as a value with no unit, and the missing-unit branch routes
+that to review, never to a match. A regression test in
+`backend/tests/test_verify_by_search.py` renders the label above and asserts
+the row reports not found for both declared forms.
+
+**Alternatives rejected for the amendment.** Restricting the rescue to lines
+that pass `is_alcohol_content_line` would reintroduce the marker rule in a
+second place, on units that no longer have lines, which is the duplication
+SC-5 penalises. Requiring a marker in the declared value does not work: the
+form's shape is a bare number (A-12), and normalization strips `%` before the
+search sees it. If the "found in small print" benefit is wanted for alcohol
+content later, that is an open question with a design of its own, not a
+threshold.
 
 **The residual risk is a declared value that appears on the label somewhere other
 than where it is required.** A brand name printed only in the small print of the

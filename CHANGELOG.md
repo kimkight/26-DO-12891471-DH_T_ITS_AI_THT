@@ -7,7 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.0] - unreleased until tagged
+## [1.2.1] - unreleased until tagged
+
+A hotfix from `main`, carrying the corrections a hiring panel would trip over
+first among the findings of the v1.2.0 code review
+(`docs/CODE_REVIEW_2026-09.md`, on `develop` in #120), and nothing else. The
+author's decisions on the review, including the ones deliberately not taken,
+are in `docs/CODE_REVIEW_DECISIONS_2026-09.md`.
+
+### Fixed
+
+- **The alcohol-content rescue search could pass a label with no alcohol
+  statement** (FR-7, FR-9, FR-15; #100). Where the pattern extractor found no
+  alcohol content, v1.2.0 searched the label for the declared value and installed
+  a whole-word hit as the label side. The declared value normalizes to a bare
+  number, so a label printing `AGED 12 MONTHS IN OAK` and no alcohol content,
+  submitted with the application declaring `12`, returned `alcohol_content:
+  match`. `RESCUED_FIELDS` is now `("net_contents",)`; net contents keeps the
+  rescue because its unit is the marker and a bare number never parses as one.
+  A regression test renders that label and asserts not found for `12` and `12%`.
+  ADR 0015 is amended with the reason and the alternatives rejected.
+- **The build tagged v1.2.0 reported version 1.1.0** (#102). The version was a
+  literal in three files and the release skipped the bump. `app.__version__` is
+  now read from the installed distribution, so `pyproject.toml` is the one
+  declaration; `test_release_metadata.py` fails when `package.json` disagrees;
+  and the deploy workflow refuses a release whose tag does not match. The
+  1.0.0, 1.1.0 and 1.2.0 sections above now carry their tag dates.
+- **The optional Bedrock fallback the README, ADR 0003 and NFR-3 described does
+  not exist** (#104). There is no client, no dependency and no call site; the
+  three settings that promised it were read by nothing. They are removed, the
+  README and NFR-3 say the fallback was designed and not built, ADR 0003 is
+  amended, and `external_call_made` is documented as the constant it is.
+- **Real applicant data in fixtures and current documentation** (#101). The
+  brand, designation and product values of a real filing were the defaults of
+  `ColourLabelSpec` and appeared in two backend and three frontend tests and in
+  the README, the scope, requirements, architecture and assumptions documents
+  and the traceability matrix. All are invented values now. The CHANGELOG entries
+  and ADR context that describe what happened on that filing are left as the
+  record they are; the decision and its line are OQ-29. The identifier that was
+  in three commits' history is not rewritten out, for the reasons OQ-29 gives.
+- **Infrastructure documents that said the stack had never been applied**, and
+  five other stale statements (#113): the openings of `infra/README.md` and
+  `docs/09_DEPLOYMENT.md`, the lock-file paragraph, the `pip-audit --strict`
+  claim, the batch envelope derivation, the spool threshold, the registry
+  hostname, and two `iam.tf` comments that described a condition and a scope
+  the policy does not have.
+- **Counts in the traceability matrix and the README that were stale** (#114):
+  26 requirements not 22, 18 ADRs not 10, 30 stories not 24, 29 open questions,
+  17 assumptions, and the per-file test counts. `test_release_metadata.py` now
+  checks the matrix summary against the headings.
+- **The item 5 comment described a 22 point separation** that the module's own
+  window does not measure: 12.1 on the same filing (#123). The comment says so;
+  the margin is unchanged until the measurement is taken at three scales.
+
+### Measured
+
+The two-document gate in `docs/CODE_REVIEW_DECISIONS_2026-09.md` decision 7,
+run on a session container against this branch, with only measurements
+recorded (the documents are real filings and stay out of the repository):
+
+| Document | Result on this branch |
+| --- | --- |
+| The author's 3-page filing, submitted alone, three runs | Five rows pass: brand and class match, alcohol content and net contents are presence checks, the warning matches. `elapsed_ms` 3477, 3592 and 3337; `ocr_passes` 1; `tesseract_reads` 4; the orientation check ran (`osd_confidence` 0.03) and `overrode_osd: true`; the colour arm won; four columns cut; item 5 read from the box. |
+| The 1-page Registry printout, `POST /api/read-application` | Brand, class and item 5 read from the text layer and the box; alcohol content and net contents absent; all seven embedded images rejected by the size floor (#121); the fanciful name over-runs to seven words (#122). |
+| The printout submitted alone | `422 no_label_to_check`, as at v1.2.0 (#121). |
+| The printout with a synthetic label that prints no alcohol statement | `alcohol_content: mismatch`, not found on the label, both with the application silent and with `12` typed. At v1.2.0 the typed case returned `match`. |
+
+Measured on a session container, which is not production hardware; the
+deployed figure for the filing is section 9's 5.0 s and is re-taken against
+the release.
+
+## [1.2.0] - 2026-09-01
 
 The author's use of the released v1.1.0 build on 2026-08-30, with the same real
 mezcal COLA document uploaded alone. Everything upstream worked, two of the four
@@ -476,7 +546,7 @@ decides, because the clean set is right at every scale and so separates nothing:
   rotation is applied to the full-resolution image, which is what the pipeline
   goes on to read, and `test_orientation_floor.py` asserts both halves.
 
-## [1.1.0] - unreleased until tagged
+## [1.1.0] - 2026-08-31
 
 The author's own use of the deployed v1.0.1 build on 2026-08-29, with a real
 COLA document: TTB Form 5100.31, OMB No. 1513-0020, three pages. Two problems
@@ -1164,7 +1234,7 @@ batch path inherits the cost, once per row.
   this product. Not found was the correct answer for the back label, and it
   stays the correct answer.
 
-## [1.0.0] - unreleased until tagged
+## [1.0.0] - 2026-08-28
 
 **This section collects everything below it and is the release the author cuts
 after the pull requests from 2026-08-28 merge.** It is dated when the tag is

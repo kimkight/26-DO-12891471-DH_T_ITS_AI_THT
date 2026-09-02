@@ -68,7 +68,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.1.0","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.2.1","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -125,9 +125,10 @@ build` first and downloads Chromium on its first run).
 OpenCV, making no outbound network calls on the default path. This is not a
 performance preference; the agency network "blocks outbound traffic to a lot of
 domains," and a previous vendor pilot lost half its features to exactly that.
-An optional vision-model fallback on Amazon Bedrock exists but is **off unless
-explicitly enabled**. See
-[ADR 0003](docs/adr/0003-local-ocr-default-bedrock-optional.md).
+There is no other extraction path: the vision-model fallback on Amazon Bedrock
+that [ADR 0003](docs/adr/0003-local-ocr-default-bedrock-optional.md) records
+was designed and not built, and the ADR's amendment says so. Every response
+carries `external_call_made: false`, and it is a constant.
 
 **Matching has three outcomes, not two.** Fields are compared with normalized
 fuzzy matching and land on match, needs human review, or mismatch. The middle
@@ -214,20 +215,21 @@ section 6.
 | --- | --- |
 | [01 Project Charter](docs/01_PROJECT_CHARTER.md) | Purpose, background, stakeholders, success criteria, constraints, deliverables |
 | [02 Project Scope](docs/02_PROJECT_SCOPE.md) | In scope, out of scope, stretch goals, Definition of Done |
-| [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-10, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
-| [04 User Stories](docs/04_USER_STORIES.md) | 24 stories across 6 epics, with Given/When/Then criteria |
+| [03 Requirements](docs/03_REQUIREMENTS.md) | FR-1 to FR-15, NFR-1 to NFR-11, with acceptance criteria; verbatim 27 CFR 16.21 and 16.22 |
+| [04 User Stories](docs/04_USER_STORIES.md) | 30 stories across 6 epics, with Given/When/Then criteria |
 | [05 Architecture](docs/05_ARCHITECTURE.md) | Context and container diagrams, request flows, data handling, configuration, government-region portability |
 | [06 Security and Compliance](docs/06_SECURITY_AND_COMPLIANCE.md) | Threat model, controls, FedRAMP posture, ATO readiness, AI governance |
 | [07 Test Strategy](docs/07_TEST_STRATEGY.md) | Unit, integration, accuracy, performance, accessibility, and a manual UAT checklist |
 | [08 SDLC Process](docs/08_SDLC_PROCESS.md) | Phases with entry and exit criteria, Git Flow, PR checklist, DoR and DoD, releases |
 | [09 Deployment](docs/09_DEPLOYMENT.md) | The author's runbook: commands, variables, task sizing, cost, post-deploy verification, teardown |
-| [Open Questions](docs/OPEN_QUESTIONS.md) | 21 questions, 8 still open, each recorded rather than guessed |
-| [Assumptions](docs/ASSUMPTIONS.md) | 16 inferences, each with what would confirm or falsify it |
+| [Open Questions](docs/OPEN_QUESTIONS.md) | 29 questions, each with its status, recorded rather than guessed |
+| [Assumptions](docs/ASSUMPTIONS.md) | 17 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
 | [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, the government warning near miss, verification by search, and item 5's product type read off the rendered page |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
+| [Code review, September 2026](docs/CODE_REVIEW_2026-09.md) | An independent review of v1.2.0 against its own claims, on `develop`; the decisions taken on it are in [CODE_REVIEW_DECISIONS_2026-09.md](docs/CODE_REVIEW_DECISIONS_2026-09.md) |
 
 ## Status
 
@@ -472,7 +474,7 @@ five fields did not come back at all.
 - **And flat artwork is not a rendered label either, which is what v1.1.0
   cost.** The author's own mezcal COLA artwork, lifted out of the filed PDF and
   therefore flat, crisp and not a photograph at all, read as `AMoviy TS` against
-  `DEL MAGUEY` on two consecutive deploys. Two causes, and both were a number
+  the declared brand on two consecutive deploys. Two causes, and both were a number
   that looked confident about text it had never seen. Tesseract answered the
   orientation with 180 degrees at a confidence of 0.03, and the floor that would
   have rejected that verdict had been in the code since v1.0.1 as a caption
@@ -492,10 +494,10 @@ five fields did not come back at all.
   rotation net cannot succeed on both at once. A sweep of 4 rotations by 5 page
   segmentation modes over the isolated warning crop returned `4 AANDVW 1AG` at
   2.1 percent similarity to 27 CFR 16.21, which is a failure to read rather than
-  a degraded read. And the real COLA for that product gives Brand `DEL MAGUEY`
-  and Fanciful `VIDA` while the largest text on the label is "Vida Clasico", so
-  even a perfect transcription could not attribute the brand under the type-size
-  heuristic. v1.1.0 made that heuristic decline rather than guess, which turned a
+  a degraded read. And the real COLA for that product declares a brand name and
+  a fanciful name while the largest text on the label is the fanciful name's
+  own display line, so even a perfect transcription could not attribute the
+  brand under the type-size heuristic. v1.1.0 made that heuristic decline rather than guess, which turned a
   confident wrong answer into an honest absence and solved nothing about the
   attribution. **v1.2.0 stops needing the attribution**: the application declares
   the brand, so the label is searched for it and found

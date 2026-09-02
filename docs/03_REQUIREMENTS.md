@@ -81,7 +81,7 @@ defect reported against a deployed build has been a failure of that ranking
 rather than of the comparison or of the reading: the brand name reported as the
 producer's tax identifier, and then the brand name and the class or type
 designation both reported as "not found" on a document whose label text contained
-`DEL MAGUEY` and `MEZCAL` exactly. The application already declares the answer, so
+the declared brand and `MEZCAL` exactly. The application already declares the answer, so
 the tool searches for it. See [ADR 0015](adr/0015-verify-by-search.md) for the
 measurements and the alternatives rejected.
 
@@ -843,10 +843,13 @@ The default extraction path makes no outbound network calls.
 
 **Acceptance criteria**
 - With default configuration, verification completes with egress blocked.
-- The Bedrock fallback is off unless `TTB_ENABLE_BEDROCK_FALLBACK` is explicitly
-  set to true.
-- Enabling the fallback is visible in the response, so a user knows whether a
-  result involved an external call.
+- No configuration opens an outbound connection. The vision-model fallback
+  ADR 0003 describes was designed and not built, and its settings were removed
+  in v1.2.1; a fallback that is built later must be off by default and must
+  make its use visible in the response, which is what `external_call_made` is
+  reserved for.
+- Every response reports `external_call_made`, so a caller can see that no
+  external call was involved.
 
 Marcus's warning: "our network blocks outbound traffic to a lot of domains...
 During the scanning vendor pilot, half their features didn't work because our

@@ -13,20 +13,20 @@ comparing is only ever as good as what the ranking handed it. Every field-level
 failure reported against the deployed prototype was a failure of the first step:
 
 * the brand name reported as not found, because on the author's mezcal artwork
-  the largest upright text is a misread of ``Vida Clasico`` and nothing on the
+  the largest upright text is a misread of the fanciful name and nothing on the
   sheet stands clear of it (``app.parse._standout``);
 * the class or type designation reported as not found for the same reason, one
   rank down;
 * before Session 16, the brand name reported as the producer's tax identifier,
   because the ranking picked a vertical strip in the gutter.
 
-On that same document the application states ``DEL MAGUEY`` and the label text
-the pipeline had already read contains ``DEL MAGUEY``, exactly. The tool said
-"not found" about a string it was holding.
+On that same document the application states the brand and the label text the
+pipeline had already read contains it, exactly. The tool said "not found" about
+a string it was holding.
 
 **So the question is inverted.** The application declares the answer, so the
-check is not "what is the brand name on this label" but "does ``DEL MAGUEY``
-appear on this label". That question has a reliable answer even when the reading
+check is not "what is the brand name on this label" but "does the declared
+brand appear on this label". That question has a reliable answer even when the reading
 is imperfect, because a search for a known target degrades gracefully: a
 character misread costs a few points of similarity, where a ranking that
 declines costs the whole field.
@@ -153,11 +153,11 @@ def find_on_label(declared: str, units: list[LabelUnit]) -> SearchHit | None:
 
     **Exact containment, on word boundaries, scores 100.** Where the normalized
     declared value appears as a run of whole words inside a unit, that is the
-    answer and no similarity is computed: ``DEL MAGUEY`` is on the label, and a
-    score would only invite the reader to wonder how nearly. Word boundaries are
-    what keeps ``VIDA`` from being found inside ``INDIVIDUAL``: a value that
-    appears only inside a longer word has not been found, because a label reading
-    ``INDIVIDUAL`` does not carry the brand ``VIDA``.
+    answer and no similarity is computed: the brand is on the label, and a score
+    would only invite the reader to wonder how nearly. Word boundaries are what
+    keeps ``ROSA`` from being found inside ``PROSAIC``: a value that appears only
+    inside a longer word has not been found, because a label reading ``PROSAIC``
+    does not carry the brand ``ROSA``.
 
     **Otherwise the best window is scored.** Windows are runs of words the length
     of the declared value, give or take ``_WINDOW_SLACK`` for a space OCR

@@ -9,9 +9,6 @@ services:
     environment:
       TTB_ENVIRONMENT: local
       TTB_LOG_LEVEL: INFO
-      # The optional Bedrock fallback stays off so that local runs make no
-      # outbound calls. See docs/adr/0003-local-ocr-default-bedrock-optional.md.
-      TTB_ENABLE_BEDROCK_FALLBACK: "false"
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/health"]
       interval: 30s
