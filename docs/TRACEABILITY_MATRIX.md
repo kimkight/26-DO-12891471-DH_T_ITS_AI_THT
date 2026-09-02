@@ -126,7 +126,7 @@ is covered only in part, and NFR-10 and NFR-11, which have none.
 
 The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9, FR-11 and
-FR-12, NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 527 backend
+FR-12, NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 535 backend
 tests at v1.2.1. The agent-facing interface (FR-10, FR-11, FR-12, FR-13, NFR-4, NFR-5) is
 built and covered by 338 component tests, a computed-contrast test over the
 palette, and an axe-core run with a keyboard walk against the built page in CI. It is deployed: ECS Fargate behind an
