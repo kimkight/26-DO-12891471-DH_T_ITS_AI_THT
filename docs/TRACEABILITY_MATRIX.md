@@ -128,8 +128,8 @@ is covered only in part, and NFR-10 and NFR-11, which have none.
 
 The gap between "traced" and "tested" is the honest state of this repository.
 The verification engine, single label and batch (FR-1 through FR-9, FR-11 and
-FR-12, NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 567 backend
-tests at v1.3.0, of which 565 run in the default gate and two are the opt-in
+FR-12, NFR-1, NFR-2, NFR-3, NFR-6, NFR-7), is built and covered by 577 backend
+tests at v1.4.0, of which 575 run in the default gate and two are the opt-in
 wall-clock ceilings (`wall_clock` marker, code review finding 23). The agent-facing interface (FR-10, FR-11, FR-12, FR-13, NFR-4, NFR-5) is
 built and covered by 381 component tests at v1.4.0, a computed-contrast test over the
 palette, and an axe-core run with a keyboard walk against the built page in CI
