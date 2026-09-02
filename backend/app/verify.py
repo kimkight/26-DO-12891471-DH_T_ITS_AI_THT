@@ -90,8 +90,19 @@ LabelSource = Literal["uploaded_photographs", "application_artwork"]
 # search does not replace their comparison. What it does is supply the label side
 # when the pattern found nothing and the declared value is on the label anyway,
 # after which every one of those rules runs exactly as it did.
+#
+# **Only net contents is rescued (v1.2.1).** Alcohol content left the rescue when
+# the v1.2.0 code review reproduced a false pass: the declared value normalizes
+# to a bare number, a bare ``12`` printed anywhere on the sheet (``AGED 12
+# MONTHS IN OAK``) matched it as a whole word with a score of 100, and
+# ``compare_abv`` reported a label with no alcohol statement at all as a match.
+# That is FR-9's last criterion broken on a mandatory element, and it is the
+# shape of the 2026-08-27 ``7%`` defect that FR-7's marker rule exists to
+# prevent. Net contents keeps the rescue because its unit is a marker: a bare
+# number never parses as net contents, and a hit has to carry ``ML`` or ``FL
+# OZ`` to change the row. See ADR 0015, amended 2026-09-01.
 SEARCHED_FIELDS = ("brand_name", "class_type")
-RESCUED_FIELDS = ("alcohol_content", "net_contents")
+RESCUED_FIELDS = ("net_contents",)
 
 
 @dataclass(frozen=True)
@@ -1069,6 +1080,8 @@ def build_result(
         ),
         ocr_ms=recorded.ocr_ms if recorded is not None else round(ocr_ms, 1),
         timings=_timings(recorded),
+        # A constant, honestly. No code path makes an outbound call; the
+        # Bedrock fallback ADR 0003 records was designed and not built (v1.2.1).
         external_call_made=False,
         application_document=application_document,
         label_source=label_source,

@@ -469,7 +469,7 @@ class Segmentation:
     Reported out to the response (FR-1, FR-10) for the same reason the
     orientation is: a field read off the wrong panel is indistinguishable, to an
     agent looking only at the value, from a field read badly. An agent who sees
-    ``DEL MAGUEY`` should be able to see which part of the sheet it came from,
+    a brand name should be able to see which part of the sheet it came from,
     and an agent who sees something odd should be able to see that the sheet was
     read as four panels rather than one.
 

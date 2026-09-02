@@ -7,7 +7,7 @@ the right way up, and two of the four compared fields came back as defects:
     ============== ================================ ==================
     field           reported                          on the artwork
     ============== ================================ ==================
-    brand name      Does not match. Not found on      ``DEL MAGUEY``,
+    brand name      Does not match. Not found on      ``SIERRA VERDE``,
                     the label.                        exactly
     class or type   Does not match. Not found on      ``MEZCAL``,
                     the label.                        exactly
@@ -15,7 +15,7 @@ the right way up, and two of the four compared fields came back as defects:
 
 Both strings were in the OCR output the tool was already holding. What failed was
 the step before the comparison: those two fields were located by type size, the
-largest text on that sheet is a misread of ``Vida Clasico``, and the ranking
+largest text on that sheet is a misread of ``Rosa Clasico``, and the ranking
 declined rather than guess. The comparison never saw a value to compare.
 
 So the question is inverted. The application declares the answer, and the check
@@ -33,8 +33,8 @@ that replaces it:
   Morrison's ``STONE'S THROW`` case, and asserts the row shows the label's own
   casing beside the declared value.
 * ``TestInsideALongerWord`` asserts that a value appearing only inside a longer
-  word is not a match, which is what stops ``VIDA`` being found in
-  ``INDIVIDUAL``.
+  word is not a match, which is what stops ``ROSA`` being found in
+  ``PROSAIC``.
 * ``TestTheRegistryCode`` covers the class or type case: the application states
   ``MEZCAL FB`` and no label prints ``FB``.
 * ``TestTheWarningIsUntouched`` asserts FR-5 still runs the exact statutory
@@ -52,11 +52,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from samples.labelmaker import BusyLabelSpec, render_busy_png_bytes  # noqa: E402
+from samples.specs import SAMPLE_LABEL  # noqa: E402
 from samples.warning_text import WARNING_STATEMENT  # noqa: E402
 
 from app.compare import Outcome  # noqa: E402
@@ -76,12 +79,12 @@ from .conftest import requires_fonts, requires_tesseract  # noqa: E402
 # The shape of the author's artwork: one large decorative line that is not the
 # brand, and the brand set the same size as everything around it.
 MEZCAL_SHAPED = BusyLabelSpec(
-    display="Vida Clasico",
-    brand="DEL MAGUEY",
+    display="Rosa Clasico",
+    brand="SIERRA VERDE",
     clutter=(
-        "SINGLE VILLAGE",
+        "SMALL BATCH",
         "PRODUCTO DE MEXICO",
-        "HECHO EN OAXACA",
+        "HECHO EN MEXICO",
         "IMPORTED BY THE NAMED IMPORTER",
     ),
     class_type="MEZCAL",
@@ -91,7 +94,7 @@ MEZCAL_SHAPED = BusyLabelSpec(
 )
 
 DECLARED = {
-    "brand_name": "DEL MAGUEY",
+    "brand_name": "SIERRA VERDE",
     "class_type": "MEZCAL FB",
     "alcohol_content": "42",
     "net_contents": "750 ML",
@@ -111,14 +114,14 @@ class TestTheSearchItself:
     """The unit level: what ``find_on_label`` answers, with no image involved."""
 
     def test_an_exact_run_of_words_scores_one_hundred(self):
-        hit = find_on_label("DEL MAGUEY", units_of("PRODUCTO DE MEXICO DEL MAGUEY SINGLE VILLAGE"))
+        hit = find_on_label("SIERRA VERDE", units_of("PRODUCTO DE MEXICO SIERRA VERDE SMALL BATCH"))
         assert hit is not None
         assert hit.score == 100.0
-        assert hit.text == "DEL MAGUEY"
+        assert hit.text == "SIERRA VERDE"
 
     def test_the_hit_reports_the_region_it_was_found_in(self):
-        units = units_of("DEL MAGUEY")
-        hit = find_on_label("DEL MAGUEY", units)
+        units = units_of("SIERRA VERDE")
+        hit = find_on_label("SIERRA VERDE", units)
         assert hit is not None
         assert hit.region == TextRegion(column=0, block=0)
 
@@ -131,15 +134,15 @@ class TestTheSearchItself:
     def test_a_window_is_scored_rather_than_the_whole_panel(self):
         """A hit is not diluted by the body copy printed around it."""
         clutter = " ".join(["filler"] * 40)
-        hit = find_on_label("DEL MAGUEY", units_of(f"{clutter} DEL MAGUEY {clutter}"))
+        hit = find_on_label("SIERRA VERDE", units_of(f"{clutter} SIERRA VERDE {clutter}"))
         assert hit is not None
         assert hit.score == 100.0
 
     def test_nothing_read_means_nothing_found(self):
-        assert find_on_label("DEL MAGUEY", []) is None
+        assert find_on_label("SIERRA VERDE", []) is None
 
     def test_a_declared_value_of_only_punctuation_finds_nothing(self):
-        assert find_on_label("--", units_of("DEL MAGUEY")) is None
+        assert find_on_label("--", units_of("SIERRA VERDE")) is None
 
 
 class TestFoundInSmallTypeOnABusyPanel:
@@ -152,7 +155,7 @@ class TestFoundInSmallTypeOnABusyPanel:
         brand = row(result, "brand_name")
         assert brand.outcome is Outcome.MATCH
         assert brand.found_on_label
-        assert brand.label_value == "DEL MAGUEY"
+        assert brand.label_value == "SIERRA VERDE"
 
     @requires_tesseract
     @requires_fonts
@@ -189,7 +192,7 @@ class TestAValueTheLabelDoesNotCarry:
 
     def test_a_declared_brand_absent_from_the_label_is_not_found(self):
         comparison, hit = verify_presence(
-            "Brand name", "STORMY RIDGE", units_of("DEL MAGUEY SINGLE VILLAGE MEZCAL")
+            "Brand name", "STORMY RIDGE", units_of("SIERRA VERDE SMALL BATCH MEZCAL")
         )
         assert comparison.outcome is Outcome.MISMATCH
         assert "not found on the label" in comparison.reason
@@ -205,7 +208,7 @@ class TestAValueTheLabelDoesNotCarry:
         assert row(result, "brand_name").outcome is Outcome.MISMATCH
 
     def test_an_empty_label_reading_reports_not_found_rather_than_a_match(self):
-        comparison, hit = verify_presence("Brand name", "DEL MAGUEY", [])
+        comparison, hit = verify_presence("Brand name", "SIERRA VERDE", [])
         assert comparison.outcome is Outcome.MISMATCH
         assert hit is None
 
@@ -231,7 +234,7 @@ class TestCaseAndPunctuation:
         assert comparison.outcome is Outcome.MATCH
 
     def test_punctuation_the_reading_invented_does_not_defeat_a_match(self):
-        comparison, _ = verify_presence("Brand name", "DEL MAGUEY", units_of("DEL, MAGUEY."))
+        comparison, _ = verify_presence("Brand name", "SIERRA VERDE", units_of("SIERRA, VERDE."))
         assert comparison.outcome is Outcome.MATCH
 
     def test_two_genuinely_different_names_do_not_match(self):
@@ -243,16 +246,16 @@ class TestInsideALongerWord:
     """A value present only inside a longer word has not been found."""
 
     def test_a_short_value_inside_a_longer_word_is_not_a_match(self):
-        comparison, _ = verify_presence("Brand name", "VIDA", units_of("INDIVIDUAL BOTTLES"))
+        comparison, _ = verify_presence("Brand name", "ROSA", units_of("PROSAIC BOTTLES"))
         assert comparison.outcome is not Outcome.MATCH
 
     def test_the_exact_pass_requires_whole_words(self):
-        hit = find_on_label("VIDA", units_of("INDIVIDUAL BOTTLES"))
+        hit = find_on_label("ROSA", units_of("PROSAIC BOTTLES"))
         assert hit is None or hit.score < 100.0
 
     def test_a_whole_word_next_to_a_longer_one_is_still_found(self):
         """The rule is word boundaries, not a ban on short values."""
-        hit = find_on_label("VIDA", units_of("INDIVIDUAL VIDA BOTTLES"))
+        hit = find_on_label("ROSA", units_of("PROSAIC ROSA BOTTLES"))
         assert hit is not None
         assert hit.score == 100.0
 
@@ -270,7 +273,7 @@ class TestTheRegistryCode:
         comparison, hit = verify_presence(
             "Class or type designation",
             "MEZCAL FB",
-            units_of("SINGLE VILLAGE MEZCAL"),
+            units_of("SMALL BATCH MEZCAL"),
             strip_trailing_code=True,
         )
         assert comparison.outcome is Outcome.MATCH
@@ -281,7 +284,7 @@ class TestTheRegistryCode:
         comparison, _ = verify_presence(
             "Class or type designation",
             "MEZCAL FB",
-            units_of("SINGLE VILLAGE MEZCAL"),
+            units_of("SMALL BATCH MEZCAL"),
             strip_trailing_code=True,
         )
         assert "registry code" in comparison.reason
@@ -299,9 +302,7 @@ class TestTheRegistryCode:
 
     def test_nothing_is_stripped_from_the_brand_name(self):
         """Only the class or type carries a code; the brand is searched whole."""
-        comparison, _ = verify_presence(
-            "Brand name", "MEZCAL FB", units_of("SINGLE VILLAGE MEZCAL")
-        )
+        comparison, _ = verify_presence("Brand name", "MEZCAL FB", units_of("SMALL BATCH MEZCAL"))
         assert comparison.outcome is not Outcome.MATCH
 
 
@@ -310,13 +311,13 @@ class TestTheThresholdsAreTheOnesAlreadyConfigured:
 
     def test_a_score_at_the_match_threshold_is_a_match(self):
         assert settings.match_threshold == 95
-        comparison, _ = verify_presence("Brand name", "DEL MAGUEY", units_of("DEL MAGUEY"))
+        comparison, _ = verify_presence("Brand name", "SIERRA VERDE", units_of("SIERRA VERDE"))
         assert comparison.score == 100.0
         assert comparison.outcome is Outcome.MATCH
 
     def test_a_near_reading_lands_in_the_review_band(self):
         """One character misread is a person's call, not a defect (FR-3)."""
-        comparison, _ = verify_presence("Brand name", "DEL MAGUEY", units_of("DEL MACUEY"))
+        comparison, _ = verify_presence("Brand name", "SIERRA VERDE", units_of("SIERRA VERDF"))
         assert comparison.outcome is Outcome.NEEDS_REVIEW
         assert settings.review_threshold <= (comparison.score or 0) < settings.match_threshold
 
@@ -372,10 +373,39 @@ class TestTheExtractorIsStillTheFallback:
         """What the search replaced, pinned so the reason for replacing it is visible.
 
         With nothing declared there is nothing to search for, so type size
-        decides, and on this label type size answers ``Vida Clasico``: confident,
+        decides, and on this label type size answers ``Rosa Clasico``: confident,
         and not the brand name. That is the whole argument for the inversion, and
         it is asserted here rather than described.
         """
         declared = {**DECLARED, "brand_name": ""}
         result = verify_photos([render_busy_png_bytes(MEZCAL_SHAPED)], declared)
-        assert row(result, "brand_name").label_value == "Vida Clasico"
+        assert row(result, "brand_name").label_value == "Rosa Clasico"
+
+
+@requires_tesseract
+@requires_fonts
+class TestAMissingAlcoholStatementIsNeverRescued:
+    """The false pass the v1.2.0 code review reproduced (ADR 0015, amended).
+
+    A label that prints no alcohol content at all, and somewhere on it the bare
+    number the application declares. Until v1.2.1 the rescue searched the label
+    for the declared value, found the number as a whole word, and handed it to
+    the numeric comparison as the label's alcohol content, which reported a
+    match. The row has to say not found: 27 CFR requires the statement, and
+    FR-9's last criterion is that no error path returns a match.
+    """
+
+    @pytest.mark.parametrize("declared", ["12", "12%"])
+    def test_a_bare_number_elsewhere_on_the_label_is_not_the_alcohol_content(
+        self, label_png, declared
+    ):
+        png = label_png(alcohol_content="AGED 12 MONTHS IN OAK")
+        application = {**SAMPLE_LABEL.application, "alcohol_content": declared}
+
+        result = verify_photos([png], application)
+
+        abv = next(field for field in result.fields if field.name == "alcohol_content")
+        assert abv.outcome is Outcome.MISMATCH
+        assert abv.found_on_label is False
+        assert abv.label_value is None
+        assert "not found on the label" in abv.reason

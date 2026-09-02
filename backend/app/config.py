@@ -18,9 +18,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Application settings.
 
-    Defaults are chosen so that a fresh checkout runs with no network egress:
-    ``enable_bedrock_fallback`` is off unless explicitly enabled
-    (see docs/adr/0003-local-ocr-default-bedrock-optional.md).
+    Defaults are chosen so that a fresh checkout runs with no network egress.
+    There is no setting that opens one: the vision-model fallback ADR 0003
+    describes was designed and never built, and the three settings that once
+    promised it were removed in v1.2.1 rather than left to imply otherwise.
     """
 
     model_config = SettingsConfigDict(env_prefix="TTB_", env_file=None, extra="ignore")
@@ -28,11 +29,6 @@ class Settings(BaseSettings):
     app_name: str = "TTB Label Verifier"
     environment: str = "local"
     log_level: str = "INFO"
-
-    # Extraction path. Off by default; the default path makes no outbound calls.
-    enable_bedrock_fallback: bool = False
-    bedrock_region: str = "us-east-1"
-    bedrock_model_id: str = ""
 
     # Upload guards. Enforced before any image is decoded.
     max_upload_bytes: int = 10 * 1024 * 1024

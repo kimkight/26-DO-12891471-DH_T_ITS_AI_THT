@@ -1,7 +1,7 @@
 """The colour image as a first-class OCR candidate (FR-1, v1.1.0).
 
 The author submitted a mezcal COLA PDF to the deployed build on 2026-08-30 and
-the label artwork inside it read as "AMoviy TS" against DEL MAGUEY, with the
+the label artwork inside it read as "AMoviy TS" against SIERRA VERDE, with the
 government warning not found at all. Two things were wrong and this module
 covers the second of them.
 
@@ -66,8 +66,8 @@ from tests.conftest import (  # noqa: E402
 # on the fixture, and two of them are printed in the ink a grayscale conversion
 # collapses into the ground behind it.
 REQUIRED_ON_THE_LABEL = (
-    "DEL MAGUEY",
-    "SINGLE VILLAGE MEZCAL",
+    "SIERRA VERDE",
+    "SMALL BATCH MEZCAL",
     "42% ALC BY VOL",
     "750 ML",
     "GOVERNMENT WARNING",

@@ -101,6 +101,25 @@ jobs:
 
           echo "All six deployment variables are set."
 
+      # A release deploys an image named for its tag, and the image reports the
+      # version pyproject.toml declares. The two have to agree, or /api/health
+      # names a build the tag does not: v1.2.0 shipped reporting 1.1.0 because
+      # nothing checked. A manual dispatch is not a release and is not checked.
+      - name: Require the release tag to match the declared version
+        if: github.event_name == 'release'
+        uses: actions/checkout@v7
+      - name: Compare the release tag with pyproject.toml
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          declared=$(python3 -c "import tomllib;print(tomllib.load(open('backend/pyproject.toml','rb'))['project']['version'])")
+          if [ "v${declared}" != "${RELEASE_TAG}" ]; then
+            echo "::error::Release tag ${RELEASE_TAG} does not match backend/pyproject.toml version ${declared}. Bump the version (docs/08_SDLC_PROCESS.md section 7, step 1) before publishing."
+            exit 1
+          fi
+          echo "Release tag ${RELEASE_TAG} matches the declared version."
+
   build-and-push:
     name: build and push image
     needs: preflight

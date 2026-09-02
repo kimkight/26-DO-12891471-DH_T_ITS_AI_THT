@@ -7,7 +7,10 @@
 
 # ---------------------------------------------------------------------------
 # Task execution role: what the ECS agent uses to start the task. Pulling the
-# image and creating log streams, nothing else.
+# image and writing log streams. It carries the AWS-managed policy, which grants
+# those actions on every repository and log group in the account rather than
+# on this stack's two; scoping it to them is tracked as a low finding of the
+# v1.2.0 code review.
 # ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
@@ -40,7 +43,7 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 #
 # The default extraction path makes no AWS API call: OCR runs in-process
 # against the Tesseract binary in the image (ADR 0003, NFR-3), nothing is
-# persisted (NFR-6), and the optional Bedrock fallback is off (D-4). A role
+# persisted (NFR-6), and no outbound call exists to make (D-4). A role
 # with no policy attached is the honest expression of that, and it exists at
 # all so that adding a permission later is an explicit change to this file
 # rather than a discovery that the task has been running as the execution role.
@@ -154,8 +157,9 @@ data "aws_iam_policy_document" "deploy" {
   # RegisterTaskDefinition and DescribeTaskDefinition cannot be scoped to a
   # resource: a task definition revision does not exist until it is registered,
   # so there is no ARN to name, and IAM rejects a resource on either action.
-  # The condition below is what narrows them instead, to the two roles this
-  # stack owns.
+  # Nothing narrows this statement. What bounds what the role can do with a
+  # registered definition is the two statements that follow: UpdateService is
+  # scoped to this one service, and PassRole to this stack's two roles.
   statement {
     sid = "EcsTaskDefinitions"
     actions = [

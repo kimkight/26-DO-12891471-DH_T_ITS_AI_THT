@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; the fallback half amended 2026-09-01: designed, not built |
 | Date | 2026-08-20 |
 | Author | Kimberly D. Kight |
 | Decision reference | D-4 |
@@ -189,6 +189,29 @@ per-field accuracy against the sample set is required work; see
   fabricated values. Mitigated by making it off by default, by requiring the
   result to disclose when it was used (NFR-3), and by keeping it out of
   committed scope.
+
+## Amendment, 2026-09-01: the fallback was designed and not built
+
+The second clause of the Decision above, "provide an optional fallback to a
+vision model on Amazon Bedrock", was never implemented. Until v1.2.1 the
+repository said otherwise in four places: the README ("exists but is off"),
+NFR-3's acceptance criteria, three settings in `app/config.py` that nothing
+read, and a response field whose description said it would be true "when the
+fallback ran". The v1.2.0 code review found no client, no dependency and no call
+site (`docs/CODE_REVIEW_2026-09.md`, finding 5).
+
+**What stands.** The first clause, local OCR with no outbound call, is the
+whole of what was built, and every measurement in this repository was taken on
+it. The reasoning in Alternatives considered for keeping a fallback available
+rather than ruling one out is unchanged; what changed is that "available"
+meant designed, not deployable.
+
+**What changed in v1.2.1.** The three settings were removed, so no configuration
+can promise something silently; `external_call_made` is documented as the
+constant it is, kept so that a fallback built later has somewhere to say it
+ran; the README and NFR-3 say the fallback was designed and not built. Building
+it is an open question rather than a pending item, because it reintroduces
+every constraint in Consequences above and no source has asked for it.
 
 ## References
 

@@ -66,13 +66,13 @@ function collapsed(text: string): string {
  */
 const DOCUMENT = applicationDocument({
   fields: [
-    parsedField('brand_name', 'DEL MAGUEY', { source: 'embedded_text' }),
+    parsedField('brand_name', 'SIERRA VERDE', { source: 'embedded_text' }),
     parsedField('class_type', 'MEZCAL', { source: 'embedded_text' }),
     parsedField('alcohol_content', null),
     parsedField('net_contents', null),
     parsedField('beverage_type', null),
   ],
-  fanciful_name: 'VIDA',
+  fanciful_name: 'ROSA',
   class_type_code: '141',
   artwork_images_found: 1,
   artwork_images_read: 0,
@@ -148,7 +148,7 @@ describe('the six strings are off the check screens', () => {
     await checkedScreen()
 
     expect(screen.getByText('Fanciful name')).toBeInTheDocument()
-    expect(screen.getByText('VIDA')).toBeInTheDocument()
+    expect(screen.getByText('ROSA')).toBeInTheDocument()
     expect(screen.queryByText(/It is not one of the fields we compare/)).not.toBeInTheDocument()
   })
 })

@@ -90,7 +90,7 @@ const ONE_GAP = applicationDocument({
 /** The author's own case: the artwork inside the document answered two of them. */
 const FROM_ARTWORK = applicationDocument({
   fields: [
-    parsedField('brand_name', 'DEL MAGUEY'),
+    parsedField('brand_name', 'SIERRA VERDE'),
     parsedField('class_type', 'MEZCAL', { source: 'embedded_artwork' }),
     parsedField('alcohol_content', '42% ALC BY VOL', { source: 'embedded_artwork' }),
     parsedField('net_contents', '750 ML', { source: 'embedded_artwork' }),
@@ -240,7 +240,7 @@ describe('the source of a value that was read', () => {
 
     await upload(user)
 
-    await waitFor(() => expect(screen.getByText('DEL MAGUEY')).toBeVisible())
+    await waitFor(() => expect(screen.getByText('SIERRA VERDE')).toBeVisible())
     expect(screen.getByText('Application form')).toBeVisible()
     expect(screen.getAllByText('Label artwork in the application')).toHaveLength(3)
     /*

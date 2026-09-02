@@ -27,9 +27,19 @@ at scale 2.0, the ticked box is plainly darker than the two empty ones:
     MALT BEVERAGE                   241.8
     ====================  ===============
 
-A 22 point separation on deliberately loose coordinates. The two empty boxes
-differ from each other by 1.9, which is what two boxes that are the same look
-like. Item 3, SOURCE OF PRODUCT, shows the same pattern with "Imported" ticked.
+A 22 point separation on deliberately loose coordinates, taken by hand. The two
+empty boxes differ from each other by 1.9, which is what two boxes that are the
+same look like. Item 3, SOURCE OF PRODUCT, shows the same pattern with
+"Imported" ticked.
+
+**The window this module takes measures less.** Run through the pipeline at
+v1.2.0, the same filing separates by 12.1 points with ``_checkbox_of``'s
+window, against a ``PRODUCT_TYPE_MARGIN`` of 12.0; a single-page Registry
+printout measured 32.3 on the same day. The margin therefore sits at the edge
+of the signal on the document it was set from, and a change of render scale or
+edition could flip a correct reading to "not determined". Tracked as #123; the
+number is not moved until the measurement has been taken across both documents
+at three scales.
 
 **This is the same lesson as the embedded label artwork, in a second place: the
 form is a picture as well as a text layer, and the tool has to look at both.**
@@ -111,7 +121,9 @@ _WINDOW_GAP_RATIO = 0.25
 # called ticked, in luminance points on the 0 to 255 scale.
 #
 # **The number is set from both ends of the author's measurement.** The signal on
-# her own filing is 22.4 points, from a loose crop that this module does not take.
+# her own filing is 22.4 points, from a loose crop that this module does not take;
+# this module's own window measures 12.1 on that filing (#123, see the module
+# docstring), which is why the margin is not to be raised without a new measurement.
 # The noise is 1.9 points, which is the difference between her two *empty* boxes
 # and therefore the size of a difference that means nothing: paper texture, a
 # heavier printed rule on one box, a scanner's uneven illumination.

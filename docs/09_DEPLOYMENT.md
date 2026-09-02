@@ -1,17 +1,16 @@
 # Deployment
 
 This is a runbook. It is written for one operator, at one machine, with
-administrative credentials for her own AWS account, and it assumes nothing has
-been applied yet.
+administrative credentials for her own AWS account. It was written before the
+first apply and is kept as the procedure for the next one.
 
-**Nothing in this repository has been applied.** The Terraform in
-`infra/terraform/` has been formatted and validated against the AWS provider
-schema in CI, which means it is well formed. It has never been planned or
-applied against an account, because the sessions that wrote it had no AWS
-credentials and were not given any. Every number in section 5 is an estimate
-from published list prices, and every number in section 4 is arithmetic. The
-first measurement of anything on the deployed target is section 9, and it does
-not exist yet.
+**The stack has been applied and the prototype is deployed.** The Terraform in
+`infra/terraform/` was applied by the author on 2026-08-28 to one account in
+`us-east-1`, and the deploy workflow has put releases behind the load balancer
+since. Every number in section 5 is still an estimate from published list
+prices, and every number in section 4 is still arithmetic; section 9 records
+the measurements taken on the deployed target, and one of them, peak memory,
+is still open.
 
 ## 1. What this builds
 
@@ -40,10 +39,11 @@ still confirmed at deployment time and is not asserted here; see
 - Write access to this repository's Actions variables.
 
 You do **not** need to put an account number, an ARN, or a key anywhere in this
-repository. Terraform reads your credentials from the environment. The two
-values that do identify your account, the deploy role ARN and the ECR
-registry hostname, reach GitHub Actions as repository variables and are
-produced by `terraform output` at the end of section 3.
+repository. Terraform reads your credentials from the environment. The one
+value that identifies your account, the deploy role ARN, reaches GitHub
+Actions as a repository variable produced by `terraform output` at the end of
+section 3; the ECR registry hostname is never stored, because
+`amazon-ecr-login` resolves it at run time from the repository name.
 
 `terraform.tfvars` is git-ignored. `terraform.tfvars.example` is committed and
 is a copy-and-edit starting point; every value in it is optional, and
@@ -55,10 +55,8 @@ describes.
 ```bash
 cd infra/terraform
 
-# One-time: resolve the AWS provider and write .terraform.lock.hcl for every
-# platform this project might be applied from, then commit the lock file. It is
-# absent from the repository because the session that wrote this configuration
-# had no route to registry.terraform.io.
+# .terraform.lock.hcl is committed, with hashes for the platforms this project
+# is applied from. Re-run the lock step only when the provider version changes.
 terraform init
 terraform providers lock \
   -platform=linux_amd64 -platform=darwin_arm64 -platform=darwin_amd64
@@ -115,8 +113,10 @@ first line of NDJSON is written. **A batch is resident in memory before any of
 it is processed.** Memory, not CPU, is what sizes this task.
 
 The application derives `TTB_MAX_BATCH_BYTES` as
-`TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, which at the defaults is 300
-times 10 MiB, 3 000 MiB. That is an upper bound implied by two limits already
+`2 * TTB_MAX_BATCH_FILES * TTB_MAX_UPLOAD_BYTES`, which at the defaults is two
+files per label, 300 labels, 10 MiB each, 6 000 MiB (the factor of two is
+ADR 0009's document per label; the task definition sets a lower explicit cap,
+below). That is an upper bound implied by two limits already
 stated elsewhere. It is not a recommendation, and a task sized below it while
 still accepting it is a task that dies on a large batch: Fargate kills a task
 that exceeds its memory rather than throttling it, and losing the task loses
@@ -137,7 +137,7 @@ to hold a smaller batch cheaply.
 | --- | --- | --- |
 | Interpreter, FastAPI, uvicorn, numpy, OpenCV, pytesseract | 150 | Measured: 77 MiB peak RSS after importing `app.main` against `backend/requirements.lock`, on a four-core Linux session container running Python 3.11. Doubled here for the running ASGI stack and allocator behaviour under load. **Not measured on Fargate.** |
 | The batch payload, held as `bytes` for the batch's duration | 3 000 | `TTB_MAX_BATCH_BYTES`, below. Since [ADR 0009](adr/0009-batch-cola-documents.md) this covers the label images **and** their COLA documents together, which does not change the figure: it is the envelope that bounds the payload, not the file count. |
-| Transient duplication while the parts are read | 300 | Starlette spools a multipart part to a temporary file once it exceeds 1 MiB; below that the part stays in memory while `await image.read()` makes the copy the batch holds. Worst case is 300 parts each just under 1 MiB, so both copies of all of them are resident at once. |
+| Transient duplication while the parts are read | 300 | Starlette spools a multipart part to a temporary file once it exceeds `TTB_MAX_UPLOAD_BYTES` (`app/api.py` raises the 1 MiB default to the per-file limit); below that the part stays in memory while `await image.read()` makes the copy the batch holds. Worst case is 300 parts each just under 1 MiB, so both copies of all of them are resident at once. |
 | Per-image working set, one worker | 400 | The decoded image at the 1600 px long edge is about 7.3 MiB per copy and the preprocessing chain holds several; the Tesseract child process is the unmeasured part, and 400 MiB is a deliberately generous ceiling for it. |
 | Result objects, futures, NDJSON framing | 20 | 300 small dataclasses. No image bytes: results carry text and scores. |
 | **Total** | **3 870** | |

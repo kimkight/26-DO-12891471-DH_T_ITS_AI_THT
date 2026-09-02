@@ -5,11 +5,13 @@ Terraform for the prototype's AWS deployment, in
 and every value's origin, is
 [docs/09_DEPLOYMENT.md](../docs/09_DEPLOYMENT.md).
 
-**Nothing here has been applied.** The configuration is formatted and validated
-against the AWS provider schema on every pull request (the `infrastructure
-format and validate` job in `.github/workflows/ci.yml`), which is a statement
-about the code and not about any account. No plan or apply has been run,
-because the sessions that wrote it had no AWS credentials.
+**This configuration has been applied**, by the author from her own machine,
+to one AWS account in `us-east-1`; the prototype runs on it and the measurements
+in `docs/09_DEPLOYMENT.md` section 9 were taken against it. CI formats and
+validates it against the provider schema on every pull request (the
+`infrastructure format and validate` job in `.github/workflows/ci.yml`), which
+is a statement about the code; the apply is a statement about one account, and
+the state file that records it is local and not committed.
 
 ## What is here
 

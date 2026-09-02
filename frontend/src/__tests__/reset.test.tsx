@@ -34,7 +34,7 @@ const TOGGLE = 'Or type the application values'
 
 const DOCUMENT = applicationDocument({
   fields: [
-    parsedField('brand_name', 'DEL MAGUEY', { source: 'embedded_text' }),
+    parsedField('brand_name', 'SIERRA VERDE', { source: 'embedded_text' }),
     parsedField('class_type', 'MEZCAL', { source: 'embedded_text' }),
     parsedField('alcohol_content', null),
     parsedField('net_contents', null),
@@ -101,7 +101,7 @@ describe('where the control is, and what it is', () => {
     render(<SingleLabelTab />)
     await user.click(screen.getByRole('button', { name: TOGGLE }))
 
-    await user.type(screen.getByLabelText('Brand name'), 'Del Maguey')
+    await user.type(screen.getByLabelText('Brand name'), 'Sierra Verde')
 
     expect(screen.getByRole('button', { name: RESET })).toBeInTheDocument()
   })
@@ -175,7 +175,7 @@ describe('reset from a completed check', () => {
     stub()
     render(<SingleLabelTab />)
     await user.click(screen.getByRole('button', { name: TOGGLE }))
-    await user.type(screen.getByLabelText('Brand name'), 'Del Maguey')
+    await user.type(screen.getByLabelText('Brand name'), 'Sierra Verde')
 
     await user.click(screen.getByRole('button', { name: RESET }))
 
