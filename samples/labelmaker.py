@@ -189,10 +189,10 @@ COLOUR_CANVAS = (1400, 1200)
 # the colour arm should not also be testing the orientation floor, so this is
 # here to keep the two apart.
 COLOUR_BODY_COPY = (
-    "Distilled and bottled by the named producer in Oaxaca, Mexico. Imported by "
-    "the named importer. Each village produces a mezcal of its own character, "
-    "and this bottling is drawn from a single village and a single family of "
-    "producers."
+    "Distilled and bottled by the named producer in Mexico. Imported by the "
+    "named importer. Each batch is drawn from a single harvest of agave, roasted "
+    "in an earthen pit and distilled twice in small copper stills, and no two "
+    "batches are quite the same."
 )
 
 
@@ -207,8 +207,11 @@ class ColourLabelSpec:
     thing those expectations are measured on.
     """
 
-    brand_name: str = "DEL MAGUEY"
-    class_type: str = "SINGLE VILLAGE MEZCAL"
+    # Invented values, like every other fixture in samples/. Until v1.2.1 these
+    # were a real producer's brand and designation, which the test data policy
+    # in docs/07_TEST_STRATEGY.md section 8 forbids (#101).
+    brand_name: str = "SIERRA VERDE"
+    class_type: str = "SMALL BATCH MEZCAL"
     alcohol_content: str = "42% ALC BY VOL"
     net_contents: str = "750 ML"
     warning: str = ""

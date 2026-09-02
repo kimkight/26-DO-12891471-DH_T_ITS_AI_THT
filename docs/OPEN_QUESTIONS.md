@@ -433,9 +433,9 @@ agency use of AI, and Treasury AI policy as documents to be reviewed and cited.
 
 Two specific questions: does a prototype of this kind fall within the scope of
 the applicable OMB memorandum at all, and would it appear in an agency AI use
-case inventory? The answers may differ depending on whether the Bedrock fallback
-is ever enabled, since the default path is deterministic OCR rather than a
-generative model.
+case inventory? The answers would change if a generative fallback were ever
+built (ADR 0003 designed one and it was not built), since the only path is
+deterministic OCR rather than a generative model.
 
 **Who can answer:** the Treasury AI governance function or the agency Chief AI
 Officer, citing the current controlling documents.
@@ -1529,3 +1529,44 @@ needs a measurement over real artwork, which is OQ-21's territory.
 **Blocks:** nothing. The field is compared normally wherever the application
 declares it, and reports "not compared" where it does not, which is what it did
 before FR-15 and is not wrong, only incomplete.
+
+## OQ-29
+
+**Should the repository's history be rewritten to remove a real producer's tax
+registration number?**
+
+**Status: Decided and closed 2026-09-01. No. Recorded here so the line is
+reusable.**
+
+**What happened.** The v1.2.0 code review (`docs/CODE_REVIEW_2026-09.md`,
+finding 2) found that a Mexican RFC, the business tax registration number of
+the producer of the author's own filed COLA, had been committed in a docstring
+of `backend/app/ocr.py` in three consecutive commits on 2026-08-31 and removed
+in a fourth. It is not in any release's tree; it is recoverable from history.
+
+**What it is, and what it is not.** An RFC is printed on the back of every
+bottle of the product and on public registry pages. It is not a credential, not
+a secret, not a personal identifier, and not an applicant's private filing
+data. The signature image on page 2 of the same filing is in a different class
+and has never been committed.
+
+**What a rewrite would cost.** A force-push of `main` and `develop`, re-creating
+the published `v1.2.0` tag on a different commit, a support request to purge
+cached views, and every commit hash cited in this CHANGELOG, the ADRs and
+eighteen merged pull request bodies pointing at objects that no longer exist. A
+reader following a link from the CHANGELOG to a dead commit is a worse outcome
+than the datum itself.
+
+**Decision.** History stands. The value was removed from the tree on
+2026-08-31; the real brand and product values that were fixture defaults and
+test expectations were replaced with invented ones in v1.2.1 (#101); the
+CHANGELOG and ADR text that record what happened on that filing are left as the
+record they are, because a record describes what happened and a fixture asserts
+what should happen. **The line that would have changed the answer:** a permit
+number tied to a named individual, a contact's details, a signature, or anything
+not already printed on a public retail package. Any of those in history is
+rewritten out, whatever it costs.
+
+**Who decided:** the author, 2026-09-01, in
+`docs/CODE_REVIEW_DECISIONS_2026-09.md` decisions 1 and 8.
+**Blocks:** nothing.

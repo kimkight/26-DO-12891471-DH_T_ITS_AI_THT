@@ -23,7 +23,7 @@ graph LR
 
     agent -->|"Uploads label artwork<br/>and application data"| app
     app -->|"Per-field outcomes:<br/>match / review / mismatch"| agent
-    app -.->|"Optional, off by default,<br/>only if explicitly enabled"| bedrock
+    app -.->|"Designed in ADR 0003,<br/>not built"| bedrock
     app -.- cola
 
     classDef out fill:#eee,stroke:#999,stroke-dasharray:4 3,color:#333;
@@ -358,7 +358,7 @@ same precedence rule: a typed value overrides a parsed one, field by field.
 **A declared value is searched for on the label rather than extracted from it**
 (`app/search.py`, [ADR 0015](adr/0015-verify-by-search.md)). The application
 already states the answer, so the question is not "what is the brand name on this
-label" but "does `DEL MAGUEY` appear on this label". The reading is grouped one
+label" but "does the declared brand appear on this label". The reading is grouped one
 searchable unit per region of the sheet, both sides are normalized as FR-4
 requires, whole-word containment scores 100, and otherwise the best window of
 words is scored with the same `fuzz.ratio` the comparison uses. The score is
@@ -532,9 +532,6 @@ committed. [Source: Decision D-4; Decision D-9]
 | --- | --- | --- |
 | `TTB_ENVIRONMENT` | `local` | Environment name reported by the health endpoint |
 | `TTB_LOG_LEVEL` | `INFO` | Log verbosity |
-| `TTB_ENABLE_BEDROCK_FALLBACK` | `false` | Enables the optional vision-model fallback. Off by default so the default path makes no outbound calls. |
-| `TTB_BEDROCK_REGION` | `us-east-1` | Region for the fallback, when enabled |
-| `TTB_BEDROCK_MODEL_ID` | empty | Model identifier for the fallback, when enabled |
 | `TTB_MAX_UPLOAD_BYTES` | `10485760` | Per-file size limit, enforced before the body is read |
 | `TTB_MAX_BATCH_FILES` | `300` | Batch file-count limit, enforced before processing |
 | `TTB_BATCH_WORKERS` | `0` | How many images a batch reads at once. `0` derives it from the cores the process may use, because OCR is CPU bound and runs in-process. |
@@ -658,11 +655,10 @@ The architecture holds both paths open by construction:
   system does not assume reachability of any external endpoint. This matters in
   a restricted network, which is the environment Marcus describes.
   [Source: Marcus Williams interview]
-- **The optional Bedrock fallback is the one portability risk.** Model
-  availability differs between commercial regions and government regions, and
-  Bedrock has no equivalent on Azure. Because the fallback is off by default and
-  is not on the committed path, it cannot block a deployment to either target.
-  Availability must be confirmed before it is relied on anywhere.
+- **A vision-model fallback, if one is ever built, would be the one portability
+  risk.** ADR 0003 designed one on Amazon Bedrock and it was not built; model
+  availability differs between commercial and government regions, and Bedrock
+  has no equivalent on Azure. Nothing in the deployed stack depends on it.
 - **A move to Azure is a deployment change, not a redesign.** ECS on Fargate
   maps to Azure Container Apps or AKS running the same image. The infrastructure
   code is the part that does not transfer: Terraform would need an Azure

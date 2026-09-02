@@ -195,7 +195,7 @@ highest a losing preprocessed read reached was 68.4.
   **Implemented**, in `test_batch.py::TestOneBadImageDoesNotFailTheBatch`.
 - A batch exceeding the file-count limit is rejected before any file is
   processed (FR-8). **Implemented**, in `test_batch.py::TestOverCount`.
-- With `TTB_ENABLE_BEDROCK_FALLBACK` unset, no outbound connection is attempted
+- With the default configuration, no outbound connection is attempted (there is no setting that opens one; the fallback ADR 0003 designed was not built)
   (NFR-3). **Implemented**, as UAT row 16: the test replaces the socket
   constructor so that any attempt to open an IP socket raises, proves the guard
   is live by opening one itself, and then asserts the verification still returns

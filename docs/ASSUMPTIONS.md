@@ -471,7 +471,7 @@ response said the verdict had been made on almost no evidence, and the rotation
 was applied anyway. The author's mezcal COLA artwork made that visible on
 2026-08-30: OSD returned 180 degrees at a confidence of 0.03, the label was
 turned upside down on the strength of it, and the brand read as `AMoviy TS`
-against `DEL MAGUEY`.
+against the declared brand.
 
 "There is nothing better to fall back to" was the wrong conclusion from a right
 measurement, and the correction is narrow. The 46 of 48 figure stands and is

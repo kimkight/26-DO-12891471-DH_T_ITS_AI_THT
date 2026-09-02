@@ -18,9 +18,9 @@ requires. The rate at which it fails is measured, not asserted: see
 scripts/measure.py.
 
 **"Usually" is doing real work in that paragraph, and the author's own filing
-is where it stops being true.** Her mezcal COLA declares a brand name of
-``DEL MAGUEY`` and a fanciful name of ``VIDA``, while the largest text on the
-artwork is ``Vida Clasico``. Type size does not identify the brand name on that
+is where it stops being true.** Her COLA declares a brand name and a fanciful
+name, while the largest text on the artwork is the fanciful name's own display
+line. Type size does not identify the brand name on that
 label, and no amount of tuning makes it. So the ranking has to be able to
 decline, and ``_standout`` is where it does: see it for the two conditions a
 candidate has to clear, and see FR-1 for why declining is the required answer
@@ -420,11 +420,11 @@ def _as_block(lines: list[OcrLine]) -> TextBlock:
 # the size of the class or type designation below it, which is what a label
 # designer does and what this reads. On the mezcal artwork nothing separates:
 # the tallest upright text on the sheet is a misread of a decorative element,
-# the next is a misread of ``Vida Clasico``, and they are within a sixth of each
-# other. The honest answer there is that type size did not find the brand name,
-# which is the truth: the COLA declares ``DEL MAGUEY`` and the artwork's own
-# largest text is ``Vida Clasico``, so the heuristic is not merely inconclusive
-# on that label, it is wrong on it.
+# the next is a misread of the fanciful name's display line, and they are within
+# a sixth of each other. The honest answer there is that type size did not find
+# the brand name, which is the truth: the COLA declares one brand and the
+# artwork's own largest text is the fanciful name, so the heuristic is not
+# merely inconclusive on that label, it is wrong on it.
 _STANDOUT_RATIO = 0.70
 
 

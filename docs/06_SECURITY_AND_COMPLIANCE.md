@@ -37,7 +37,7 @@ These exist in the repository today and are verifiable by reading it.
 | Non-root container user (UID 10001, `nologin`) | `Dockerfile` | CI asserts `id -u` is not 0 in the built image |
 | Multi-stage build; Node toolchain absent from the runtime image | `Dockerfile` | Runtime stage starts from `python:3.11-slim-bookworm` |
 | No volumes mounted; nothing writable persists | `docker-compose.yml`, `Dockerfile` | Inspection |
-| Python dependency audit | `.github/workflows/ci.yml` | `pip-audit --strict` |
+| Python dependency audit | `.github/workflows/ci.yml` | `pip-audit --no-deps` over both fully pinned lock files, runtime and dev |
 | Node dependency audit | `.github/workflows/ci.yml` | `npm audit --audit-level=high` |
 | SBOM for the container image | `.github/workflows/ci.yml` | Syft via `anchore/sbom-action`, SPDX JSON, uploaded as a build artifact |
 | Automated dependency updates | `.github/dependabot.yml` | Weekly for pip, npm, GitHub Actions, Docker |
@@ -132,7 +132,7 @@ AWS services this system uses or would use:
 | Elastic Load Balancing (Application Load Balancer) | Ingress and TLS termination |
 | AWS IAM | Roles for the task, task execution, and the CI OIDC principal |
 | Amazon CloudWatch Logs | Container logging |
-| Amazon Bedrock | Optional, off by default, not on the committed path (D-4) |
+| Amazon Bedrock | Designed as an optional fallback in ADR 0003 and not built; not used (D-4) |
 
 The in-scope status of each of these services, for the relevant impact level and
 for the relevant region, **must be confirmed at deployment time** against the

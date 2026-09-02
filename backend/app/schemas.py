@@ -885,8 +885,11 @@ class VerificationResult(BaseModel):
     external_call_made: bool = Field(
         default=False,
         description=(
-            "False on the default path, which makes no outbound network call "
-            "(NFR-3). True only when the optional Bedrock fallback ran."
+            "Always false: the only extraction path makes no outbound network "
+            "call (NFR-3). The vision-model fallback ADR 0003 describes was "
+            "never built. The field stays so that a caller written against it "
+            "keeps working and so that any future fallback has somewhere to say "
+            "it ran."
         ),
     )
     files: list[FileClassification] = Field(
