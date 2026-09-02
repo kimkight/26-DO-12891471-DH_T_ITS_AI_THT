@@ -171,6 +171,23 @@ the deployed ceiling is readable where the size is:
 | `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly. The budget above holds it. See the note below: this is now a tighter bound than the application would derive. |
 | `TTB_BATCH_WORKERS` | `1` | One worker per vCPU of quota. |
 
+**Changing any of these, or a size, is apply then deploy, and the order is
+the whole of the procedure.** Terraform owns the shape of the task definition
+and the deploy workflow owns one field of it, the image
+([ADR 0019](adr/0019-task-definition-has-one-owner.md)). `terraform apply`
+registers a new revision carrying the new value and, by design, does not move
+the service onto it (`ignore_changes` in `ecs.tf`, so that an apply never
+reverts a deployment). The next run of the deploy workflow reads the **latest
+revision of the family**, which is the one the apply registered, puts the
+image into it and moves the service. Until v1.3.0 the workflow read the
+revision the service was running instead, so a changed cap could never reach
+the service through this path (code review finding 10, #109); the
+`describe-task-definition` call in `deploy.yml` now names the family, and
+its log prints both revisions when they differ. Forgetting the deploy leaves
+the service on the old shape, and nothing warns; `aws ecs describe-services
+--query 'services[0].taskDefinition'` against the family's latest revision
+is the check.
+
 **`TTB_MAX_BATCH_BYTES` is now a real bound rather than arithmetic, and that is
 deliberate.** It used to be exactly 300 times 10 MiB, one image per label at the
 per-file cap. Since [ADR 0009](adr/0009-batch-cola-documents.md) a batch carries
@@ -307,8 +324,24 @@ service. The service's circuit breaker rolls the deployment back.
 For a release, the normal path: cut `release/*`, merge to `main`, publish a
 `vX.Y.Z` release. The workflow runs on publication and tags the image with the
 release tag. The role's trust policy accepts `workflow_dispatch` from `develop`
-and `main`, a published release at a `v*` tag, and the `production`
-environment, and nothing else.
+and `main` and a published release at a `v*` tag, and nothing else; no job
+declares a GitHub environment, and [docs/06](06_SECURITY_AND_COMPLIANCE.md)
+section 2 says why the ref and not the environment is the control (#110).
+
+**Tags are immutable (v1.3.0, code review finding 27).** The registry refuses a
+push to a tag that already exists, and the workflow's preflight refuses a
+dispatch tag matching `^v[0-9]` before it builds. Two consequences for the
+operator: a dispatch cannot re-point a release tag, which is the point; and
+re-running a dispatch on the same commit with the image tag left empty pushes
+the same `sha-` tag and is refused at the push. Give the re-run an explicit
+tag (`sha-abc1234-2`, say) and it goes through. The service is unaffected
+either way, because it runs by digest.
+
+**The SBOM of the pushed image** is generated in the same job, from the
+registry by the digest that is about to be deployed, and uploaded as an
+artifact named `sbom-<digest prefix>` for 90 days. On a release it is also
+attached to the release as `sbom-<digest prefix>.spdx.json`, where it does not
+expire (#112). CI's own SBOM is of CI's build and is a different artifact.
 
 ## 8. Post-deploy verification
 

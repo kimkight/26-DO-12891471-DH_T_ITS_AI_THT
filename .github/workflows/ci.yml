@@ -22,9 +22,9 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -90,9 +90,9 @@ jobs:
       # visible in the log which one.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
           cache: npm
@@ -140,7 +140,7 @@ jobs:
 
       - name: Upload the accessibility report on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: playwright-report-${{ github.sha }}
           path: frontend/playwright-report/
@@ -153,9 +153,9 @@ jobs:
       run:
         working-directory: infra/terraform
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: hashicorp/setup-terraform@v4
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.13.3"
           # The wrapper rewrites stdout to capture step outputs, which nothing
@@ -184,13 +184,13 @@ jobs:
     name: dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "22"
 
@@ -230,12 +230,12 @@ jobs:
     name: container build and SBOM
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: false
@@ -266,6 +266,48 @@ jobs:
           echo "container uid: ${uid}"
           test "${uid}" != "0"
 
+      # A .env file anywhere in the tree must not reach the build context
+      # (code review finding 28). The frontend stage copies frontend/ whole,
+      # and Vite inlines any VITE_* value it finds in a .env.local there into
+      # the public bundle; .dockerignore excluded .env files at the root only.
+      # This plants one at each depth, builds the frontend stage from that
+      # context, and asserts that no .env file is in the stage and that the
+      # planted value is not in the bundle. It fails if .dockerignore loses
+      # the `**/` rule, which is the regression it exists to catch.
+      - name: Plant .env files that must not reach the build
+        run: |
+          printf 'VITE_PLANTED=planted-by-ci-must-not-ship\n' > frontend/.env.local
+          printf 'VITE_PLANTED=planted-by-ci-must-not-ship\n' > frontend/.env
+          printf 'TTB_PLANTED=planted-by-ci-must-not-ship\n' > backend/.env
+          printf 'PLANTED=planted-by-ci-must-not-ship\n' > .env.production
+
+      - name: Build the frontend stage from the planted context
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: frontend-build
+          push: false
+          load: true
+          tags: ttb-context-check:${{ github.sha }}
+          cache-from: type=gha
+
+      - name: Prove no .env file reaches the build
+        run: |
+          rm -f frontend/.env.local frontend/.env backend/.env .env.production
+          found=$(docker run --rm --entrypoint sh ttb-context-check:${{ github.sha }} \
+            -c 'find /build -path /build/node_modules -prune -o \( -name ".env" -o -name ".env.*" \) -print | grep -v "/.env.example$" || true')
+          if [ -n "${found}" ]; then
+            echo "::error::A .env file reached the build context:"
+            echo "${found}"
+            exit 1
+          fi
+          if docker run --rm --entrypoint sh ttb-context-check:${{ github.sha }} \
+            -c 'grep -rq "planted-by-ci-must-not-ship" /build/dist'; then
+            echo "::error::A planted VITE_ value was inlined into the built bundle."
+            exit 1
+          fi
+          echo "No .env file reached the build context, and the bundle carries nothing planted."
+
       # Records the Tesseract version actually shipped in the image. The
       # initializing session could not install Tesseract locally, so this is
       # the authoritative source for docs/05_ARCHITECTURE.md (OQ-2).
@@ -285,7 +327,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate SBOM (syft)
-        uses: anchore/sbom-action@v0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         with:
           image: ttb-label-verifier:${{ github.sha }}
           format: spdx-json
@@ -293,7 +335,7 @@ jobs:
           upload-artifact: false
 
       - name: Upload SBOM
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sbom-${{ github.sha }}
           path: sbom.spdx.json

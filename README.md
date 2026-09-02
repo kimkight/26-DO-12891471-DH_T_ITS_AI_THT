@@ -68,7 +68,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.2.1","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.3.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -571,7 +571,12 @@ five fields did not come back at all.
   server-side copy of the results, so the stream is the only one. This is the
   strongest argument for the job model ADR 0006 records as its expected
   successor.
-- **Container base images are pinned by tag, not digest.**
+- **Transit is plain HTTP.** The deployed URL has no certificate and no
+  domain, so the filed application and its signature image cross the network
+  in the clear. The fix is sized and the reasons it is not done for the
+  evaluation stack are in [docs/06](docs/06_SECURITY_AND_COMPLIANCE.md)
+  section 3.1; submit a filing you are content to send in the clear, or one of
+  the synthetic documents.
 - **The container build is verified in CI**, not in a session. The backend
   suite, the frontend component tests and the accessibility run execute in
   both.

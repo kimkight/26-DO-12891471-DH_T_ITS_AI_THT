@@ -11,11 +11,21 @@ resource "aws_ecr_repository" "app" {
     scan_on_push = true
   }
 
-  # MUTABLE, deliberately. The deploy workflow pushes a moving tag (the release
-  # tag or a dispatch tag) and then deploys the immutable digest that push
-  # returned, so immutability at the registry would forbid the tag rewrite
-  # without adding anything: what actually runs is pinned by digest either way.
-  image_tag_mutability = "MUTABLE"
+  # IMMUTABLE since v1.3.0 (code review finding 27). It was MUTABLE on the
+  # argument that what runs is pinned by digest either way, so forbidding a tag
+  # rewrite added nothing. It added something: a manual dispatch with
+  # `image_tag=v1.2.0` could re-point the release tag, and the true release
+  # digest, now untagged, would be expired by the lifecycle rule below within
+  # a day. The service would keep running the right digest; the release
+  # artefact would be gone. With immutability a push to an existing tag is
+  # refused by the registry, and the deploy workflow's preflight refuses a
+  # release-shaped dispatch tag before a build so the refusal comes with a
+  # sentence. A re-run of a dispatch on the same commit pushes the same
+  # `sha-` tag and is refused too; dispatch with an explicit tag in that case.
+  #
+  # Changing this on an existing repository is an in-place update; nothing is
+  # recreated and the images stay.
+  image_tag_mutability = "IMMUTABLE"
 
   # Let destroy delete the repository with images still in it. Without this,
   # `terraform destroy` fails on a non-empty repository and the operator has to

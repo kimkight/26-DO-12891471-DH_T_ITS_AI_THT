@@ -65,6 +65,21 @@ error handling"]
 A working prototype deployed to a URL that reviewers can access and test, on
 AWS commercial `us-east-1`. [Source: Deliverables; Decision D-1]
 
+**The URL is plain HTTP, and that is a stated limitation rather than an
+oversight (2026-09-02, code review finding 20, #119).** There is no
+certificate, no domain and no authentication, so the filed application, its
+signature image, the label artwork and the result cross the network in the
+clear; no credential, session or identity does, because none exists and
+nothing is stored (OOS-2, OOS-3). What a real deployment adds is an ACM
+certificate on a name the agency controls, an HTTPS listener on 443, a redirect
+from 80 and the matching security group rule, roughly one Terraform block plus
+the domain. It is not added for the evaluation stack because a certificate
+needs a domain this exercise does not have, and the one mitigation short of it,
+a CIDR restriction on the listener, would refuse the reviewers' networks and so
+break this deliverable. [docs/06](06_SECURITY_AND_COMPLIANCE.md) section 3.1
+sizes the fix; an evaluator should submit a filing they are content to send in
+the clear, or one of the synthetic documents under `samples/`.
+
 ### 1.8 Documentation
 
 README with setup and run instructions, plus documentation of approach, tools

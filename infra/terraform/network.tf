@@ -129,14 +129,21 @@ resource "aws_vpc_security_group_ingress_rule" "tasks_from_alb" {
   ip_protocol                  = "tcp"
 }
 
-# Open egress. The task pulls its image from ECR, fetches layers from ECR's S3
-# store, and writes to CloudWatch Logs, and each of those is a public endpoint
-# reached over the internet gateway. NFR-3 is a statement about the
-# application's default request path, which makes no outbound call, not about
-# the platform's control plane.
+# Egress on TCP 443 only. The task pulls its image from ECR, fetches layers
+# from ECR's S3 store, and writes to CloudWatch Logs, and each of those is a
+# public HTTPS endpoint reached over the internet gateway; nothing the task
+# does needs another port or protocol, and the application's default request
+# path makes no outbound call at all (NFR-3). Until v1.3.0 this rule was all
+# protocols to everywhere (code review finding 26): the residual risk in
+# docs/06 section 1, a decoder exploit in the container, would have had an
+# unrestricted reverse path from a public IP. Now it has 443. DNS is not
+# affected: traffic to the VPC's Route 53 Resolver is not filtered by security
+# groups. This is a narrowing of what the task may do, not of who may reach it.
 resource "aws_vpc_security_group_egress_rule" "tasks_egress" {
   security_group_id = aws_security_group.tasks.id
-  description       = "Image pull, log delivery"
+  description       = "Image pull and log delivery, HTTPS only"
   cidr_ipv4         = "0.0.0.0/0"
-  ip_protocol       = "-1"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
 }
