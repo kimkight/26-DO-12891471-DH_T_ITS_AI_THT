@@ -578,11 +578,13 @@ This section is the record of the runs; the README is the summary of them.
       **The panel segmentation released after deploy #12 adds no Tesseract
       read**, so it should not move this figure: the column split and the block
       grouping are both arithmetic on the word table the single existing pass
-      already returns. Confirmed on a session container, which is not
-      production hardware and is quoted only as a before-and-after on one
-      machine: the same document measured a median of 3300 ms over five runs
-      before that change and 3280 ms after it, with `ocr_passes` 1 and
-      `tesseract_reads` 4 on every run either side.
+      already returns. Re-measured on the deployed target rather than
+      on a session container, as this entry instructed: **v1.2.1, deploy #19,
+      2026-09-01**, the same document returned 4736, 4896 and 4741 ms of wall
+      clock, with `elapsed_ms` 4665, 4826 and 4671, `ocr_passes` 1 and
+      `tesseract_reads` 4 on every run. Phase breakdown on that build: PDFium
+      396 ms, artwork OCR 4267 ms, comparison 1.1 ms, unaccounted 30 ms. The
+      earlier session-container before-and-after is superseded by this.
       `backend/tests/test_panel_segmentation.py` asserts the read count so the
       claim does not rest on the measurement. **Re-run this step against the
       next deploy anyway and replace these figures if they move.** Report what
@@ -682,6 +684,31 @@ This section is the record of the runs; the README is the summary of them.
       way every other measurement in this repository is recorded. Done: 2026-08-28,
       1 vCPU and 8 GiB on Fargate, build `sha-f66a4e2`, behind the ALB in
       `us-east-1`, exercised from the author's browser.
+
+- [x] **The two real filed documents, run as a gate against the deployed
+      build.** Measured 2026-09-01 against **v1.2.1, deploy #19**, 1 vCPU and
+      8 GiB on Fargate behind the ALB in `us-east-1`, exercised from the
+      author's browser. Neither document is in this repository, in any fixture,
+      log, issue or pull request; only these measurements leave them, and
+      anyone repeating the gate supplies their own copies.
+
+      **A three-page filing, 382 KB.** Upload and parse 501, 495 and 494 ms.
+      Check 4736, 4896 and 4741 ms. All five rows pass: brand name and class or
+      type match, alcohol content and net contents are present on the label,
+      the government warning matches. The orientation check overrode a
+      Tesseract verdict of 0.03 confidence, `overrode_osd` true, which is the
+      v1.1.0 fix doing its job on a real document.
+
+      **A one-page Public COLA Registry printout, 1.1 MB.** Upload and parse
+      624 ms. Brand name and class or type read from the text layer, product
+      type read from the item 5 boxes. Alcohol content and net contents are
+      reported absent, never as a match, which is the property this half of the
+      gate exists to protect. Submitted alone the check returns
+      `no_label_to_check` in 526 ms, because **all seven of its embedded
+      images are rejected by the artwork floor**: the largest, 1442 by 433, on
+      aspect ratio, and the remaining six on the short edge. That is a real
+      Registry page whose label artwork the floor excludes wholesale, and it is
+      tracked as an open defect rather than accepted.
 
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
