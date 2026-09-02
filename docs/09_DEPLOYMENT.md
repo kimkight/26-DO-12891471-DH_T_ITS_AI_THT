@@ -171,6 +171,23 @@ the deployed ceiling is readable where the size is:
 | `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly. The budget above holds it. See the note below: this is now a tighter bound than the application would derive. |
 | `TTB_BATCH_WORKERS` | `1` | One worker per vCPU of quota. |
 
+**Changing any of these, or a size, is apply then deploy, and the order is
+the whole of the procedure.** Terraform owns the shape of the task definition
+and the deploy workflow owns one field of it, the image
+([ADR 0019](adr/0019-task-definition-has-one-owner.md)). `terraform apply`
+registers a new revision carrying the new value and, by design, does not move
+the service onto it (`ignore_changes` in `ecs.tf`, so that an apply never
+reverts a deployment). The next run of the deploy workflow reads the **latest
+revision of the family**, which is the one the apply registered, puts the
+image into it and moves the service. Until v1.3.0 the workflow read the
+revision the service was running instead, so a changed cap could never reach
+the service through this path (code review finding 10, #109); the
+`describe-task-definition` call in `deploy.yml` now names the family, and
+its log prints both revisions when they differ. Forgetting the deploy leaves
+the service on the old shape, and nothing warns; `aws ecs describe-services
+--query 'services[0].taskDefinition'` against the family's latest revision
+is the check.
+
 **`TTB_MAX_BATCH_BYTES` is now a real bound rather than arithmetic, and that is
 deliberate.** It used to be exactly 300 times 10 MiB, one image per label at the
 per-file cap. Since [ADR 0009](adr/0009-batch-cola-documents.md) a batch carries
@@ -307,16 +324,51 @@ service. The service's circuit breaker rolls the deployment back.
 For a release, the normal path: cut `release/*`, merge to `main`, publish a
 `vX.Y.Z` release. The workflow runs on publication and tags the image with the
 release tag. The role's trust policy accepts `workflow_dispatch` from `develop`
-and `main`, a published release at a `v*` tag, and the `production`
-environment, and nothing else.
+and `main` and a published release at a `v*` tag, and nothing else; no job
+declares a GitHub environment, and [docs/06](06_SECURITY_AND_COMPLIANCE.md)
+section 2 says why the ref and not the environment is the control (#110).
+
+**Tags are mutable; the workflow guards the release tags (v1.3.0, code review
+finding 27).** The registry's tag immutability was turned on for finding 27
+inside v1.3.0 and reverted before the release: once it is on, ECR returns
+`ImageTagAlreadyExistsException` for any push to a tag that already exists,
+whatever the digest, and this workflow tags by commit alone, so a re-run on an
+unchanged commit pushes the same `sha-` tag and fails at the push step.
+**Re-running the deploy workflow on an unchanged commit works**, with the image
+tag input left empty, and it is the way to redeploy. What prevents a dispatch
+from re-pointing a release tag is the workflow's preflight, which refuses a
+dispatch tag matching `^v[0-9]` before it builds; the registry itself does not
+prevent a re-point. The trade, and what would change it, is
+[OQ-34](OPEN_QUESTIONS.md#oq-34). The service is unaffected either way, because
+it runs by digest.
+
+**The SBOM of the pushed image** is generated in the same job, from the
+registry by the digest that is about to be deployed, and uploaded as an
+artifact named `sbom-<digest prefix>` for 90 days. On a release it is also
+attached to the release as `sbom-<digest prefix>.spdx.json`, where it does not
+expire (#112). CI's own SBOM is of CI's build and is a different artifact.
 
 ## 8. Post-deploy verification
 
-Run these against the URL, in order. `terraform output alb_dns_name` prints it.
+Run these against the URL, in order. `terraform output alb_dns_name` prints it,
+scheme included.
 
 ```bash
 URL=$(terraform output -raw alb_dns_name)
 ```
+
+**The URL is `http://`, and it cannot be `https://`.** Give it and open it as
+`http://<alb host>`, which is what the output prints; the same host over
+`https://` does not connect, and will not, because the load balancer has a
+listener on port 80 only. A browser that tries HTTPS first, or a link a mail
+client has rewritten to `https://`, fails to connect instead of showing the
+application, so whoever runs this gate or receives the URL should not lose
+time to it. A certificate alone is not the shortcut: ACM will not issue one for
+an `*.elb.amazonaws.com` name, so HTTPS here needs a domain as well as the
+certificate, the 443 listener and the security group rule
+([docs/06](06_SECURITY_AND_COMPLIANCE.md) section 3.1). Verified 2026-09-02
+against the running v1.2.1: `http://<alb host>/api/health` answered `1.2.1`
+and the interface loaded; `https://` on the same host could not connect.
 
 **8.1 The service answers.**
 
@@ -578,11 +630,13 @@ This section is the record of the runs; the README is the summary of them.
       **The panel segmentation released after deploy #12 adds no Tesseract
       read**, so it should not move this figure: the column split and the block
       grouping are both arithmetic on the word table the single existing pass
-      already returns. Confirmed on a session container, which is not
-      production hardware and is quoted only as a before-and-after on one
-      machine: the same document measured a median of 3300 ms over five runs
-      before that change and 3280 ms after it, with `ocr_passes` 1 and
-      `tesseract_reads` 4 on every run either side.
+      already returns. Re-measured on the deployed target rather than
+      on a session container, as this entry instructed: **v1.2.1, deploy #19,
+      2026-09-01**, the same document returned 4736, 4896 and 4741 ms of wall
+      clock, with `elapsed_ms` 4665, 4826 and 4671, `ocr_passes` 1 and
+      `tesseract_reads` 4 on every run. Phase breakdown on that build: PDFium
+      396 ms, artwork OCR 4267 ms, comparison 1.1 ms, unaccounted 30 ms. The
+      earlier session-container before-and-after is superseded by this.
       `backend/tests/test_panel_segmentation.py` asserts the read count so the
       claim does not rest on the measurement. **Re-run this step against the
       next deploy anyway and replace these figures if they move.** Report what
@@ -682,6 +736,96 @@ This section is the record of the runs; the README is the summary of them.
       way every other measurement in this repository is recorded. Done: 2026-08-28,
       1 vCPU and 8 GiB on Fargate, build `sha-f66a4e2`, behind the ALB in
       `us-east-1`, exercised from the author's browser.
+
+- [x] **The two real filed documents, run as a gate against the deployed
+      build.** Measured 2026-09-01 against **v1.2.1, deploy #19**, 1 vCPU and
+      8 GiB on Fargate behind the ALB in `us-east-1`, exercised from the
+      author's browser. Neither document is in this repository, in any fixture,
+      log, issue or pull request; only these measurements leave them, and
+      anyone repeating the gate supplies their own copies.
+
+      **A three-page filing, 382 KB.** Upload and parse 501, 495 and 494 ms.
+      Check 4736, 4896 and 4741 ms. All five rows pass: brand name and class or
+      type match, alcohol content and net contents are present on the label,
+      the government warning matches. The orientation check overrode a
+      Tesseract verdict of 0.03 confidence, `overrode_osd` true, which is the
+      v1.1.0 fix doing its job on a real document.
+
+      **A one-page Public COLA Registry printout, 1.1 MB.** Upload and parse
+      624 ms. Brand name and class or type read from the text layer, product
+      type read from the item 5 boxes. Alcohol content and net contents are
+      reported absent, never as a match, which is the property this half of the
+      gate exists to protect. Submitted alone the check returns
+      `no_label_to_check` in 526 ms, because **all seven of its embedded
+      images are rejected by the artwork floor**: the largest, 1442 by 433, on
+      aspect ratio, and the remaining six on the short edge. That is a real
+      Registry page whose label artwork the floor excludes wholesale, and it is
+      tracked as an open defect rather than accepted.
+
+- [x] **The item 5 margin at three render scales** (#123, OQ-32). The
+      luminance separation between the ticked box and the next darkest measured
+      **12.1 points against the 12.0 floor** on the author's own filing at the
+      default scale, on the very document the margin was derived from. The
+      question was whether the number moves with the render scale, and it was
+      taken across both document shapes at three scales before deciding whether
+      the floor moves. **Measured 2026-09-02 on a session container** (not
+      production hardware, and not on the real documents, which stay on the
+      author's machine) over the two synthetic stand-ins `samples/formmaker.py`
+      builds: the text-layer form with its three boxes drawn and one filled at
+      the grey calibrated against the author's measurement, and the same page
+      rasterised as a scan. The render long edge is `TTB_OCR_LONG_EDGE_PX`; the
+      scale is that over the page's longer side.
+
+      | document | render long edge (scale) | WINE | DISTILLED SPIRITS, ticked | MALT BEVERAGES | separation | read as | empty-box noise |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | text-layer form PDF | 792 px (1.0) | 218.8 | 191.2 | 219.4 | **27.6** | distilled spirits | 0.0 |
+      | rasterised scan | 792 px (1.0) | not sampled | | | | not determined | |
+      | text-layer form PDF | 1600 px (2.0, the default) | 232.6 | 212.1 | 234.6 | **20.5** | distilled spirits | 2.0 |
+      | rasterised scan | 1600 px (2.0, the default) | 223.0 | 194.4 | 226.0 | **28.6** | distilled spirits | 2.8 |
+      | text-layer form PDF | 2400 px (3.0) | 232.4 | 212.5 | 234.3 | **19.9** | distilled spirits | 1.8 |
+      | rasterised scan | 2400 px (3.0) | 228.9 | 196.5 | 223.2 | **26.6** | distilled spirits | 2.4 |
+
+      **The three scales do not agree, so the number does not move.** On the
+      text-layer document the separation is 27.6 at scale 1.0 and about 20 at
+      2.0 and 3.0, a seven-point swing from the render scale alone on a tick
+      whose darkness never changed; on the scan it is 28.6 and 26.6 where it
+      can be read at all, and at scale 1.0 the captions are too small for the
+      engine to find, so nothing is sampled and the agent chooses. The
+      synthetic tick clears 12.0 by eight to sixteen points at every scale that
+      reads; the author's real filing cleared it by 0.1 at the default, and a
+      swing of the size seen here would take that reading either way. What
+      would justify moving the floor is the same table on the two real
+      documents, which is the author's half of this measurement; until then
+      the comment in `backend/app/product_type.py` describes 12.1, not 22, and
+      the margin stays where it is. The empty-box noise, 0.0 to 2.8 points,
+      agrees with the 1.9 the author measured, so the floor's other end stands.
+
+      **Reconciling the table with the 12.1 (added 2026-09-02).** None of the
+      five separations above is anywhere near the 12.1 that put this item on
+      the list, and a published measurement should not sit beside another with
+      no account of the gap. The two runs measured the same quantity, the
+      separation the module's own `_checkbox_of` window reports, but on
+      **different documents**. The 12.1 was taken at v1.2.0 on the author's own
+      three-page filing at the default scale, and the 32.3 recorded on the same
+      day was the one-page Public COLA Registry printout, per the module
+      docstring in `backend/app/product_type.py`; neither document leaves the
+      author's machine, so neither could be in this run. The table above was
+      taken on the two synthetic stand-ins `samples/formmaker.py` builds, and
+      the darkness of their drawn tick, `TICK_GREY = 110`, was chosen to
+      reproduce the author's **hand** measurement of the filing, 217.5 against
+      239.9 and 241.8 from a loose crop, which is the 22-point figure the code
+      comment once described and not the 12.1 the module's window measures on
+      the same page. So the 20.5 at the default scale is the fixture returning
+      its own calibration, within two points of the 212 against 233 and 235
+      recorded beside that constant, and it says nothing about the real filing's
+      margin in either direction. Both figures stand, each labelled with what it
+      measures: **12.1 points, the author's real filing, the module's window,
+      default scale, v1.2.0, and not re-taken since**; **20.5 points, the
+      synthetic text-layer form, the module's window, default scale, v1.3.0**.
+      Neither is wrong and neither supersedes the other. The one the floor was
+      set from, and the one that would justify moving it, is the first, and it
+      is the measurement OQ-32 still asks the author for. The floor stays at
+      12.0.
 
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)

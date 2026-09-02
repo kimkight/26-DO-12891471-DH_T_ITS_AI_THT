@@ -154,7 +154,12 @@ export interface OrientationDetail {
   exif_orientation: number | null
   exif_transposed: boolean
   rotation_degrees: number
-  method: 'osd' | 'osd_180_check' | 'unavailable' | 'disabled'
+  /**
+   * `osd_180_check_full_resolution` is the second opinion repeated at full
+   * resolution because the reduced-scale pass read no words either way
+   * (v1.3.0); `check` then carries the full-resolution scores.
+   */
+  method: 'osd' | 'osd_180_check' | 'osd_180_check_full_resolution' | 'unavailable' | 'disabled'
   confidence: number | null
   /**
    * The second opinion taken when Tesseract's own confidence in the turn fell

@@ -28,8 +28,11 @@ artwork carry the integration markers.
 from __future__ import annotations
 
 import json
+import tempfile
 import time
+from pathlib import Path
 
+import pytesseract.pytesseract
 import pytest
 from fastapi.testclient import TestClient
 from samples.formmaker import (
@@ -481,8 +484,15 @@ class TestWhatTheDocumentSupplied:
         assert by_name["net_contents"]["application_value_source"] == "absent"
 
 
-class TestNothingIsPersisted:
-    """NFR-6, asserted against the batch path as well as the single one."""
+class TestNothingIsRetainedOnTheBatchPath:
+    """NFR-6, asserted against the batch path as well as the single one.
+
+    Renamed from `TestNothingIsPersisted` in v1.3.0 (code review finding 4): the
+    log assertion was always what it checked, and the temporary-directory
+    assertion `test_verify_integration.py::TestNothingIsRetained` makes for the
+    single path is made here for the stream, whose rows are read in a worker
+    pool rather than on the request's own thread.
+    """
 
     def test_no_field_value_or_filename_reaches_the_logs(self, caplog):
         caplog.set_level("INFO")
@@ -490,6 +500,32 @@ class TestNothingIsPersisted:
         logged = "\n".join(record.getMessage() for record in caplog.records)
         assert "secret-brand" not in logged
         assert "Stone's Throw" not in logged
+
+    @requires_tesseract
+    @requires_fonts
+    def test_the_engines_temporary_files_are_gone_when_the_stream_ends(
+        self, sample_label_png, tmp_path, monkeypatch
+    ):
+        directory = tmp_path / "tmp"
+        directory.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(directory))
+        created: list[Path] = []
+        real = tempfile.NamedTemporaryFile
+
+        def counted(*args, **kwargs):
+            handle = real(*args, **kwargs)
+            created.append(Path(handle.name))
+            return handle
+
+        monkeypatch.setattr(pytesseract.pytesseract, "NamedTemporaryFile", counted)
+
+        response = paired([("01-clean.png", sample_label_png)])
+
+        assert response.status_code == 200
+        assert lines(response)[0]["status"] == "ok"
+        assert created, "the engine reads each image through a temporary file"
+        assert {path.parent for path in created} == {directory}
+        assert sorted(directory.iterdir()) == []
 
 
 @requires_tesseract
@@ -617,3 +653,32 @@ class TestTheSameArtworkRulesApplyPerRow:
         assert entry["found_on_label"] is False
         assert entry["outcome"] == "mismatch"
         assert "27 CFR 5.63(b)(2)" in entry["reason"]
+
+
+class TestTheFoldIsTheSameOnBothSides:
+    """Code review finding 21 (v1.3.0): the page's pairing preview uses the server's rule.
+
+    The server folded with `casefold`, which rewrites `ß` to `ss`, and the page
+    with `toLowerCase`, which does not, so `Straße.png` paired with
+    `STRASSE.pdf` on the server and not on the page. Both sides now use their
+    language's plain lower-case mapping, and these vectors are asserted in
+    `frontend/src/__tests__/batchTable.test.tsx` as well, character for
+    character, so a divergence fails a test rather than a batch.
+    """
+
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("Label.PNG", "label"),
+            ("ÉTIQUETTE.png", "étiquette"),
+            ("Straße.png", "straße"),
+            ("STRASSE.pdf", "strasse"),
+            ("İstanbul.pdf", "i̇stanbul"),
+        ],
+    )
+    def test_the_plain_lower_case_mapping(self, filename, expected):
+        assert pairing_stem(filename) == expected
+
+    def test_a_sharp_s_and_a_double_s_no_longer_pair(self):
+        """What `casefold` would have paired, and the page would not have."""
+        assert pairing_stem("Straße.png") != pairing_stem("STRASSE.pdf")

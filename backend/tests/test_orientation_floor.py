@@ -48,6 +48,7 @@ from app.ocr import (  # noqa: E402
     CARDINAL_ROTATIONS,
     LOW_ORIENTATION_CONFIDENCE,
     ORIENTATION_CHECK_SCALE,
+    Segmentation,
     decode,
     extract_text,
     preprocess,
@@ -263,3 +264,89 @@ class TestTheCheckIsScoredSmall:
         prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
 
         assert max(prepared.gray.shape[:2]) == ocr.settings.ocr_long_edge_px
+
+
+@requires_tesseract
+@requires_fonts
+class TestATieOfNothingIsRescoredAtFullResolution:
+    """Code review finding 24 (v1.3.0): a tie of zero words is not a verdict.
+
+    Type too small to read at ``ORIENTATION_CHECK_SCALE`` scores zero words and
+    zero confidence both ways, and the tie rule then keeps the OSD verdict this
+    check exists to second-guess. So a tie of nothing at the reduced scale is
+    scored again at full resolution before anything is decided, and only a tie
+    at full resolution too falls back to OSD. The engine is stubbed at the read,
+    as `TestTheOverrideItself` stubs it at the verdict: what this repository
+    owns is what happens when the reduced read comes back empty, not whether a
+    given Tesseract build reads a given picture at 800 pixels.
+    """
+
+    @pytest.fixture
+    def reads(self, monkeypatch) -> list[int]:
+        """Every candidate read's long edge, in order; the reduced ones return nothing."""
+        monkeypatch.setattr(ocr, "detect_orientation", lambda _: (180, 0.03, "osd"))
+        reduced = round(ocr.settings.ocr_long_edge_px * ORIENTATION_CHECK_SCALE)
+        long_edges: list[int] = []
+        real_read = ocr._read
+
+        def read(image):
+            long_edge = max(image.shape[:2])
+            long_edges.append(long_edge)
+            if long_edge == reduced:
+                empty = Segmentation(columns=1, blocks=0, column_bounds=((0, int(image.shape[1])),))
+                return [], 0.0, empty
+            return real_read(image)
+
+        monkeypatch.setattr(ocr, "_read", read)
+        return long_edges
+
+    def test_no_words_at_the_reduced_scale_scores_again_at_full_resolution(self, reads):
+        prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
+
+        full = ocr.settings.ocr_long_edge_px
+        reduced = round(full * ORIENTATION_CHECK_SCALE)
+        assert reads == [reduced, reduced, full, full]
+        assert prepared.orientation.method == "osd_180_check_full_resolution"
+        # The scores reported are the ones that decided it: the full-resolution
+        # pair, which read words, not the empty pair that could not.
+        check = prepared.orientation.check
+        assert all(candidate.words > 0 for candidate in check.candidates)
+        assert check.overrode_osd is True
+        assert prepared.orientation.rotation_degrees == 0
+        assert prepared.orientation.low_confidence is True
+
+    def test_a_tie_at_full_resolution_too_leaves_the_osd_verdict_standing(self, monkeypatch):
+        monkeypatch.setattr(ocr, "detect_orientation", lambda _: (180, 0.03, "osd"))
+        count = 0
+
+        def nothing(image):
+            nonlocal count
+            count += 1
+            return [], 0.0, Segmentation(columns=1, blocks=0, column_bounds=((0, 1),))
+
+        monkeypatch.setattr(ocr, "_read", nothing)
+
+        prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
+
+        assert count == 4
+        assert prepared.orientation.method == "osd_180_check_full_resolution"
+        assert prepared.orientation.check.overrode_osd is False
+        assert prepared.orientation.rotation_degrees == 180
+
+    def test_words_at_the_reduced_scale_are_never_rescored(self, monkeypatch):
+        """The ordinary path is untouched: two reads, at half scale, and done."""
+        monkeypatch.setattr(ocr, "detect_orientation", lambda _: (180, 0.03, "osd"))
+        long_edges: list[int] = []
+        real_read = ocr._read
+
+        def spy(image):
+            long_edges.append(max(image.shape[:2]))
+            return real_read(image)
+
+        monkeypatch.setattr(ocr, "_read", spy)
+
+        prepared = preprocess(decode(render_png_bytes(SAMPLE_LABEL)))
+
+        reduced = round(ocr.settings.ocr_long_edge_px * ORIENTATION_CHECK_SCALE)
+        assert long_edges == [reduced, reduced]
+        assert prepared.orientation.method == "osd_180_check"

@@ -7,7 +7,302 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.2.1] - unreleased until tagged
+## [1.3.0] - unreleased until tagged
+
+The rest of the v1.2.0 code review (`docs/CODE_REVIEW_2026-09.md`; the
+author's decisions on it are `docs/CODE_REVIEW_DECISIONS_2026-09.md`), in
+three pull requests merged in order: the backend, the screen, and the
+infrastructure with the documents that describe it. This release is polish on
+a submission that is already defensible. Where a finding turned out to be
+larger than it was written, it is tracked in `docs/OPEN_QUESTIONS.md` and the
+pull request says so, rather than half-built (SC-5).
+
+### Backend correctness (pull request A)
+
+#### Changed
+
+- **NFR-6 is worded as the retention promise it always was** (finding 4,
+  #103; decision 4). "Nothing is written to disk" was not true of any request
+  the service accepted: `pytesseract` hands the engine every image through a
+  temporary file it deletes before the call returns, and Starlette spools a
+  part over the per-file limit to a temporary file before the exact size check
+  refuses it. The claim is corrected, not the code: NFR-6 now says nothing
+  uploaded is kept, that files exist only for the moments the check takes and
+  are gone when it returns, and that there is no database, no bucket and no log
+  of content. `docs/06_SECURITY_AND_COMPLIANCE.md` section 3.2 says where the
+  bytes live while a request runs, including the exact size of the spool
+  window (one part between 10 MiB and 40 MiB on the single-label routes;
+  between 10 MiB and the batch envelope on the batch route), and why the window
+  is documented rather than closed: closing it from the header means owning
+  the framework's multipart parser, and feeding the engine over standard input
+  means owning a subprocess wrapper for a guarantee the reworded claim already
+  gives (OQ-30). The same wording lands in the Help tab, `SECURITY.md`, the
+  architecture and test-strategy documents, US-15, the traceability matrix,
+  and the comments in `api.py`, `ocr.py`, `batch.py` and
+  `application_form.py`; ADR 0006 carries an amendment rather than an edit.
+  `TestNothingIsPersisted`, which asserted that two identical requests gave
+  identical outcomes and could not have seen a file, is replaced on both paths
+  by `TestNothingIsRetained`: the engine's temporary files are observed being
+  created and asserted gone when the request returns, the working directory
+  gains no file and no file changes, an oversize part is spooled exactly once,
+  refused and gone, and nothing the request carried reaches a line the real
+  logging configuration wrote. Every one of those was watched go red with the
+  behaviour broken on purpose before it was committed.
+- **The single-label check runs in a worker thread, and the number of them is
+  bounded** (finding 8, #107). Every Tesseract pass on `POST /api/verify`,
+  `/api/classify` and `/api/read-application` ran on the only event loop
+  thread, so `GET /api/health` waited for the whole request: 3.34 s in the
+  review session, and 7.8 s on the deployed target against a 5 s health-check
+  timeout that stops the task after three misses. The reading now runs through
+  `anyio.to_thread.run_sync` behind a `CapacityLimiter` sized from
+  `TTB_BATCH_WORKERS`, the same setting that sizes the batch pool, because
+  anyio's default pool is forty threads and forty concurrent OCR passes on a
+  1 vCPU task would trade a stalled probe for an out-of-memory kill.
+  `OMP_THREAD_LIMIT=1` and the PDFium lock already cover a worker thread, and
+  the `ocr.py` comment that presented the loop-blocking as a safety property
+  says what it was. `test_event_loop.py` asserts ordering, not milliseconds: a
+  health probe issued while a stubbed, blocking check is in flight is answered
+  before the check finishes, and it goes red when the work is run inline.
+- **The application's logger emits** (finding 9, #108). Nothing configured
+  logging; uvicorn attaches handlers to its own loggers only, so every INFO
+  record the routes wrote was discarded and `TTB_LOG_LEVEL` was read by
+  nothing. `app/logging_config.py` attaches one handler to the `app` logger at
+  the configured level, writing one JSON object per record with the call
+  site's `extra` fields as keys, so the `ocr_ms` figure the runbook tells an
+  operator to read from CloudWatch is now written. `test_logging.py` runs the
+  real configuration, including once under a real uvicorn process whose
+  output is read for the completion record at INFO and its absence at
+  WARNING, and asserts on that same output that no uploaded filename and no
+  value reaches a line; the process test was watched go red with the
+  configuration call removed.
+- **A tie of nothing in the orientation check is rescored at full
+  resolution** (finding 24). When Tesseract's orientation confidence falls
+  under the floor, the verdict is scored against its opposite at half
+  resolution; type too small to read at that scale scored zero words both
+  ways, and the tie kept the verdict the check exists to second-guess. Both
+  candidates are now read again at full resolution before deciding, and only a
+  tie there falls back to the OSD answer. The path is reported in the existing
+  fields: `method` is `osd_180_check_full_resolution` and `overrode_osd` says
+  what the full-resolution pair decided. Three tests stub the read and assert
+  the four reads, the reported method, and that words at half scale are never
+  rescored.
+- **PNG encoding leaves the PDFium lock** (finding 25). Every embedded picture
+  that cleared the floor was encoded to PNG inside `_PDFIUM_LOCK`, whether or
+  not it was ever read, and so were the page renders. The pictures now leave
+  the lock as decoded copies and encode themselves on first use, so the
+  prefill pass, which counts them and reads none (ADR 0017), encodes none, and
+  the check encodes only the ones it reads; page renders are encoded after the
+  lock is released. A test watches every encode and asserts none happens
+  while the lock is held.
+- **The two wall-clock ceilings are opt-in** (finding 23). `elapsed < 5.0` on
+  a real OCR request is a property of the runner as much as of the code. The
+  figures are still printed on every run; the assertions are behind a
+  `wall_clock` marker that `tests/conftest.py` skips unless
+  `TTB_ASSERT_WALL_CLOCK=1`, with the reason written beside it. The evidence
+  for NFR-1 is the section 9 measurement on the deployed target.
+- The 1.2.1 section below carries its tag date, which the tag did not add.
+
+#### Measured
+
+Session container, not production hardware, on synthetic fixtures built at
+run time (the author's two real documents stay on her machine and are the
+gate in `docs/09_DEPLOYMENT.md` section 9). Three runs each, medians.
+
+| Finding | Fixture | Before | After |
+| --- | --- | --- | --- |
+| 25, the lock | A filing carrying eight copies of the three-ink colour label (1.5 MB), `POST /api/verify` alone: `document_pdfium_ms` | 905 ms | **105 ms** |
+| 25, the lock | The same, `POST /api/classify` wall clock (the prefill pass, which reads no picture) | 963 ms | **160 ms** |
+| 25, the lock | The same filing carrying one copy: `document_pdfium_ms` | 173 ms | **23 ms** |
+| 24, the orientation check | The one-copy filing, `POST /api/verify` alone: `tesseract_reads` | 2 | 2 |
+| 24, the orientation check | The same: `artwork_ocr_ms` | 1618 ms | 1764 ms |
+
+The finding 24 figures are unchanged within run-to-run variation (1580 to
+1837 ms before, 1677 to 1786 ms after): the full-resolution pass runs only
+when the half-resolution pair reads no words at all, and this artwork, like
+the author's, reads dozens at half scale. Her document's `tesseract_reads` of 4
+and `overrode_osd: true` are re-taken against the release in the gate.
+
+The item 5 margin at three render scales is recorded in
+`docs/09_DEPLOYMENT.md` section 9: the separation swings by about seven points
+with the scale on the synthetic form and the scanned form cannot be sampled at
+scale 1.0, so the floor does not move (OQ-32, #123).
+
+#### Tracked, not fixed
+
+- The artwork floor rejects a real Registry printout's artwork wholesale:
+  OQ-24 and #121. A design question, needing a synthetic fixture shaped like
+  the printout, which never enters the repository.
+- The fanciful-name capture over-runs on a Registry printout: OQ-31 and #122.
+- The item 5 margin: measured, recorded, not moved: OQ-32 and #123.
+
+### The screen (pull request B)
+
+Every item here is something an agent using the tool can hit, and every one
+has a test; the four accessibility tests were each broken on purpose and
+watched go red before they were committed.
+
+#### Fixed
+
+- **A typed value survives a document uploaded afterwards** (finding 6, #105).
+  The source map was rebuilt from the document, so a field the agent had
+  typed and the document did not carry became "absent": the value stayed in
+  the box, the screen said "Not supplied" beside it, and the request omitted
+  it. Agent input now wins over absence, as FR-11's precedence always said it
+  should. Where the document carries a different value the disagreement is
+  shown under the agent's value ("The application you uploaded says ...; the
+  check uses your value") in the summary and in the box, and the agent's
+  value is the one sent; a difference of case or spacing alone is not a
+  disagreement (FR-4). Editing the box settles it. `typedFirst.test.tsx`.
+- **Four Section 508 conformance rows said things the code contradicted, and
+  the four tests behind them could not fail** (finding 7, #106). Rows 4.1.3,
+  3.2.2, 2.4.4 and 1.4.11 now describe what the code does; 4.1.1 and 1.3.2
+  are corrected on the smaller points the review noted. The two batch-tab
+  status regions are labelled ("Batch pairing", "Batch progress") and the
+  pairing region is always mounted; the stylesheet no longer draws the gold
+  ring on the pale banner; the file picker's hint says the cursor will move
+  when an application leaves a value unread, which is the advice 3.2.2 asks
+  for. The status-region test opens the batch tab and names all five regions;
+  the name-role-value test runs a check first and asserts five chips, none a
+  button, none focusable; the text-spacing test locates a chip as a chip and
+  checks its word is not clipped; the contrast test reads the ring token for
+  each ground off the stylesheet's own rules, walks the outcome list off the
+  outcome definitions, and asserts the active pill's weight and shadow rather
+  than a fill threshold fitted to the measurement. Section 508 is WCAG 2.0 A
+  and AA via 36 CFR 1194 Appendix A E205.4, verified to 2.1 AA, as before.
+- **The batch table and tally account for every row** (finding 16, #115). A
+  row whose worst outcome was not compared, present or artwork-derived was
+  counted in none of the four buckets and its detail cell read "All five
+  fields match." The tally has seven buckets that partition what `rowOutcome`
+  returns, the finished announcement names each non-zero one, and the detail
+  cell is the single-label wording, "4 of 5 checks passed", followed by every
+  field that was not a match. A test submits one row of each kind and
+  asserts the buckets sum to the row count.
+- **Reset cancels a check in flight** (finding 17, #116). An `AbortController`
+  is held per check, aborted on reset and when a later check starts, and a
+  counter disowns an answer that arrives after the screen stopped asking, so
+  a late result cannot repopulate a cleared form or overwrite "The form was
+  cleared." `inFlight.test.tsx`, with the response released by hand.
+- **A file removed before its classification returns is ignored** (finding 18,
+  #117). Each change to the list cancels the request for the previous list;
+  an answer for a list the agent no longer has fills nothing and announces
+  nothing. Tested with a removal mid-flight and with two overlapping requests
+  resolving out of order.
+- **A photograph alone opens no box, moves no focus, and says the true thing**
+  (finding 19, #118). It can be checked for the elements a label must carry,
+  and there is nothing to compare it against yet; the upload panel and its
+  live region say so, and the four gap boxes and the focus move are gone for
+  that case. "Upload a clearer image" is not said about a photograph.
+- **Blanking a document-read value removes it from the check** (finding 29).
+  An empty typed value let the server re-derive the field from the document it
+  was sent anyway. The interface now sends the blanked fields as
+  `cleared_fields`, the server treats each as declared absent, and the hint
+  above the boxes says what a blank does. Backend and frontend tests.
+- **The pairing preview implements the server's rule** (finding 21). The
+  server folded with `casefold`, which rewrites `ß` to `ss`; the page folds
+  with `toLowerCase`, which does not, so `Straße.png` paired on the server
+  and not on the page. The server now uses the plain lower-case mapping too,
+  and the same vectors are asserted on both sides. The preview is kept: the
+  runbook's section 8.4 relies on the count before sending, and the code is
+  small and now provably the same rule.
+- **Three server error codes have plain-language lines** (finding 22):
+  `no_label_to_check`, `too_many_application_documents` and `no_files`. The
+  test reads every code off the backend's own source, so a code added without
+  a line fails the build.
+- **`file_too_large` says what was too large** (finding 30): a file, a
+  submission of several, or a batch, read off the server's message.
+- **Two files with the same name get their own chips** (finding 31): the
+  classification is matched by position, which is submission order.
+- **A TIFF shows an honest placeholder** (finding 32): the preview frame says
+  the browser cannot draw a TIFF and the server reads it as usual, instead of
+  a broken-image glyph.
+
+#### Found, not fixed
+
+- **The clean result does not fit one screen at 1280 by 800, and the test that
+  said so was measuring scroll position** (#128, OQ-33). Removing the focus
+  move for a photograph on its own (#118) stopped the page scrolling under the
+  test, and the panel it then measured is about 1655 px from heading to
+  footnote, as it was before. The test now measures the panel in document
+  coordinates and is annotated as an expected failure with the figure, so it
+  turns red the day the panel fits; NFR-4 keeps the target and records that it
+  is not met. Making it fit is a layout decision for the author.
+
+### The infrastructure and the documents that describe it (pull request C)
+
+Nothing here has been applied to an AWS account in this session, which holds
+no credentials; the Terraform is formatted and CI validates it against the
+provider schema, and the author's gate runs the deploy on `develop` before the
+release. Each item names the finding and the issue.
+
+#### Fixed
+
+- **The deploy role is scoped by repository and ref, not by environment**
+  (finding 11, #110). The `environment:production` subject is gone from the
+  trust policy and `environment: production` is gone from the deploy job,
+  because the two go together. Checked rather than assumed: the environment
+  on this repository has no deployment-branch policy and no protection rules,
+  so the subject admitted any branch and the two branch entries beside it
+  constrained nothing. `docs/06` section 2 records the reasoning, what would
+  change it, and what the ref condition does not do: with no review gate on
+  the environment, the image push and the service update are gated by the
+  same thing, write access to `develop`, `main` or a `v*` tag.
+- **Transit is stated as the limitation it is** (finding 20, #119). The
+  premise at the top of `docs/06` said the prototype handled no sensitive
+  data; since ADR 0008 its primary input is a filed application with the
+  applicant's signature on page 2. The premise is rewritten, section 3.1 says
+  the filing crosses the wire in the clear and that no credential, session or
+  identity does, sizes the production fix (an ACM certificate, a 443 listener,
+  a redirect from 80 and one security group rule: roughly one Terraform block
+  plus a domain), and records why a CIDR restriction and a domain were both
+  refused for the evaluation stack. The scope document and the README say the
+  same. No CIDR, no domain, no authentication was added (decision 5).
+- **The task definition has one owner** (finding 10, #109; ADR 0019).
+  Terraform owns its shape; the deploy workflow owns the image and starts from
+  the latest revision of the family rather than from the revision the service
+  is running, so a cap or a size changed in `ecs.tf` reaches the service on
+  the next deploy, which is what the `ecs.tf` comment claimed. `docs/09`
+  section 4.4 describes the apply-then-deploy path and its check.
+- **Every action is pinned by commit SHA and both base images by digest**
+  (finding 12, #111). Twelve actions across the two workflows, each with the
+  version it was resolved from beside it; `id-token: write` moved from the
+  workflow to the two jobs that assume the role. The Dockerfile `TODO` that
+  said "before the first tagged release", five releases late, is closed.
+- **The SBOM describes the image that was pushed** (finding 13, #112).
+  `deploy.yml` generates it from the registry by the deployed digest, names
+  the artifact by that digest, keeps it 90 days, and attaches it to the
+  release from a job that holds `contents: write` and no AWS session. CI's
+  SBOM of its own build stays as a CI artifact. `docs/06` says what consumes
+  it: nothing automatic, so it is an inventory and not a gate.
+- **The execution role and the task's egress are narrowed** (finding 26).
+  An inline policy naming the stack's one repository and one log group
+  replaces the account-wide managed execution policy; the task's egress is
+  TCP 443 only, which is all that image pull, layer fetch and log delivery
+  use. The task role still has no policy at all.
+- **The deploy path refuses a release-shaped dispatch tag** (finding 27).
+  The deploy workflow refuses a dispatch tag matching `^v[0-9]` before it
+  builds. The registry stays `MUTABLE`. It was set to `IMMUTABLE` on this
+  branch first and reverted before the release, one decision reversed inside
+  pull request C: once immutability is on, ECR returns
+  `ImageTagAlreadyExistsException` for any push to an existing tag, whatever
+  the digest, and the workflow tags by commit SHA alone, so a re-run of the
+  deploy on an unchanged commit, which is how this project redeploys, fails
+  at the push step. A re-run on the same commit needs nothing. What
+  immutability would buy, and the cheaper guard that would make it compatible
+  with a re-run, are in OQ-34.
+- **No `.env` file at any depth reaches the image** (finding 28).
+  `.dockerignore` excludes `**/.env` and `**/.env.*`; CI plants one at each
+  depth, builds the frontend stage from that context, and asserts none is in
+  the stage and the planted value is not in the bundle.
+- **`infra/README.md` no longer says the lock file is not committed** (finding
+  15, #113). It has been since the first local init.
+
+#### Changed
+
+- Version 1.3.0 in `backend/pyproject.toml`, which is the one source; the
+  package reads it from its own metadata and `frontend/package.json` carries
+  the same value, as `test_release_metadata.py` asserts.
+
+## [1.2.1] - 2026-09-01
 
 A hotfix from `main`, carrying the corrections a hiring panel would trip over
 first among the findings of the v1.2.0 code review

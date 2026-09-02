@@ -588,14 +588,19 @@ class OrientationDetail(BaseModel):
             "degrees: 0, 90, 180 or 270."
         )
     )
-    method: Literal["osd", "osd_180_check", "unavailable", "disabled"] = Field(
+    method: Literal[
+        "osd", "osd_180_check", "osd_180_check_full_resolution", "unavailable", "disabled"
+    ] = Field(
         description=(
             "Where the rotation came from. 'osd' is Tesseract's orientation and "
             "script detection, taken at its word; 'osd_180_check' means it "
             "answered below the confidence floor and its answer was scored "
             "against the opposite turn, which is reported in `check`; "
-            "'unavailable' means it could not judge, usually too little text, "
-            "and the image was left as it arrived; 'disabled' means "
+            "'osd_180_check_full_resolution' means that scoring read no words "
+            "either way at the reduced scale and was repeated at full "
+            "resolution before deciding, and `check` carries the full-resolution "
+            "scores; 'unavailable' means it could not judge, usually too little "
+            "text, and the image was left as it arrived; 'disabled' means "
             "TTB_CORRECT_ORIENTATION is off."
         )
     )

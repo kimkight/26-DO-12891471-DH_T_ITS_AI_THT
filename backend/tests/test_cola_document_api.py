@@ -276,3 +276,50 @@ class TestReadApplicationOnItsOwn:
         emitted = " ".join(str(record.__dict__) for record in caplog.records)
         assert "STONE'S THROW" not in emitted
         assert "application.pdf" not in emitted
+
+
+class TestABlankedDocumentValueIsLeftOut:
+    """Code review finding 29 (v1.3.0): blanking is an instruction, and it is honoured.
+
+    The interface said an empty box was not compared, and the server re-read
+    the value from the document it was sent anyway. `cleared_fields` names the
+    fields the agent emptied after the document filled them; a cleared field is
+    reported as absent and takes the not-compared path, or the presence path
+    where FR-15 gives it one.
+    """
+
+    def test_a_cleared_field_is_not_re_read_from_the_document(self, sample_label_png):
+        body = post(
+            sample_label_png, registry_pdf(), data={"cleared_fields": ["brand_name"]}
+        ).json()
+
+        brand = field(body, "brand_name")
+        assert brand["application_value_source"] == "absent"
+        assert brand["application_value"] is None
+        assert brand["outcome"] == "not_compared"
+        # The document was still read, and its other values still stand.
+        assert body["application_document"] is not None
+        assert field(body, "class_type")["application_value_source"] == "parsed_from_form"
+
+    def test_a_typed_value_still_wins_over_a_clearing_of_the_same_field(self, sample_label_png):
+        """The instruction is about the blank; a value typed back is a value."""
+        body = post(
+            sample_label_png,
+            registry_pdf(),
+            data={"cleared_fields": ["brand_name"], "brand_name": "A DIFFERENT BRAND"},
+        ).json()
+
+        brand = field(body, "brand_name")
+        assert brand["application_value"] == "A DIFFERENT BRAND"
+        assert brand["application_value_source"] == "typed"
+
+    def test_a_cleared_presence_field_takes_the_presence_path(self, sample_label_png):
+        """Alcohol content cleared: nothing declared, so FR-15 asks whether the label carries it."""
+        body = post(
+            sample_label_png, registry_pdf(), data={"cleared_fields": ["alcohol_content"]}
+        ).json()
+
+        alcohol = field(body, "alcohol_content")
+        assert alcohol["application_value_source"] == "absent"
+        assert alcohol["outcome"] in {"present", "mismatch"}
+        assert alcohol["outcome"] != "match"

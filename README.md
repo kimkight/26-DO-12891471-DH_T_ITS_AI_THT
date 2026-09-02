@@ -16,7 +16,12 @@ seconds, or agents go back to doing it manually.
 > deployed target. Accuracy on real label artwork is still the open question.**
 > Single-label and batch verification and the agent-facing interface are built,
 > tested, and running on ECS Fargate behind an Application Load Balancer in
-> `us-east-1`, deployed by image digest.
+> `us-east-1`, deployed by image digest. The deployed URL is supplied with the
+> submission and must be opened as `http://`; `https://` on the same host does
+> not connect, and will not, because the load balancer has a listener on port
+> 80 only. ACM will not issue a certificate for an `*.elb.amazonaws.com` name,
+> so HTTPS here needs a domain as well as the certificate, the 443 listener
+> and the security group rule (`docs/06` section 3.1).
 >
 > The first measurements against the deployed URL were taken on 2026-08-28 and
 > are in [Measured performance and accuracy](#measured-performance-and-accuracy)
@@ -68,7 +73,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.2.1","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.3.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -257,7 +262,7 @@ and the first figures measured on the deployed target are below.**
 | CI: lint, tests, dependency audit, container build, SBOM | Works |
 | Infrastructure as code | Works: `infra/terraform/` builds the ECR repository, ECS cluster and Fargate service, load balancer, log group, and IAM roles including a GitHub OIDC deploy role. Format-checked and validated in CI, and applied to an AWS account in `us-east-1`. |
 | Deployment workflow | Works. `workflow_dispatch` or a published release; builds, pushes to ECR, and deploys the image digest through OIDC with no static keys. |
-| Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
+| Deployed URL | Deployed: ECS Fargate behind an Application Load Balancer in `us-east-1`. The URL is supplied with the submission and **must be opened as `http://`**; `https://` on the same host does not connect, and will not, because the load balancer has a listener on port 80 only. ACM will not issue a certificate for an `*.elb.amazonaws.com` name, so HTTPS needs a domain as well as the certificate, the 443 listener and the security group rule. The runbook is [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md); the author applies and deploys from her own machine, and **nothing merged deploys itself**. |
 | Accuracy and latency measurements | Measured on the deployed target on 2026-08-28, build `sha-f66a4e2`, over the synthetic sample set. See [Measured performance and accuracy](#measured-performance-and-accuracy) and `docs/09_DEPLOYMENT.md` section 9. |
 | Alcohol content and net contents where the application is silent | Works: reported as a **presence check** rather than as a comparison. 27 CFR requires both on the label, so whether the label carries them is answerable from the label alone; the row shows the value found, cites the section, and passes as **Contains** in the same green as a match with its own silhouette. There is no application side on the row, because there is nothing on that side. Where the application does declare the value the row is an ordinary two-sided comparison. See [ADR 0018](docs/adr/0018-presence-checks.md) |
 | Label artwork embedded in a COLA document | Works: every raster image above a size floor is lifted out of the PDF at its own resolution and read through the same OCR pipeline, filling values the text layer left empty and standing in as the label side when no photograph was uploaded. Checking artwork from an application against that application is a self-consistency check, and the response and the interface both say so ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)). It is read **once**, by the check: the prefill pass takes the document's text layer alone, and there is no cache ([ADR 0017](docs/adr/0017-read-the-artwork-once.md)). |
@@ -571,7 +576,19 @@ five fields did not come back at all.
   server-side copy of the results, so the stream is the only one. This is the
   strongest argument for the job model ADR 0006 records as its expected
   successor.
-- **Container base images are pinned by tag, not digest.**
+- **Transit is plain HTTP, and the URL has to be opened as `http://`.** The
+  deployed URL has no certificate and no domain, so the filed application and
+  its signature image cross the network in the clear. `https://` on the same
+  host does not connect, and will not, because the load balancer has a
+  listener on port 80 only; a browser that tries HTTPS first, or a link a mail
+  client has rewritten, fails to connect rather than showing the application.
+  ACM will not issue a certificate for an `*.elb.amazonaws.com` name, so HTTPS
+  here needs a domain as well as the certificate, the 443 listener and the
+  security group rule, which is what makes it a domain purchase rather than
+  one Terraform block. The fix is sized and the reasons it is not done for the
+  evaluation stack are in [docs/06](docs/06_SECURITY_AND_COMPLIANCE.md)
+  section 3.1; submit a filing you are content to send in the clear, or one of
+  the synthetic documents.
 - **The container build is verified in CI**, not in a session. The backend
   suite, the frontend component tests and the accessibility run execute in
   both.

@@ -27,8 +27,11 @@ out a single buffered response because 300 labels at about 5 seconds each is
 about 25 minutes in one request, which exceeds every idle timeout between the
 browser and the application and produces exactly the frozen page NFR-2 forbids.
 What is left is one request whose body arrives in pieces. The response stream is
-the only copy of the results; there is no job store and nothing is written to
-disk.
+the only copy of the results; there is no job store, and nothing outlives the
+request: the parts the multipart parser spooled and the temporary file the OCR
+engine reads each image through are gone when it returns (NFR-6, and
+docs/06_SECURITY_AND_COMPLIANCE.md section 3.2 for where the bytes are while it
+runs).
 
 **What is deliberately not here.** No retry, no partial resubmission, and no
 resume. A dropped connection loses the batch, which ADR 0006 records as the
@@ -78,7 +81,12 @@ def pairing_stem(filename: str) -> str:
     """
     name = filename.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     base, separator, _ = name.rpartition(".")
-    return (base if separator and base else name).casefold()
+    # `lower`, not `casefold`, since v1.3.0: the page previews the pairing with
+    # JavaScript's `toLowerCase`, and `casefold` also rewrites `ß` to `ss`, so
+    # `Straße.png` paired with `STRASSE.pdf` here and not there (code review
+    # finding 21). The two plain lower-case mappings agree, and the same vectors
+    # are asserted on both sides.
+    return (base if separator and base else name).lower()
 
 
 @dataclass(frozen=True)

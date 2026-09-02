@@ -54,10 +54,12 @@ Fargate, Elastic Load Balancing, CloudWatch Logs, IAM.
   the same image on Azure Container Apps or AKS and needs a provider module
   this repository does not contain (Decision D-11,
   [ADR 0001](../docs/adr/0001-cloud-platform-aws.md)).
-- **`.terraform.lock.hcl` is not committed yet.** It should be. The session
-  that wrote this configuration had no route to `registry.terraform.io`, so no
-  provider could be resolved to lock. The runbook's first step generates it for
-  linux and both macOS architectures and asks for it to be committed.
+- **`.terraform.lock.hcl` is committed**, carrying the provider hashes for
+  linux and both macOS architectures. The session that first wrote this
+  configuration had no route to `registry.terraform.io` and left a note here
+  saying the file was not committed yet; it was, later, and the note outlived
+  the fact (code review finding 15, #113). A `terraform init` that changes the
+  file is a provider change and belongs in its own pull request.
 
 ## Two things in here that are load-bearing
 

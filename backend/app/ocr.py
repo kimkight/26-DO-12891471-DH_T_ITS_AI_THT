@@ -44,11 +44,17 @@ that ships in the container image, and OpenCV works on the decoded array in
 memory. That is what makes the default path work with egress blocked, which is
 the environment Marcus Williams describes.
 
-Nothing is written to disk either (NFR-6). The image is decoded from the request
-bytes into a numpy array and released with the request.
+Nothing is kept (NFR-6). The image is decoded from the request bytes into a
+numpy array and released with the request. ``pytesseract`` hands the engine
+each image through a temporary file that it writes to the temporary directory
+and deletes, with the engine's output file, before the call returns; nothing
+outlives the request. The promise NFR-6 makes is about retention, and
+docs/06_SECURITY_AND_COMPLIANCE.md section 3.2 says where the bytes are while a
+request runs. Until v1.3.0 this docstring said nothing was written to disk,
+which was not true of any request the service accepted (code review finding 4).
 
-``OMP_THREAD_LIMIT`` is pinned below. See the comment there: it is what lets the
-batch path call this from a worker thread at all.
+``OMP_THREAD_LIMIT`` is pinned below. See the comment there: it is what lets
+either path call this from a worker thread at all.
 """
 
 from __future__ import annotations
@@ -60,11 +66,15 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 # Tesseract is built against OpenMP, and its OpenMP runtime deadlocks when the
-# binary is invoked from a thread other than the process's main thread. The
-# single-label path never hit this: `POST /api/verify` is an async handler, so
-# extract_text runs on the event loop thread. The batch path (FR-8, ADR 0006)
-# runs it in a worker pool, and without this the Tesseract child process never
-# exits and the batch hangs rather than failing.
+# binary is invoked from a thread other than the process's main thread. Until
+# v1.3.0 the single-label path never hit this, because `POST /api/verify` ran
+# extract_text on the event loop thread; that was not a safety property, it
+# was the loop being blocked for the length of every request, so that
+# `/api/health` could not answer while a label was being read (code review
+# finding 8). Both paths now run it in a worker thread: the batch path (FR-8,
+# ADR 0006) in its own pool and the single-label path behind a capacity
+# limiter in `app.api`. Without this pin the Tesseract child process never
+# exits and the request hangs rather than failing.
 #
 # One thread per invocation is also the right shape for the work rather than
 # merely the safe one. ADR 0006 parallelizes across images, so letting each of
@@ -320,6 +330,11 @@ class OcrLine:
         return self.width > 0 and self.height > self.width
 
 
+OrientationMethod = Literal[
+    "osd", "osd_180_check", "osd_180_check_full_resolution", "unavailable", "disabled"
+]
+
+
 @dataclass(frozen=True)
 class RotationScore:
     """What one candidate rotation scored when the image was actually read."""
@@ -372,9 +387,11 @@ class Orientation:
     orientation and script detection answered and was taken at its word,
     ``osd_180_check`` when it answered below ``LOW_ORIENTATION_CONFIDENCE`` and
     the answer was put to the second opinion described in ``check``,
-    ``unavailable`` when it could not answer (too little text to judge, or no
-    ``osd`` training data installed), and ``disabled`` when
-    ``TTB_CORRECT_ORIENTATION`` is off.
+    ``osd_180_check_full_resolution`` when that second opinion read no words
+    either way at the reduced scale and was taken again at full resolution
+    before deciding (v1.3.0), ``unavailable`` when it could not answer (too
+    little text to judge, or no ``osd`` training data installed), and
+    ``disabled`` when ``TTB_CORRECT_ORIENTATION`` is off.
 
     ``confidence`` is always Tesseract's own figure for its own verdict, not a
     score from the second opinion. The second opinion's scores are in ``check``,
@@ -384,7 +401,7 @@ class Orientation:
     exif_orientation: int | None = None
     exif_transposed: bool = False
     rotation_degrees: int = 0
-    method: Literal["osd", "osd_180_check", "unavailable", "disabled"] = "disabled"
+    method: OrientationMethod = "disabled"
     confidence: float | None = None
     check: OrientationCheck | None = None
 
@@ -392,7 +409,7 @@ class Orientation:
     def low_confidence(self) -> bool:
         """True when Tesseract answered but had almost nothing to go on."""
         return (
-            self.method in ("osd", "osd_180_check")
+            self.method in ("osd", "osd_180_check", "osd_180_check_full_resolution")
             and self.confidence is not None
             and self.confidence < LOW_ORIENTATION_CONFIDENCE
         )
@@ -732,8 +749,8 @@ def preprocess(
     if correct:
         degrees, confidence, method = detect_orientation(gray)
         if method == "osd" and confidence is not None and confidence < LOW_ORIENTATION_CONFIDENCE:
-            degrees, check = _second_opinion_on_180(gray, degrees, confidence)
-            method = "osd_180_check"
+            degrees, check, rescored = _second_opinion_on_180(gray, degrees, confidence)
+            method = "osd_180_check_full_resolution" if rescored else "osd_180_check"
         gray = rotate_cardinal(gray, degrees)
         if colour is not None:
             colour = rotate_cardinal(colour, degrees)
@@ -804,8 +821,11 @@ def has_colour(image: np.ndarray) -> bool:
 
 def _second_opinion_on_180(
     gray: np.ndarray, osd_degrees: int, osd_confidence: float
-) -> tuple[int, OrientationCheck]:
+) -> tuple[int, OrientationCheck, bool]:
     """Score the OSD rotation against its opposite, and keep the better one.
+
+    Returns the rotation kept, the check as reported to the agent, and whether
+    the scoring had to be repeated at full resolution.
 
     **This is the narrow half of ADR 0003, and it is narrow on purpose.** That
     decision measured both approaches over the twelve-label sample set at all
@@ -843,19 +863,30 @@ def _second_opinion_on_180(
     resolution, for about half the time. The text an agent reads is unchanged,
     because it is read afterwards, from the full-size image, by the pipeline
     that always read it.
+
+    **A tie of nothing is not a verdict (v1.3.0, code review finding 24).**
+    Type too small to read at the reduced scale scores zero words and zero
+    confidence both ways, and a tie leaves the OSD answer standing, which is
+    the answer this check exists to second-guess: fine-print-only artwork filed
+    upside down, with OSD saying 0 degrees at 0.03, was read upside down. So
+    when neither candidate yields a word at ``ORIENTATION_CHECK_SCALE`` both
+    are scored again at full resolution before anything is decided, and only
+    a tie at full resolution falls back to the OSD verdict. The path taken is
+    reported in ``Orientation.method`` and the outcome in ``overrode_osd``;
+    ``check.candidates`` carries the scores that decided it. The
+    full-resolution pass costs two more reads and runs only on an image the
+    reduced pass could not read at all; on the twelve sample labels and on the
+    author's own artwork, which score dozens of words at half scale, it never
+    runs, and the measured figures in the CHANGELOG say so.
     """
     opposite = (osd_degrees + 180) % 360
-    scored: list[RotationScore] = []
-    scoring_edge = max(1, round(max(gray.shape[:2]) * ORIENTATION_CHECK_SCALE))
-    for degrees in (osd_degrees, opposite):
-        lines, confidence, _ = _read(resize_long_edge(rotate_cardinal(gray, degrees), scoring_edge))
-        scored.append(
-            RotationScore(
-                rotation_degrees=degrees,
-                confidence=round(confidence, 1),
-                words=sum(len(line.text.split()) for line in lines),
-            )
-        )
+    full_edge = max(gray.shape[:2])
+    scored = _score_rotations(
+        gray, (osd_degrees, opposite), max(1, round(full_edge * ORIENTATION_CHECK_SCALE))
+    )
+    rescored = all(candidate.words == 0 for candidate in scored)
+    if rescored:
+        scored = _score_rotations(gray, (osd_degrees, opposite), full_edge)
 
     chosen, challenger = scored
     # Strictly greater, so a tie leaves Tesseract's own answer in place. The
@@ -863,7 +894,7 @@ def _second_opinion_on_180(
     # coin-flip is not an improvement on it.
     overrode = challenger.confidence > chosen.confidence
     kept = challenger if overrode else chosen
-    return kept.rotation_degrees, OrientationCheck(
+    check = OrientationCheck(
         osd_rotation_degrees=osd_degrees,
         osd_confidence=round(osd_confidence, 2),
         floor=LOW_ORIENTATION_CONFIDENCE,
@@ -871,6 +902,24 @@ def _second_opinion_on_180(
         chosen_rotation_degrees=kept.rotation_degrees,
         overrode_osd=overrode,
     )
+    return kept.rotation_degrees, check, rescored
+
+
+def _score_rotations(
+    gray: np.ndarray, rotations: tuple[int, int], long_edge: int
+) -> list[RotationScore]:
+    """Read the image at each rotation, scaled to ``long_edge``, and score it."""
+    scored: list[RotationScore] = []
+    for degrees in rotations:
+        lines, confidence, _ = _read(resize_long_edge(rotate_cardinal(gray, degrees), long_edge))
+        scored.append(
+            RotationScore(
+                rotation_degrees=degrees,
+                confidence=round(confidence, 1),
+                words=sum(len(line.text.split()) for line in lines),
+            )
+        )
+    return scored
 
 
 def extract_text(

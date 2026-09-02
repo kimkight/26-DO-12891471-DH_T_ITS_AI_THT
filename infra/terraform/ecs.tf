@@ -184,7 +184,11 @@ resource "aws_ecs_service" "app" {
     # would revert the service to the bootstrap tag in this file and undo the
     # deployment. Terraform still owns the shape of the task definition: change
     # a limit or a size here, apply, then run the deploy workflow to put the
-    # new shape into service.
+    # new shape into service. That path works because the workflow reads the
+    # LATEST revision of the family, which the apply just registered, and not
+    # the revision the service is running; until v1.3.0 it read the running
+    # one and the new shape could never reach the service (code review finding
+    # 10, #109, ADR 0019).
     ignore_changes = [task_definition]
   }
 
@@ -195,6 +199,6 @@ resource "aws_ecs_service" "app" {
   # that still fills the service events with pull errors.
   depends_on = [
     aws_lb_listener.http,
-    aws_iam_role_policy_attachment.task_execution,
+    aws_iam_role_policy.task_execution,
   ]
 }

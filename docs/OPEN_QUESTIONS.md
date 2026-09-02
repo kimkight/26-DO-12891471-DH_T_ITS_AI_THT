@@ -33,10 +33,17 @@ updates every artifact the answer affects.
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
-| [OQ-24](#oq-24) | Open | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010) |
+| [OQ-24](#oq-24) | Open; a real answer arrived 2026-09-01 (#121) and is tracked, not fixed, in v1.3.0 | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010), and the floor is now known to reject a real Registry printout's artwork wholesale |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
 | [OQ-26](#oq-26) | Answered 2026-08-30: met at 5.0 s, at the line | Nothing; re-measured against deploy #12, and the 1.4 s the orientation check costs is what took the margin |
 | [OQ-27](#oq-27) | Open | Nothing; it would buy back part of the NFR-1 margin the orientation check consumed (OQ-26) |
+| [OQ-28](#oq-28) | Open | Nothing; class or type is compared where declared and reported not compared where not |
+| [OQ-29](#oq-29) | Decided and closed 2026-09-01: history stands | Nothing; the line that would have changed the answer is recorded |
+| [OQ-30](#oq-30) | Decided and closed 2026-09-02: NFR-6 reworded, engine not re-plumbed | Nothing; the stronger guarantee and the spool window are recorded with what would change the answer |
+| [OQ-31](#oq-31) | Open, #122; tracked, not fixed, in v1.3.0 | Nothing; the fanciful name is displayed and never compared |
+| [OQ-32](#oq-32) | Open, #123; measured on synthetic documents in v1.3.0, floor not moved | Nothing; where the margin falls short the agent chooses |
+| [OQ-33](#oq-33) | Open, #128; found in v1.3.0, the test corrected, the panel not changed | Nothing; the result is complete and readable, it scrolls |
+| [OQ-34](#oq-34) | Decided and closed 2026-09-02: the registry stays mutable, the release-tag guard is in the workflow | Nothing; a re-run of the deploy on the same commit works |
 
 ---
 
@@ -1200,7 +1207,9 @@ being wrong is that agents rename files they should not have had to.
 **Which COLA form editions embed the label artwork in the filed PDF, and which
 file it separately? And how big are those embedded images in practice?**
 
-**Status: Open, 2026-08-29.**
+**Status: Open, 2026-08-29. The first real answer arrived 2026-09-01, and it is
+the highest-value finding the secondary test produced: see the last paragraph,
+and #121.**
 
 [ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
 image from an uploaded COLA document, discards the ones below a size floor, and
@@ -1253,6 +1262,30 @@ and the agent types them. A filing that embeds something large that is not a
 label has it reported as the label side, in the response and on screen, where
 the agent can see it. It bounds the claim that this works across filings, and it
 is the reason no such claim is made.
+
+**The floor rejects real Registry artwork wholesale (2026-09-01, #121; tracked,
+not fixed, in v1.3.0).** The author's secondary test document, a one-page
+Public COLA Registry printout, carries seven embedded images, the largest at
+1442 by 433. All seven are rejected: the largest on aspect ratio (3.33 against
+the ceiling of 3.0) and the other six on the short edge. Submitted alone the
+document returns `no_label_to_check`. The rule was set to exclude a signature
+strip, and it is excluding label artwork with the same rule, which answers the
+question this entry asked with a distribution of one: at least one real
+submission route embeds its artwork at sizes and shapes the floor refuses.
+**This is a design question, not a threshold tweak.** Raising the ratio ceiling
+to admit a 3.33 strip admits a signature scanned at the same shape, which is
+the case the ratio exists for; lowering the edge floor admits the barcodes and
+seals it exists for. What separates a label from a signature on that page is
+not size or shape but what it carries, and a floor cannot see that. A fix
+needs a synthetic fixture shaped like the printout (seven images, the largest
+wide and short, the rest small), built from the dimensions the author can
+report, and a rule that reads a rejected candidate rather than measuring it, or
+that lets a document with no admitted artwork fall back to its largest rejected
+picture and say so. Either is a decision with an ADR, and v1.3.0 is polish on a
+submission that is already defensible (SC-5), so it is recorded here and in
+#121 rather than half-built. **What would change the answer:** the fixture,
+and the numbers from a second real Registry page. The printout itself never
+enters the repository.
 
 
 
@@ -1570,3 +1603,234 @@ rewritten out, whatever it costs.
 **Who decided:** the author, 2026-09-01, in
 `docs/CODE_REVIEW_DECISIONS_2026-09.md` decisions 1 and 8.
 **Blocks:** nothing.
+
+## OQ-30
+
+**Should the OCR engine be fed over standard input, so that no temporary file
+exists at all, and can the multipart spool window be closed from the header?**
+
+**Status: Decided and closed 2026-09-02. Neither, for now; both recorded here
+as the stronger measures available if NFR-6 ever hardens.**
+
+**What happened.** The v1.2.0 code review (finding 4, #103) found that NFR-6's
+first acceptance criterion, "no image or form field is written to disk", was not
+true of any request the service accepted: `pytesseract` hands the engine every
+image through a temporary file it writes and deletes before the call returns,
+and Starlette spools a multipart part over the per-file limit to a temporary
+file before the exact size check refuses it. The author's decision
+(`CODE_REVIEW_DECISIONS_2026-09.md`, decision 4) was to correct the claim
+rather than the code: NFR-6 is reworded in v1.3.0 as the retention promise it
+always was, `docs/06_SECURITY_AND_COMPLIANCE.md` section 3.2 says where the
+bytes are while a request runs, and `TestNothingIsRetained` asserts that
+nothing survives one.
+
+**The stronger guarantee, and why it was not taken.** Tesseract reads an image
+from standard input (`tesseract - -`), so a direct `subprocess` call could feed
+it the decoded pixels with no file on any disk. That drops a maintained
+dependency and hand-rolls a wrapper covering the OSD and TSV output paths the
+pipeline uses, which is code to own for a guarantee the reworded claim already
+gives honestly; SC-5 rewards owning less. It would also leave the spool window
+untouched, which is the other half of the finding.
+
+**The spool window, and why it is documented rather than closed.** The
+whole-request guard reads `Content-Length` before the body is read. A
+single-label request may carry up to four files, so the guard bounds the
+envelope at four times the per-file limit and cannot count the parts without
+reading the body it exists not to read; a part between 10 MiB and 40 MiB on
+`POST /api/verify` and `POST /api/classify`, or between 10 MiB and the batch
+envelope on `POST /api/verify-batch`, is spooled and then refused, and the
+spooled file is deleted with the request. Starlette 1.6 caps non-file parts
+(`max_part_size`) and the count of files, and has no per-file byte cap; closing
+the window means owning its multipart parser, which is the framework internal
+the decision said not to fight. `test_verify_integration.py::TestNothingIsRetained::test_an_oversize_part_is_spooled_refused_and_gone`
+counts exactly one rollover on such a part and asserts the directory is empty
+afterwards, so the window's size and its retention are both pinned.
+
+**What would change the answer:** a requirement that content never touch
+ephemeral storage even transiently, which is a different requirement from
+retention and would come from a records or security review rather than from
+this prototype's own scope. Then: the stdin wrapper, and either a Starlette
+release with a per-file cap or a small parser of this repository's own.
+
+**Who decided:** the author, 2026-09-01, in decision 4.
+**Blocks:** nothing.
+
+## OQ-31
+
+**The fanciful-name capture over-runs on a Registry printout: what should bound
+the value?**
+
+**Status: Open, filed 2026-09-01 as #122; tracked, not fixed, in v1.3.0.**
+
+**What happened.** On the author's secondary test document, a one-page Public
+COLA Registry printout, `_VALUE_LOOKAHEAD` in `backend/app/application_form.py`
+swallowed a line belonging to the next item, so the fanciful name came back as
+seven words where the document prints fewer. The value is shown to the agent as
+a line and is never compared (OOS-5), so the cost today is a wrong caption on a
+datum the check does not use.
+
+**Why it is not fixed in this release.** The over-run is a property of how the
+printout lays out captions and values, and there is one real example of it,
+which cannot enter this repository. A fix that is not reproduced on a synthetic
+fixture shaped like that printout would be a guess at the layout, and a fixture
+that reproduces it has to be built first from the measurements the author can
+take on the real page: which caption follows the fanciful name, and on which
+line. That is a design step, and v1.3.0 is polish on a submission that is
+already defensible (SC-5).
+
+**What would change the answer:** a synthetic Registry printout in
+`samples/formmaker.py` whose fanciful-name line is followed by the next item's
+caption in the real page's order, with a test that fails on the over-run. Then
+the lookahead is bounded by the next caption rather than by a line count.
+
+**Who can answer:** the author, with the real printout's caption order.
+**Blocks:** nothing; the value is displayed, never compared.
+
+## OQ-32
+
+**Should the item 5 margin move, and on what measurement?**
+
+**Status: Open, filed 2026-09-01 as #123; measured on the synthetic documents
+in v1.3.0, not moved.**
+
+**What happened.** `PRODUCT_TYPE_MARGIN` is 12.0 luminance points, and on the
+author's own filing at the default render scale the ticked box separated from
+the next darkest by 12.1, on the very document the margin was derived from,
+while the code comments described a 22 point separation taken by hand from a
+looser crop. The comment was corrected in v1.2.1 (#123). The measurement the
+decision called for, both documents at three render scales, was taken in
+v1.3.0 on the two synthetic stand-ins and is recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9: the separation swings by about
+seven points with the render scale on the text-layer form (27.6 at scale 1.0,
+about 20 at 2.0 and 3.0) and the scanned form cannot be sampled at all at scale
+1.0, because its captions are too small for the engine to find. The three
+scales disagree, so the number does not move.
+
+**What would change the answer:** the same table on the two real documents,
+which only the author can take, showing either that the real filing's 12.1 is
+stable across scales (then the floor can come down toward the noise, which
+measured 0.0 to 2.8 points here and 1.9 on her filing) or that it swings the way
+the synthetic form does (then the fix is not the floor but the window
+`_checkbox_of` samples, which is what the seven-point swing implicates).
+
+**Who can answer:** the author, with the real documents; measurement.
+**Blocks:** nothing. Where the separation falls short the agent chooses, which
+is FR-1's direction of error.
+
+## OQ-33
+
+**Should the clean single-label result be made to fit one screen at 1280 by
+800, and how?**
+
+**Status: Open, filed 2026-09-02 as #128; the test corrected in v1.3.0, the
+panel not changed.**
+
+**What happened.** NFR-4 carries the author's target that a clean result fits
+one screen at 1280 by 800 without scrolling, and `frontend/tests/a11y.spec.ts`
+held it. The test measured where the panel's footnote ended relative to the
+viewport, which depends on how far the page has scrolled, and the page had
+scrolled for two reasons unrelated to the panel: a photograph uploaded on its
+own opened the gap boxes and moved focus into the first (a smooth scroll), and
+the test runner scrolls the check button into view before pressing it. Fixing
+#118 took the focus move away for that case, the page stopped scrolling, and
+the test went red on a panel exactly as tall as before. Measured in document
+coordinates, heading to footnote, the panel is about 1655 px at 1280 wide:
+five cards of about 202 px each, the photo notes, the summary line and the
+heading. The 412 px recorded against #74 was a viewport-relative figure taken
+after the same scrolling. The test now measures the panel itself and is
+annotated as an expected failure with the figure, so the run is green while the
+panel is known not to fit and red the day it does.
+
+**Options.** A denser card (the "On the label" and "On the application" pair on
+one line, the reason folded behind a disclosure); two columns of cards at 1280
+and wider; or a different target, one screen for the summary line and the
+first card with the rest reachable by scrolling. Each is a layout decision with
+a NFR-5 cost to check (reflow at 320 wide, reading order, the disclosure's
+name), and none is a correctness fix.
+
+**What would change the answer:** the author looking at a clean result on her
+own screen and saying which of the three she wants, or that scrolling is fine.
+
+**Who can answer:** the author; taste and a screen.
+**Blocks:** nothing. The result is complete, in reading order and readable; it
+scrolls.
+
+## OQ-34
+
+**Should the container registry's tags be immutable, when the deploy path tags
+by commit alone?**
+
+**Status: Decided and closed 2026-09-02: `MUTABLE`. Immutability was applied
+for code review finding 27 inside pull request C (#130) and reverted on the
+same branch before v1.3.0 was tagged. The guard against re-pointing a release
+tag is the workflow's, not the registry's.**
+
+**What happened.** Finding 27 observed that a manual dispatch of the deploy
+workflow with `image_tag=v1.2.0` could push a new image under an existing
+release tag. The service would keep running the digest it was given, but the
+true release digest, now untagged, would be expired by the repository's
+lifecycle rule within a day, and the release artefact would be gone. Pull
+request C did both of the things the review suggested: it set
+`image_tag_mutability = "IMMUTABLE"` on the repository in
+`infra/terraform/ecr.tf`, and it added a preflight step to
+`.github/workflows/deploy.yml` that refuses a dispatch tag matching `^v[0-9]`
+before anything is built. The first was then checked against the AWS
+documentation and reverted; the second stays.
+
+**What immutability would buy.** A registry-side refusal that does not depend
+on the workflow: no push, from any client with push rights, can replace the
+image under an existing tag. For a release tag that is a stronger property
+than a check in one workflow, because it holds against a dispatch of a
+different workflow, a push from an operator's machine, and a future edit that
+removes the preflight step.
+
+**Why it was reverted.** Once tag immutability is on, ECR returns
+`ImageTagAlreadyExistsException` for a push to any tag that already exists in
+the repository, and it does so whatever the digest being pushed: an identical
+image under an existing tag is refused the same as a different one. The deploy
+workflow tags an image from the commit SHA alone, `sha-<short sha>`, with no
+check that the tag exists. So re-running the deploy workflow on an unchanged
+commit, which is the documented and habitual way this project redeploys and is
+what the runbook step for every release says to do, fails at the push step.
+Before the reversal the runbook told the operator to give a re-run an explicit
+tag instead; that is a working step that turns every re-run into a manual one
+and defeats the point of re-running. On a stack whose posture is deploy, demo,
+destroy, registry-wide immutability protects an artefact that is deleted with
+the stack, and it traded away the ability to re-run a deploy in the week before
+submission. That is the same trade recorded for TLS and for the CIDR
+restriction (decision 5, `CODE_REVIEW_DECISIONS_2026-09.md`): the working
+deliverable is not broken to buy a partial mitigation. The workflow-side
+refusal is the control that addresses the substance of the finding, and the
+`docs/06` control row, the traceability matrix, the CHANGELOG and the runbook
+now say that the registry itself does not prevent a re-point. `terraform`
+treats `image_tag_mutability` as an in-place update, so the change was safe to
+apply and is safe to reverse; nothing is recreated and the images stay.
+
+**What would change the answer.** Any one of three, each of which removes the
+collision between immutability and a re-run:
+
+1. **A deploy path that tags uniquely per run**, for instance
+   `sha-<short sha>-<run number>`, so that no two runs ever push the same tag.
+   Cheap in the workflow, but every re-run then leaves a new tagged image for
+   the lifecycle rule to count, and a release tag would still have to be
+   exempt from the suffix.
+2. **A skip-if-exists guard**: before the build, one
+   `aws ecr describe-images --repository-name <repo> --image-ids imageTag=<tag>`
+   call, and a conditional on the build-and-push step that, when the tag is
+   already present, reuses the digest of the image already in the registry and
+   goes straight to the service update. This is the cheapest of the three,
+   roughly one CLI call plus a condition on one step, and it makes a re-run on
+   the same commit exactly what it should be: a redeploy of the image that
+   commit already produced. It was not built because it is not needed for a
+   demo stack; it is the first thing to build if immutability is wanted back.
+3. **ECR's `IMMUTABLE_WITH_EXCLUSION`** mutability setting, with the moving
+   tags (`sha-*`, or whatever the dispatch path pushes) excluded by filter and
+   the release tags left immutable. That keeps the registry-side property for
+   exactly the tags finding 27 was about and lets the commit-tagged re-runs
+   through; it needs a provider version that carries the setting and the
+   exclusion filter block.
+
+**Who can answer:** the author, if the stack outlives the evaluation window;
+until then the decision above stands.
+**Blocks:** nothing. Re-running the deploy on the same commit works, and a
+release-shaped dispatch tag is refused before a build.

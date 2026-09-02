@@ -94,6 +94,16 @@ const PRESENTATIONS: Record<Outcome, OutcomePresentation> = {
   },
 }
 
+/**
+ * Every outcome the interface can present, read off the definitions above.
+ *
+ * Exported so that a test checking every outcome (the contrast pairs, the
+ * word-and-shape rule) walks this list rather than a copy of it kept beside
+ * the test: a seventh outcome added with an unchecked tone then fails the test
+ * instead of shipping (code review finding 7, criterion 1.4.3).
+ */
+export const OUTCOMES = Object.keys(PRESENTATIONS) as Outcome[]
+
 export function presentation(outcome: Outcome): OutcomePresentation {
   // An unrecognized outcome presents as not compared rather than as a match.
   // FR-9's last criterion is that no error path reports a match, and a value
@@ -231,4 +241,36 @@ export function rowOutcome(line: BatchLine): Outcome | 'error' {
 export function countOf(line: BatchLine, outcome: Outcome): number {
   if (!line.result) return 0
   return line.result.fields.filter((field) => field.outcome === outcome).length
+}
+
+/**
+ * The categories a batch row can land in, in the order the tally lists them,
+ * with the words the tally uses (code review finding 16, #115).
+ *
+ * **They partition what `rowOutcome` returns**, which is what makes the tally
+ * account for every row: a reader adding the seven counts gets the row count.
+ * Until v1.3.0 the tally had four buckets, so a row whose worst outcome was
+ * "not compared", "present" or "artwork-derived" was counted nowhere, and "0
+ * fully matching, 0 needing review, 0 not matching, 0 could not be checked"
+ * sat beside "1 of 1 labels checked". `present` is kept apart from `match` on
+ * purpose: a presence row asserts no agreement (FR-15).
+ */
+export const ROW_BUCKETS: { outcome: Outcome | 'error'; label: string }[] = [
+  { outcome: 'match', label: 'fully matching' },
+  { outcome: 'present', label: 'passing on what the label carries, with nothing declared' },
+  { outcome: 'needs_review', label: 'needing review' },
+  { outcome: 'mismatch', label: 'not matching' },
+  { outcome: 'not_compared', label: 'with a value not compared' },
+  { outcome: 'artwork_derived', label: 'read from the artwork only' },
+  { outcome: 'error', label: 'could not be checked' },
+]
+
+/** One row's own summary line, in the words the single-label view uses. */
+export function rowSummary(line: BatchLine): string {
+  if (!line.result) return line.error?.message ?? ''
+  const outcomes = line.result.fields.map((field) => field.outcome)
+  const named = line.result.fields
+    .filter((field) => field.outcome !== 'match')
+    .map((field) => `${field.display_name} ${presentation(field.outcome).spoken}`)
+  return [`${summary(outcomes)}.`, ...named.map((sentence) => `${sentence}.`)].join(' ')
 }

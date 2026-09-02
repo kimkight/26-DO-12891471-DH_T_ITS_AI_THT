@@ -16,10 +16,23 @@ locals {
   #   develop and main only.
   # - a published release runs at the tag, so the claim is the tag ref.
   #   v-prefixed tags only, which is the release convention in
-  #   docs/08_SDLC_PROCESS.md.
-  # - the deploy job declares `environment: production`, and a job with an
-  #   environment gets an environment-scoped claim instead of a ref-scoped
-  #   one, so that form is listed too.
+  #   docs/08_SDLC_PROCESS.md. IAM's StringLike knows `*` and `?` only, so
+  #   `v*` cannot be tightened to `v[0-9]*` here; the tag protection rule on
+  #   the repository is the control on who can create such a tag.
+  #
+  # There is no `environment:production` entry, and no job in deploy.yml
+  # declares an environment. v1.2.0 accepted that subject because the deploy
+  # job declared `environment: production`, and a job with an environment
+  # presents the environment-scoped claim instead of the ref-scoped one. The
+  # code review (finding 11, #110) pointed out what that admitted: GitHub
+  # issues the environment subject to any job in any workflow on any branch
+  # that names the environment, and the `production` environment on this
+  # repository has no deployment-branch policy and no protection rules
+  # (checked 2026-09-01; docs/CODE_REVIEW_DECISIONS_2026-09.md, decision 6).
+  # So the entry admitted every branch, and the two branch entries above it
+  # constrained nothing. The ref is the claim GitHub enforces from the token
+  # itself, so the ref is the control. If a deployment-branch policy is ever
+  # added to the environment, docs/06 section 2 says what changes.
   #
   # A pull request from a fork produces `repo:<owner>/<repo>:pull_request`,
   # which matches none of these.
@@ -46,7 +59,6 @@ locals {
       "${prefix}:ref:refs/heads/develop",
       "${prefix}:ref:refs/heads/main",
       "${prefix}:ref:refs/tags/v*",
-      "${prefix}:environment:production",
     ]
   ])
 }

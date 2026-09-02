@@ -11,6 +11,10 @@ infra
 samples
 .github
 *.md
-.env
-.env.*
-!.env.example
+# Every .env file at every depth, not only the root (code review finding 28).
+# The frontend stage copies frontend/ whole and Vite inlines VITE_* values from
+# a .env.local there into the public bundle. CI plants one and proves it does
+# not reach the build context (ci.yml, "no .env file reaches the build").
+**/.env
+**/.env.*
+!**/.env.example

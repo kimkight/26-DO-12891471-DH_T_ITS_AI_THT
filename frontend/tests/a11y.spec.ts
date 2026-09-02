@@ -302,8 +302,24 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
    * A word count is a proxy; this is the thing itself. It is here rather than in
    * vitest because jsdom has no layout engine and cannot answer it, which is the
    * same reason the contrast rule lives in this file.
+   *
+   * **Not met, and known (#128, OQ-33).** Until v1.3.0 this test asserted where
+   * the footnote ended relative to the viewport, which is a function of how far
+   * the page had scrolled, and the page had scrolled for two reasons unrelated
+   * to the panel: the gap boxes opening for a photograph on its own moved focus
+   * into the first of them, and Playwright scrolls the check button into view
+   * before pressing it. Fixing #118 took the focus move away and the test went
+   * red on a panel exactly as tall as before. It now measures the panel itself,
+   * heading to footnote, in document coordinates, where it is about 1655 px at
+   * 1280 wide. `test.fail()` keeps the target asserted and the run green while
+   * the figure is known; the day the panel fits, the run goes red with
+   * "expected to fail but passed", and the annotation comes off.
    */
   test('a clean result fits one screen at 1280 by 800', async ({ page }) => {
+    test.fail(
+      true,
+      'The clean five-row result measures about 1655 px from heading to footnote at 1280 wide (#128, OQ-33)',
+    )
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.route('**/api/classify', async (route) => {
       await route.fulfill({
@@ -328,13 +344,23 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     await page.getByRole('button', { name: 'Check this label' }).click()
     await expect(page.locator('p.summary-line')).toBeVisible()
 
-    // The last thing in the panel, on screen without scrolling. Measured against
-    // the viewport rather than against the document, because a two-column layout
-    // means the page can be taller than the panel and still show all of it.
-    const footnote = page.locator('section[aria-labelledby="results-heading"] p.footnote')
-    const box = await footnote.boundingBox()
-    expect(box).not.toBeNull()
-    expect(box!.y + box!.height).toBeLessThanOrEqual(800)
+    // The panel, from its top edge to the bottom of the last thing in it, in
+    // document coordinates. That is the height an agent has to see at once for
+    // the result to be on one screen, whatever the page above it has done, and
+    // it does not move when something else scrolls the page. Two columns mean
+    // the page can be taller than the panel and still show all of it, which is
+    // why the panel and not the page is what is measured.
+    const panel = page.locator('section[aria-labelledby="results-heading"]')
+    const footnote = panel.locator('p.footnote')
+    const height = await footnote.evaluate(
+      (element, root) => {
+        const top = root!.getBoundingClientRect().top
+        const bottom = element.getBoundingClientRect().bottom
+        return bottom - top
+      },
+      await panel.elementHandle(),
+    )
+    expect(height, 'the panel from its top to its footnote, in px').toBeLessThanOrEqual(800)
   })
 
   /*
@@ -478,9 +504,22 @@ test.describe('the criteria a tool reports as incomplete', () => {
     })
 
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
-    // And the result is still readable rather than clipped away.
+    // And the result is still readable rather than clipped away: the summary
+    // line, and a chip. The chip is located as a chip (`data-outcome`), not by
+    // its text: `getByText('Does not match').first()` resolved to the visually
+    // hidden live region ahead of the cards in DOM order, so this check never
+    // looked at a chip until v1.3.0 (code review finding 7, 1.4.12).
     await expect(page.locator('.summary-line')).toBeVisible()
-    await expect(page.getByText('Does not match').first()).toBeVisible()
+    const chip = page.locator('[data-outcome="mismatch"]').first()
+    await expect(chip).toBeVisible()
+    await expect(chip.locator('.badge__label')).toBeVisible()
+    await expect(chip.locator('.badge__label')).toHaveText('Does not match')
+    const clipped = await chip.evaluate((node) => {
+      const box = node.getBoundingClientRect()
+      const label = node.querySelector('.badge__label')?.getBoundingClientRect()
+      return !label || label.right > box.right + 1 || label.bottom > box.bottom + 1
+    })
+    expect(clipped, 'the chip clips its own word under text spacing').toBe(false)
   })
 
   /**
@@ -547,7 +586,12 @@ test.describe('the criteria a tool reports as incomplete', () => {
    * be rather than as what it looks like.
    */
   test('every custom control reports its name, its role and its state', async ({ page }) => {
-    await page.goto('/')
+    // With a result on the page, so that the chip assertion at the end is made
+    // against five chips rather than against none (code review finding 7,
+    // 4.1.2): until v1.3.0 it asserted zero chip-buttons on a page with zero
+    // chips.
+    await stubResult(page)
+    await runCheck(page)
 
     // The pill control is a tab set, not three buttons that swap content.
     const tabs = page.getByRole('tab')
@@ -567,8 +611,16 @@ test.describe('the criteria a tool reports as incomplete', () => {
     await expect(disclosure).toHaveAttribute('aria-expanded', 'true')
 
     // And the outcome chips, which are text and not controls, are not
-    // announced as buttons by accident.
+    // announced as buttons by accident. Five are on the page; none is a
+    // button, a link or otherwise focusable.
+    await expect(page.locator('[data-outcome]')).toHaveCount(5)
     await expect(page.locator('[data-outcome][role="button"]')).toHaveCount(0)
+    await expect(page.locator('[data-outcome][role]')).toHaveCount(0)
+    await expect(page.locator('[data-outcome] button, [data-outcome] a')).toHaveCount(0)
+    const focusable = await page
+      .locator('[data-outcome]')
+      .evaluateAll((nodes) => nodes.filter((node) => (node as HTMLElement).tabIndex >= 0).length)
+    expect(focusable).toBe(0)
   })
 
   /**
@@ -576,24 +628,38 @@ test.describe('the criteria a tool reports as incomplete', () => {
    * Each region is checked for its role and its label rather than for its text,
    * because the text is asserted where it is produced.
    */
-  test('every status region is a labelled live region', async ({ page }) => {
+  test('every status region is a labelled live region, on both working tabs', async ({ page }) => {
     await page.goto('/')
+    // Open the batch tab too, so its regions are mounted: until v1.3.0 this
+    // test never left the single-label view and dropped unlabelled regions
+    // with `.filter(Boolean)`, so it could not see the two batch regions that
+    // carried no name (code review finding 7, 4.1.3).
+    await page.getByRole('tab', { name: 'Check many labels' }).click()
 
     const regions = page.locator('[role="status"]')
-    await expect(regions.first()).toBeAttached()
+    await expect(regions).toHaveCount(5)
     const described = await regions.evaluateAll((nodes) =>
       nodes.map((node) => ({
         live: node.getAttribute('aria-live'),
-        label: node.getAttribute('aria-label'),
+        label: node.getAttribute('aria-label') ?? '',
       })),
     )
     for (const region of described) {
       expect(region.live).toBe('polite')
+      expect(region.label, 'a status region has no name').not.toBe('')
     }
-    // The three on the single-label view are labelled apart, so a screen reader
-    // says which one spoke.
-    const labels = described.map((region) => region.label).filter(Boolean)
+    // Labelled apart, so a screen reader says which one spoke.
+    const labels = described.map((region) => region.label)
     expect(new Set(labels).size).toBe(labels.length)
+    expect(labels.sort()).toEqual(
+      [
+        'Application values',
+        'Batch pairing',
+        'Batch progress',
+        'Check result',
+        'Your uploads',
+      ].sort(),
+    )
   })
 })
 

@@ -205,9 +205,9 @@ export function HelpTab() {
         <Entry question="What happens to my files?">
           <p>Nothing is stored.</p>
           <p>
-            Your files are read on this server and thrown away when the answer comes back. They are
-            not written to disk, not put in a log, not kept for a later request, and not sent to TTB
-            or anywhere else.
+            Your files are read on this server and thrown away when the answer comes back. They
+            exist only for the moments the check takes: not kept on this server afterwards, not put
+            in a log, not kept for a later request, and not sent to TTB or anywhere else.
           </p>
           <p>
             The results live in this page until you leave it or clear it. There is no account, no

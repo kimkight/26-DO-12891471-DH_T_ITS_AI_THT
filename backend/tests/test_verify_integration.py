@@ -12,16 +12,21 @@ published number; scripts/measure.py produces the reported set.
 import io
 import logging
 import socket
+import tempfile
 import time
+from pathlib import Path
 
 import cv2
 import numpy as np
+import pytesseract.pytesseract
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 from samples.specs import SAMPLE_LABEL, TITLE_CASE_WARNING
 from samples.warning_text import WARNING_STATEMENT, hyphenated_column
 
+from app.config import settings
+from app.logging_config import configure_logging
 from app.main import app
 from app.ocr import decode
 from tests.conftest import (
@@ -79,10 +84,13 @@ def exif_tagged_jpeg(png: bytes, orientation: int) -> bytes:
 
 
 class TestCleanLabel:
-    def test_all_five_fields_return_and_the_request_is_under_five_seconds(
-        self, sample_label_png, capsys
-    ):
-        """UAT rows 1 and 11, measured rather than asserted (NFR-1)."""
+    def test_all_five_fields_return_and_the_time_is_printed(self, sample_label_png, capsys):
+        """UAT rows 1 and 11, measured rather than asserted (NFR-1).
+
+        The figure is printed on every run and asserted only in the
+        `wall_clock` test beside this one, which is opt-in (code review
+        finding 23): a runner's speed is not a property of the code.
+        """
         started = time.perf_counter()
         response = verify(sample_label_png, SAMPLE_LABEL.application)
         elapsed = time.perf_counter() - started
@@ -108,6 +116,15 @@ class TestCleanLabel:
                 f"Target is about {FIVE_SECOND_TARGET:.0f} s (NFR-1). "
                 "Measured on this runner, not on production hardware."
             )
+
+    @pytest.mark.wall_clock
+    def test_the_request_is_under_five_seconds(self, sample_label_png):
+        """NFR-1's ceiling, on request only. See `wall_clock` in tests/conftest.py."""
+        started = time.perf_counter()
+        response = verify(sample_label_png, SAMPLE_LABEL.application)
+        elapsed = time.perf_counter() - started
+
+        assert response.status_code == 200
         assert elapsed < FIVE_SECOND_TARGET
 
     def test_the_default_path_reports_that_no_external_call_was_made(self, sample_label_png):
@@ -148,12 +165,139 @@ class TestTitleCaseWarning:
         assert "apitalization" in warning["reason"]
 
 
-class TestNothingIsPersisted:
-    def test_two_identical_requests_share_no_state(self, sample_label_png):
-        """NFR-6: nothing is retained between requests, so results are identical."""
-        first = verify(sample_label_png, SAMPLE_LABEL.application).json()
-        second = verify(sample_label_png, SAMPLE_LABEL.application).json()
-        assert [f["outcome"] for f in first["fields"]] == [f["outcome"] for f in second["fields"]]
+def _tree(root: Path) -> set[tuple[Path, int, int]]:
+    """Every file under ``root`` with its size and modification time.
+
+    The size and the time are part of the key on purpose: a leak that rewrites
+    a file of the same name on every request would leave the set of paths
+    unchanged, and the mutation that proved this test can fail did exactly that
+    when it ran ahead of the snapshot.
+    """
+    caches = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache"}
+    entries: set[tuple[Path, int, int]] = set()
+    for path in root.rglob("*"):
+        if caches.intersection(path.relative_to(root).parts) or not path.is_file():
+            continue
+        stat = path.stat()
+        entries.add((path, stat.st_size, stat.st_mtime_ns))
+    return entries
+
+
+# A filename an agent might give a real file, and which must never be logged.
+UNLOGGED_FILENAME = "applicant-private-filing-7391.png"
+
+
+class TestNothingIsRetained:
+    """NFR-6 as the retention promise it is (v1.3.0, code review finding 4, #103).
+
+    The class this replaces, `TestNothingIsPersisted`, posted the same label
+    twice and asserted the two outcome lists were equal. That passes with the
+    uploads written to disk, logged, or held in a module-level list: it was a
+    test of determinism. These assert what is true and can fail. The engine
+    reads each image through a temporary file, so the first test watches those
+    files being created and then asserts none survives; a request leaves
+    nothing in the working directory; a part over the limit is spooled by the
+    parser, refused, and gone; and nothing the request carried reaches a line
+    the real logging configuration wrote. Each was watched go red with the
+    behaviour it asserts broken before it was committed; the pull request that
+    added them records how.
+    """
+
+    @pytest.fixture
+    def temp_dir(self, tmp_path, monkeypatch) -> Path:
+        """A temporary directory of this test's own, so what lands in it is this request's.
+
+        `tempfile.tempdir` is what `gettempdir()` returns once set, and both
+        `pytesseract` and Starlette's spool go through it.
+        """
+        directory = tmp_path / "tmp"
+        directory.mkdir()
+        monkeypatch.setattr(tempfile, "tempdir", str(directory))
+        return directory
+
+    def test_the_engine_reads_through_temporary_files_that_are_gone_when_it_returns(
+        self, sample_label_png, temp_dir, monkeypatch
+    ):
+        created: list[Path] = []
+        real = tempfile.NamedTemporaryFile
+
+        def counted(*args, **kwargs):
+            handle = real(*args, **kwargs)
+            created.append(Path(handle.name))
+            return handle
+
+        monkeypatch.setattr(pytesseract.pytesseract, "NamedTemporaryFile", counted)
+
+        response = verify(sample_label_png, SAMPLE_LABEL.application)
+
+        assert response.status_code == 200
+        # The guard is live: the engine did read through the temporary directory
+        # this test is watching, so an empty directory afterwards means
+        # something, rather than meaning nothing was watched.
+        assert created, "the engine reads each image through a temporary file"
+        assert {path.parent for path in created} == {temp_dir}
+        assert sorted(temp_dir.iterdir()) == []
+
+    def test_the_working_directory_gains_nothing(self, sample_label_png):
+        before = _tree(Path.cwd())
+
+        response = verify(sample_label_png, SAMPLE_LABEL.application)
+
+        assert response.status_code == 200
+        assert _tree(Path.cwd()) - before == set()
+
+    def test_an_oversize_part_is_spooled_refused_and_gone(self, temp_dir, monkeypatch):
+        """The window docs/06 section 3.2 describes, at its exact size.
+
+        One part over the per-file limit, inside the whole-request envelope:
+        the parser spools it to a temporary file (one rollover, counted), the
+        exact check refuses it with the limit named (FR-9), and the file does
+        not survive the request.
+        """
+        rollovers: list[bool] = []
+        real = tempfile.SpooledTemporaryFile.rollover
+
+        def counted(spool):
+            rollovers.append(True)
+            return real(spool)
+
+        monkeypatch.setattr(tempfile.SpooledTemporaryFile, "rollover", counted)
+        oversize = b"\x89PNG" + bytes(settings.max_upload_bytes)
+
+        response = verify(oversize, SAMPLE_LABEL.application)
+
+        assert response.status_code == 413
+        assert response.json()["error"]["code"] == "file_too_large"
+        assert len(rollovers) == 1
+        assert sorted(temp_dir.iterdir()) == []
+
+    def test_nothing_the_request_carried_reaches_a_line_the_logger_wrote(self, sample_label_png):
+        """Through the real handler, not `caplog`: the promise is about what is written."""
+        stream = io.StringIO()
+        configure_logging("DEBUG", stream)
+        try:
+            response = client.post(
+                "/api/verify",
+                files={"image": (UNLOGGED_FILENAME, sample_label_png, "image/png")},
+                data=SAMPLE_LABEL.application,
+            )
+        finally:
+            configure_logging(settings.log_level)
+
+        assert response.status_code == 200
+        written = stream.getvalue()
+        assert "verification completed" in written, "the guard should be checking real output"
+        forbidden = [
+            UNLOGGED_FILENAME,
+            SAMPLE_LABEL.brand_name,
+            SAMPLE_LABEL.class_type,
+            SAMPLE_LABEL.alcohol_content,
+            SAMPLE_LABEL.net_contents,
+            *(value for value in SAMPLE_LABEL.application.values() if len(value) >= 5),
+            "GOVERNMENT WARNING",
+        ]
+        for value in forbidden:
+            assert value not in written, f"{value!r} reached the log"
 
 
 class TestNothingSensitiveReachesTheLogs:
@@ -411,9 +555,10 @@ class TestASidewaysPhotograph:
         assert photo["orientation"]["rotation_degrees"] == 0
         assert photo["orientation"]["method"] == "osd"
 
-    def test_the_turn_is_still_within_the_five_second_target(self, sample_label_png, capsys):
+    def test_the_turn_is_measured_against_the_five_second_target(self, sample_label_png, capsys):
         """NFR-1. Orientation detection is a second pass over the image, so the
-        budget is re-measured rather than assumed to still hold."""
+        budget is re-measured rather than assumed to still hold. Printed here;
+        asserted only in the opt-in `wall_clock` test beside it (finding 23)."""
         turned = turned_png(sample_label_png, 1)
         started = time.perf_counter()
         response = verify(turned, SAMPLE_LABEL.application)
@@ -428,6 +573,16 @@ class TestASidewaysPhotograph:
                 f"preprocessing and OCR). Target is about {FIVE_SECOND_TARGET:.0f} s "
                 "(NFR-1). Measured on this runner, not on production hardware."
             )
+
+    @pytest.mark.wall_clock
+    def test_the_turn_is_still_within_the_five_second_target(self, sample_label_png):
+        """NFR-1's ceiling for a turned photograph, on request only."""
+        turned = turned_png(sample_label_png, 1)
+        started = time.perf_counter()
+        response = verify(turned, SAMPLE_LABEL.application)
+        elapsed = time.perf_counter() - started
+
+        assert response.status_code == 200
         assert elapsed < FIVE_SECOND_TARGET
 
 
