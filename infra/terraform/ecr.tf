@@ -11,10 +11,29 @@ resource "aws_ecr_repository" "app" {
     scan_on_push = true
   }
 
-  # MUTABLE, deliberately. The deploy workflow pushes a moving tag (the release
-  # tag or a dispatch tag) and then deploys the immutable digest that push
-  # returned, so immutability at the registry would forbid the tag rewrite
-  # without adding anything: what actually runs is pinned by digest either way.
+  # MUTABLE, so that a re-run of the deploy workflow on the same commit
+  # succeeds.
+  #
+  # This was set to IMMUTABLE inside v1.3.0 for code review finding 27 and
+  # reverted before the release. Once tag immutability is on, ECR returns
+  # ImageTagAlreadyExistsException for any push to a tag that already exists
+  # in the repository, whatever the digest being pushed. The deploy workflow
+  # tags an image from the commit SHA alone (`sha-<short sha>`) with no check
+  # that the tag exists, so re-running the deploy on an unchanged commit,
+  # which is how this project redeploys and what the runbook says to do for
+  # every release, fails at the push step.
+  #
+  # The substance of finding 27 was that a manual dispatch with
+  # `image_tag=v1.2.0` could re-point the release tag, leaving the true release
+  # digest untagged and expired by the lifecycle rule below within a day. The
+  # control against that lives in the workflow: `.github/workflows/deploy.yml`
+  # refuses a dispatch tag matching `^v[0-9]` before it builds. The registry
+  # itself does not prevent a re-point. What immutability would buy, why it was
+  # reverted, and the cheaper guard that would make it compatible with a re-run
+  # are in docs/OPEN_QUESTIONS.md, OQ-34.
+  #
+  # Changing this on an existing repository is an in-place update in either
+  # direction; nothing is recreated and the images stay.
   image_tag_mutability = "MUTABLE"
 
   # Let destroy delete the repository with images still in it. Without this,

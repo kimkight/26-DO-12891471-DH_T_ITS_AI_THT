@@ -171,6 +171,23 @@ the deployed ceiling is readable where the size is:
 | `TTB_MAX_BATCH_BYTES` | `3145728000` | 3 000 MiB exactly. The budget above holds it. See the note below: this is now a tighter bound than the application would derive. |
 | `TTB_BATCH_WORKERS` | `1` | One worker per vCPU of quota. |
 
+**Changing any of these, or a size, is apply then deploy, and the order is
+the whole of the procedure.** Terraform owns the shape of the task definition
+and the deploy workflow owns one field of it, the image
+([ADR 0019](adr/0019-task-definition-has-one-owner.md)). `terraform apply`
+registers a new revision carrying the new value and, by design, does not move
+the service onto it (`ignore_changes` in `ecs.tf`, so that an apply never
+reverts a deployment). The next run of the deploy workflow reads the **latest
+revision of the family**, which is the one the apply registered, puts the
+image into it and moves the service. Until v1.3.0 the workflow read the
+revision the service was running instead, so a changed cap could never reach
+the service through this path (code review finding 10, #109); the
+`describe-task-definition` call in `deploy.yml` now names the family, and
+its log prints both revisions when they differ. Forgetting the deploy leaves
+the service on the old shape, and nothing warns; `aws ecs describe-services
+--query 'services[0].taskDefinition'` against the family's latest revision
+is the check.
+
 **`TTB_MAX_BATCH_BYTES` is now a real bound rather than arithmetic, and that is
 deliberate.** It used to be exactly 300 times 10 MiB, one image per label at the
 per-file cap. Since [ADR 0009](adr/0009-batch-cola-documents.md) a batch carries
@@ -307,16 +324,51 @@ service. The service's circuit breaker rolls the deployment back.
 For a release, the normal path: cut `release/*`, merge to `main`, publish a
 `vX.Y.Z` release. The workflow runs on publication and tags the image with the
 release tag. The role's trust policy accepts `workflow_dispatch` from `develop`
-and `main`, a published release at a `v*` tag, and the `production`
-environment, and nothing else.
+and `main` and a published release at a `v*` tag, and nothing else; no job
+declares a GitHub environment, and [docs/06](06_SECURITY_AND_COMPLIANCE.md)
+section 2 says why the ref and not the environment is the control (#110).
+
+**Tags are mutable; the workflow guards the release tags (v1.3.0, code review
+finding 27).** The registry's tag immutability was turned on for finding 27
+inside v1.3.0 and reverted before the release: once it is on, ECR returns
+`ImageTagAlreadyExistsException` for any push to a tag that already exists,
+whatever the digest, and this workflow tags by commit alone, so a re-run on an
+unchanged commit pushes the same `sha-` tag and fails at the push step.
+**Re-running the deploy workflow on an unchanged commit works**, with the image
+tag input left empty, and it is the way to redeploy. What prevents a dispatch
+from re-pointing a release tag is the workflow's preflight, which refuses a
+dispatch tag matching `^v[0-9]` before it builds; the registry itself does not
+prevent a re-point. The trade, and what would change it, is
+[OQ-34](OPEN_QUESTIONS.md#oq-34). The service is unaffected either way, because
+it runs by digest.
+
+**The SBOM of the pushed image** is generated in the same job, from the
+registry by the digest that is about to be deployed, and uploaded as an
+artifact named `sbom-<digest prefix>` for 90 days. On a release it is also
+attached to the release as `sbom-<digest prefix>.spdx.json`, where it does not
+expire (#112). CI's own SBOM is of CI's build and is a different artifact.
 
 ## 8. Post-deploy verification
 
-Run these against the URL, in order. `terraform output alb_dns_name` prints it.
+Run these against the URL, in order. `terraform output alb_dns_name` prints it,
+scheme included.
 
 ```bash
 URL=$(terraform output -raw alb_dns_name)
 ```
+
+**The URL is `http://`, and it cannot be `https://`.** Give it and open it as
+`http://<alb host>`, which is what the output prints; the same host over
+`https://` does not connect, and will not, because the load balancer has a
+listener on port 80 only. A browser that tries HTTPS first, or a link a mail
+client has rewritten to `https://`, fails to connect instead of showing the
+application, so whoever runs this gate or receives the URL should not lose
+time to it. A certificate alone is not the shortcut: ACM will not issue one for
+an `*.elb.amazonaws.com` name, so HTTPS here needs a domain as well as the
+certificate, the 443 listener and the security group rule
+([docs/06](06_SECURITY_AND_COMPLIANCE.md) section 3.1). Verified 2026-09-02
+against the running v1.2.1: `http://<alb host>/api/health` answered `1.2.1`
+and the interface loaded; `https://` on the same host could not connect.
 
 **8.1 The service answers.**
 
@@ -747,6 +799,33 @@ This section is the record of the runs; the README is the summary of them.
       the comment in `backend/app/product_type.py` describes 12.1, not 22, and
       the margin stays where it is. The empty-box noise, 0.0 to 2.8 points,
       agrees with the 1.9 the author measured, so the floor's other end stands.
+
+      **Reconciling the table with the 12.1 (added 2026-09-02).** None of the
+      five separations above is anywhere near the 12.1 that put this item on
+      the list, and a published measurement should not sit beside another with
+      no account of the gap. The two runs measured the same quantity, the
+      separation the module's own `_checkbox_of` window reports, but on
+      **different documents**. The 12.1 was taken at v1.2.0 on the author's own
+      three-page filing at the default scale, and the 32.3 recorded on the same
+      day was the one-page Public COLA Registry printout, per the module
+      docstring in `backend/app/product_type.py`; neither document leaves the
+      author's machine, so neither could be in this run. The table above was
+      taken on the two synthetic stand-ins `samples/formmaker.py` builds, and
+      the darkness of their drawn tick, `TICK_GREY = 110`, was chosen to
+      reproduce the author's **hand** measurement of the filing, 217.5 against
+      239.9 and 241.8 from a loose crop, which is the 22-point figure the code
+      comment once described and not the 12.1 the module's window measures on
+      the same page. So the 20.5 at the default scale is the fixture returning
+      its own calibration, within two points of the 212 against 233 and 235
+      recorded beside that constant, and it says nothing about the real filing's
+      margin in either direction. Both figures stand, each labelled with what it
+      measures: **12.1 points, the author's real filing, the module's window,
+      default scale, v1.2.0, and not re-taken since**; **20.5 points, the
+      synthetic text-layer form, the module's window, default scale, v1.3.0**.
+      Neither is wrong and neither supersedes the other. The one the floor was
+      set from, and the one that would justify moving it, is the first, and it
+      is the measurement OQ-32 still asks the author for. The floor stays at
+      12.0.
 
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)

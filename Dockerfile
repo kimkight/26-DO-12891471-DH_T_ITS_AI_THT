@@ -3,10 +3,14 @@
 # ---------------------------------------------------------------------------
 # Stage 1: build the frontend.
 # ---------------------------------------------------------------------------
-# Base images are pinned by digest at release time. See
-# docs/06_SECURITY_AND_COMPLIANCE.md; the TODO below tracks that step.
-# TODO: pin both base images by sha256 digest before the first tagged release.
-FROM node:22-bookworm-slim AS frontend-build
+# Both base images are pinned by the digest of their multi-architecture
+# manifest list as well as by tag (code review finding 12, #111). The tag says
+# what the image is for a reader; the digest is what is pulled, and a
+# re-published tag changes nothing here until someone changes this line.
+# Dependabot's docker ecosystem understands the tag-plus-digest form and
+# proposes the new digest when the tag moves within its pinned line
+# (.github/dependabot.yml). Resolved 2026-09-02 from the Docker Hub registry.
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS frontend-build
 
 WORKDIR /build
 
@@ -30,7 +34,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 2: runtime image, backend plus built frontend assets.
 # ---------------------------------------------------------------------------
-FROM python:3.11-slim-bookworm AS runtime
+FROM python:3.11-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS runtime
 
 # Tesseract and the English language data are installed here because the
 # default extraction path runs OCR locally, inside the container, with no

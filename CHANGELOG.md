@@ -227,6 +227,81 @@ watched go red before they were committed.
   turns red the day the panel fits; NFR-4 keeps the target and records that it
   is not met. Making it fit is a layout decision for the author.
 
+### The infrastructure and the documents that describe it (pull request C)
+
+Nothing here has been applied to an AWS account in this session, which holds
+no credentials; the Terraform is formatted and CI validates it against the
+provider schema, and the author's gate runs the deploy on `develop` before the
+release. Each item names the finding and the issue.
+
+#### Fixed
+
+- **The deploy role is scoped by repository and ref, not by environment**
+  (finding 11, #110). The `environment:production` subject is gone from the
+  trust policy and `environment: production` is gone from the deploy job,
+  because the two go together. Checked rather than assumed: the environment
+  on this repository has no deployment-branch policy and no protection rules,
+  so the subject admitted any branch and the two branch entries beside it
+  constrained nothing. `docs/06` section 2 records the reasoning, what would
+  change it, and what the ref condition does not do: with no review gate on
+  the environment, the image push and the service update are gated by the
+  same thing, write access to `develop`, `main` or a `v*` tag.
+- **Transit is stated as the limitation it is** (finding 20, #119). The
+  premise at the top of `docs/06` said the prototype handled no sensitive
+  data; since ADR 0008 its primary input is a filed application with the
+  applicant's signature on page 2. The premise is rewritten, section 3.1 says
+  the filing crosses the wire in the clear and that no credential, session or
+  identity does, sizes the production fix (an ACM certificate, a 443 listener,
+  a redirect from 80 and one security group rule: roughly one Terraform block
+  plus a domain), and records why a CIDR restriction and a domain were both
+  refused for the evaluation stack. The scope document and the README say the
+  same. No CIDR, no domain, no authentication was added (decision 5).
+- **The task definition has one owner** (finding 10, #109; ADR 0019).
+  Terraform owns its shape; the deploy workflow owns the image and starts from
+  the latest revision of the family rather than from the revision the service
+  is running, so a cap or a size changed in `ecs.tf` reaches the service on
+  the next deploy, which is what the `ecs.tf` comment claimed. `docs/09`
+  section 4.4 describes the apply-then-deploy path and its check.
+- **Every action is pinned by commit SHA and both base images by digest**
+  (finding 12, #111). Twelve actions across the two workflows, each with the
+  version it was resolved from beside it; `id-token: write` moved from the
+  workflow to the two jobs that assume the role. The Dockerfile `TODO` that
+  said "before the first tagged release", five releases late, is closed.
+- **The SBOM describes the image that was pushed** (finding 13, #112).
+  `deploy.yml` generates it from the registry by the deployed digest, names
+  the artifact by that digest, keeps it 90 days, and attaches it to the
+  release from a job that holds `contents: write` and no AWS session. CI's
+  SBOM of its own build stays as a CI artifact. `docs/06` says what consumes
+  it: nothing automatic, so it is an inventory and not a gate.
+- **The execution role and the task's egress are narrowed** (finding 26).
+  An inline policy naming the stack's one repository and one log group
+  replaces the account-wide managed execution policy; the task's egress is
+  TCP 443 only, which is all that image pull, layer fetch and log delivery
+  use. The task role still has no policy at all.
+- **The deploy path refuses a release-shaped dispatch tag** (finding 27).
+  The deploy workflow refuses a dispatch tag matching `^v[0-9]` before it
+  builds. The registry stays `MUTABLE`. It was set to `IMMUTABLE` on this
+  branch first and reverted before the release, one decision reversed inside
+  pull request C: once immutability is on, ECR returns
+  `ImageTagAlreadyExistsException` for any push to an existing tag, whatever
+  the digest, and the workflow tags by commit SHA alone, so a re-run of the
+  deploy on an unchanged commit, which is how this project redeploys, fails
+  at the push step. A re-run on the same commit needs nothing. What
+  immutability would buy, and the cheaper guard that would make it compatible
+  with a re-run, are in OQ-34.
+- **No `.env` file at any depth reaches the image** (finding 28).
+  `.dockerignore` excludes `**/.env` and `**/.env.*`; CI plants one at each
+  depth, builds the frontend stage from that context, and asserts none is in
+  the stage and the planted value is not in the bundle.
+- **`infra/README.md` no longer says the lock file is not committed** (finding
+  15, #113). It has been since the first local init.
+
+#### Changed
+
+- Version 1.3.0 in `backend/pyproject.toml`, which is the one source; the
+  package reads it from its own metadata and `frontend/package.json` carries
+  the same value, as `test_release_metadata.py` asserts.
+
 ## [1.2.1] - 2026-09-01
 
 A hotfix from `main`, carrying the corrections a hiring panel would trip over

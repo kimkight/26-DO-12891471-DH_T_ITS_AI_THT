@@ -9,9 +9,23 @@ name: deploy
 # credentials.
 #
 # It authenticates with GitHub's OIDC token and assumes an IAM role whose trust
-# policy names this repository. No static AWS access key exists anywhere in
-# this system (Decision D-8). The role's trust policy and permissions are in
-# infra/terraform/iam.tf.
+# policy names this repository at the refs that may deploy: develop, main and
+# a v* tag (infra/terraform/locals.tf). No static AWS access key exists
+# anywhere in this system (Decision D-8). The role's trust policy and
+# permissions are in infra/terraform/iam.tf.
+#
+# No job declares a GitHub environment. The `production` environment on this
+# repository carries no deployment-branch policy and no protection rules, so a
+# job that named it would gain nothing and would present an environment-scoped
+# OIDC subject that any branch can obtain (code review finding 11, #110). The
+# ref is the control; docs/06_SECURITY_AND_COMPLIANCE.md section 2 says why
+# and what would change it.
+#
+# Every action is pinned by commit SHA with the version it was resolved from
+# beside it (finding 12, #111). Two of the jobs hold an AWS session for up to
+# an hour; a tag can be moved under a job that holds one, a commit cannot.
+# Dependabot's github-actions ecosystem understands the SHA-plus-comment form
+# and proposes the bump with both updated.
 #
 # Before the first run, the infrastructure has to exist and six repository
 # variables have to be set. The preflight job below fails with a readable list
@@ -36,15 +50,17 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: "Tag to push the image under. Defaults to the short commit SHA."
+        description: "Tag to push the image under. Defaults to the short commit SHA. A release-shaped tag (v1, v1.2.0) is refused; releases come from the release trigger."
         required: false
         type: string
   release:
     types: [published]
 
+# The workflow default is read-only. id-token: write is granted to the two
+# jobs that assume the AWS role and to no other; contents: write is granted to
+# the one job that attaches the SBOM to a release and to no other.
 permissions:
   contents: read
-  id-token: write
 
 # One deployment at a time. Two concurrent runs would race on the same ECS
 # service and the loser would win, because whichever UpdateService lands last
@@ -101,13 +117,31 @@ jobs:
 
           echo "All six deployment variables are set."
 
+      # A manual dispatch must not push under a tag shaped like a release
+      # (code review finding 27). This step is the control. The registry is
+      # MUTABLE, so that a re-run of this workflow on the same commit can push
+      # the same `sha-` tag again (infra/terraform/ecr.tf says why immutability
+      # was applied and reverted; docs/OPEN_QUESTIONS.md OQ-34 records the
+      # decision), and nothing downstream would refuse the push. This refuses
+      # it here, before a build, with a sentence that says why.
+      - name: Refuse a dispatch tag shaped like a release
+        if: github.event_name == 'workflow_dispatch' && inputs.image_tag != ''
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+        run: |
+          if [[ "${INPUT_TAG}" =~ ^v[0-9] ]]; then
+            echo "::error::image_tag '${INPUT_TAG}' is shaped like a release tag. Releases are pushed by the release trigger under their own tag; a dispatch may not reuse or pre-empt one."
+            exit 1
+          fi
+          echo "Dispatch tag '${INPUT_TAG}' is not release-shaped."
+
       # A release deploys an image named for its tag, and the image reports the
       # version pyproject.toml declares. The two have to agree, or /api/health
       # names a build the tag does not: v1.2.0 shipped reporting 1.1.0 because
       # nothing checked. A manual dispatch is not a release and is not checked.
       - name: Require the release tag to match the declared version
         if: github.event_name == 'release'
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Compare the release tag with pyproject.toml
         if: github.event_name == 'release'
         env:
@@ -124,18 +158,22 @@ jobs:
     name: build and push image
     needs: preflight
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     outputs:
       image: ${{ steps.image.outputs.image }}
       tag: ${{ steps.image.outputs.tag }}
+      digest: ${{ steps.build.outputs.digest }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Adopted at v6 directly, from v4, which is what pull request #27 was
       # held for: the action is used only here, so CI could never exercise the
       # bump and merging it while this workflow was disabled would have proved
       # nothing. See docs/DEPENDENCY_TRIAGE_2026-08.md.
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
@@ -143,7 +181,7 @@ jobs:
 
       - name: Log in to Amazon ECR
         id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
 
       # A release names its own tag. A manual run takes the input if one was
       # given and otherwise the short SHA, so a dispatch always produces a tag
@@ -164,11 +202,11 @@ jobs:
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "Image tag: ${tag}"
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push
         id: build
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
@@ -210,40 +248,84 @@ jobs:
             echo "| Digest | \`${DIGEST}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The SBOM of the image that was pushed, taken from the registry by the
+      # digest that will be deployed, rather than of a separate build on a
+      # different trigger (code review finding 13, #112). Syft reads the
+      # registry credentials the ECR login left in the runner's Docker
+      # configuration. The artifact is named by the digest so that the
+      # question "what is in the image the service is running" has an answer
+      # for as long as the artifact lives; a release carries it permanently,
+      # attached by the job below.
+      - name: Generate the SBOM of the pushed image (syft)
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
+        with:
+          image: ${{ steps.image.outputs.image }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      - name: Name the SBOM by its digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          short="${DIGEST#sha256:}"
+          echo "SBOM_NAME=sbom-${short::12}" >> "$GITHUB_ENV"
+          jq --arg image "${{ steps.image.outputs.image }}" '.name = $image' sbom.spdx.json > "sbom-${short::12}.spdx.json"
+          ls -l "sbom-${short::12}.spdx.json"
+
+      - name: Upload the SBOM
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.SBOM_NAME }}
+          path: sbom-*.spdx.json
+          retention-days: 90
+
   deploy:
     name: deploy to ECS
     needs: [preflight, build-and-push]
     runs-on: ubuntu-latest
-    environment: production
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: deploy-${{ github.run_id }}
 
-      # The task definition is read from the running service rather than from a
-      # file in this repository. Two reasons, and the first is a hard one: a
-      # committed task definition would have to carry the execution role ARN,
-      # which contains the AWS account number, and no account identifier is
-      # committed to this repository. The second is drift: Terraform owns the
-      # shape of the task definition, so a committed copy would be a second
-      # source of truth that nobody remembers to update.
+      # The task definition is read from AWS rather than from a file in this
+      # repository. Two reasons, and the first is a hard one: a committed task
+      # definition would have to carry the execution role ARN, which contains
+      # the AWS account number, and no account identifier is committed to this
+      # repository. The second is ownership: Terraform owns the shape of the
+      # task definition, and this job owns one field of it, the image
+      # (ADR 0019).
+      #
+      # It reads the LATEST revision of the family, not the revision the
+      # service is running. The service runs whatever the previous deploy
+      # registered; a `terraform apply` that changed a size or a cap registers
+      # a newer revision and, by design, does not move the service
+      # (`ignore_changes` in ecs.tf). Reading the service's revision carried
+      # the old shape forward on every deploy and no Terraform change could
+      # ever reach the service (code review finding 10, #109). Reading the
+      # family's latest picks up Terraform's revision when there is one and
+      # the previous deploy's otherwise, and both carry Terraform's shape.
       #
       # The query strips the read-only fields the API adds
       # (taskDefinitionArn, revision, status, requiresAttributes,
       # compatibilities, registeredAt, registeredBy). RegisterTaskDefinition
       # rejects them.
-      - name: Read the current task definition
+      - name: Read the latest revision of the task definition family
         env:
           CLUSTER: ${{ vars.ECS_CLUSTER }}
           SERVICE: ${{ vars.ECS_SERVICE }}
         run: |
-          # The service names a task definition revision by ARN, and
-          # describe-task-definition accepts that ARN directly. A service that
-          # does not exist comes back as a failure entry rather than an error,
-          # so the query prints "None" and the guard below catches it.
+          # The service names its running revision by ARN, and the family is
+          # the ARN's last path segment before the revision number. A service
+          # that does not exist comes back as a failure entry rather than an
+          # error, so the query prints "None" and the guard below catches it.
           current=$(aws ecs describe-services \
             --cluster "${CLUSTER}" --services "${SERVICE}" \
             --query 'services[0].taskDefinition' --output text)
@@ -253,10 +335,21 @@ jobs:
             exit 1
           fi
 
-          echo "Current task definition: ${current}"
+          family_and_revision="${current##*/}"
+          family="${family_and_revision%%:*}"
+          echo "Service is running: ${current}"
+          echo "Task definition family: ${family}"
+
+          latest=$(aws ecs describe-task-definition \
+            --task-definition "${family}" \
+            --query 'taskDefinition.taskDefinitionArn' --output text)
+          echo "Latest revision of the family: ${latest}"
+          if [ "${latest}" != "${current}" ]; then
+            echo "The latest revision is newer than the one the service runs; its shape (a Terraform apply since the last deploy) goes into service with this image."
+          fi
 
           aws ecs describe-task-definition \
-            --task-definition "${current}" \
+            --task-definition "${family}" \
             --query 'taskDefinition | {
               family: family,
               taskRoleArn: taskRoleArn,
@@ -274,7 +367,7 @@ jobs:
 
       - name: Render the task definition with the new image
         id: task-def
-        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        uses: aws-actions/amazon-ecs-render-task-definition@138c24f321fdbdf7edee4a685519d253cae2cdea # v1.9.0
         with:
           task-definition: task-definition.json
           container-name: ${{ vars.ECS_CONTAINER_NAME }}
@@ -286,7 +379,7 @@ jobs:
       # new task ever passed a health check. The service's circuit breaker
       # rolls the deployment back; this is what makes the rollback visible.
       - name: Deploy and wait for the service to stabilise
-        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        uses: aws-actions/amazon-ecs-deploy-task-definition@c465972ecbd160473f22e683363b422a5412a3de # v2.6.3
         with:
           task-definition: ${{ steps.task-def.outputs.task-definition }}
           cluster: ${{ vars.ECS_CLUSTER }}
@@ -308,4 +401,38 @@ jobs:
             echo ""
             echo "The URL is the load balancer DNS name from \`terraform output alb_dns_name\`."
             echo "Post-deploy verification is in \`docs/09_DEPLOYMENT.md\` section 8."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # -------------------------------------------------------------------------
+  # A release keeps its SBOM. The artifact above expires; a release asset does
+  # not, and it sits beside the tag a reader would look under. This job holds
+  # the one write permission in the workflow and no AWS session, which is why
+  # it is a job of its own rather than a step in build-and-push.
+  # -------------------------------------------------------------------------
+  attach-sbom:
+    name: attach the SBOM to the release
+    if: github.event_name == 'release'
+    needs: [build-and-push, deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the SBOM
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          pattern: sbom-*
+          merge-multiple: true
+
+      - name: Attach it to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          DIGEST: ${{ needs.build-and-push.outputs.digest }}
+        run: |
+          ls -l sbom-*.spdx.json
+          gh release upload "${RELEASE_TAG}" sbom-*.spdx.json --repo "${GITHUB_REPOSITORY}" --clobber
+          {
+            echo "### SBOM attached to ${RELEASE_TAG}"
+            echo ""
+            echo "For image digest \`${DIGEST}\`."
           } >> "$GITHUB_STEP_SUMMARY"

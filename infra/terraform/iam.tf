@@ -7,10 +7,12 @@
 
 # ---------------------------------------------------------------------------
 # Task execution role: what the ECS agent uses to start the task. Pulling the
-# image and writing log streams. It carries the AWS-managed policy, which grants
-# those actions on every repository and log group in the account rather than
-# on this stack's two; scoping it to them is tracked as a low finding of the
-# v1.2.0 code review.
+# image and writing log streams, from this stack's one repository and to this
+# stack's one log group. Until v1.3.0 it carried the AWS-managed
+# AmazonECSTaskExecutionRolePolicy, which grants the same actions on every
+# repository and log group in the account (code review finding 26). The inline
+# policy below names the two resources instead; GetAuthorizationToken is the
+# one action ECR does not let a policy scope.
 # ---------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "ecs_tasks_assume" {
@@ -29,13 +31,43 @@ resource "aws_iam_role" "task_execution" {
   assume_role_policy = data.aws_iam_policy_document.ecs_tasks_assume.json
 }
 
-# The AWS-managed execution policy is the ECR pull and CloudWatch Logs write
-# that every Fargate task needs. Its ARN is built from the partition data
-# source rather than written as "arn:aws:...", so the same configuration
-# resolves in GovCloud, where the partition is aws-us-gov.
-resource "aws_iam_role_policy_attachment" "task_execution" {
-  role       = aws_iam_role.task_execution.name
-  policy_arn = "arn:${data.aws_partition.current.partition}:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+# The ECR pull and the CloudWatch Logs write that every Fargate task needs,
+# scoped to this stack's repository and log group. The log group ARN is
+# suffixed with ":*" because PutLogEvents and CreateLogStream act on log
+# streams, whose ARNs sit under the group's. No ARN is written by hand: the
+# partition and the resource ARNs come from the resources themselves, so the
+# same configuration resolves in GovCloud.
+data "aws_iam_policy_document" "task_execution" {
+  statement {
+    sid       = "EcrLogin"
+    actions   = ["ecr:GetAuthorizationToken"]
+    resources = ["*"]
+  }
+
+  statement {
+    sid = "PullThisImageOnly"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer",
+    ]
+    resources = [aws_ecr_repository.app.arn]
+  }
+
+  statement {
+    sid = "WriteThisLogGroupOnly"
+    actions = [
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+    ]
+    resources = ["${aws_cloudwatch_log_group.app.arn}:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "task_execution" {
+  name   = "${var.name_prefix}-task-execution"
+  role   = aws_iam_role.task_execution.id
+  policy = data.aws_iam_policy_document.task_execution.json
 }
 
 # ---------------------------------------------------------------------------
