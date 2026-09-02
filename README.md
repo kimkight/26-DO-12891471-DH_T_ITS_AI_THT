@@ -440,11 +440,15 @@ throughout rather than arriving in one block at the end. The 83-of-300 reading
 at 109 seconds is the evidence that the load balancer did not buffer the stream,
 which was the specific risk ADR 0006 recorded and the reason the check exists.
 
-**Peak task memory for the batch window: memory utilization measurement
-pending.** The CloudWatch `MemoryUtilization` figure for that window is being
-retrieved and is not written here until it is in hand. It is the number that
-would replace the two estimates in `docs/09_DEPLOYMENT.md` section 4.3 with a
-measurement, and it is the one that says whether 8 GiB was the right size.
+**Peak task memory for the batch window: 1.7 percent of 8192 MiB, which is
+139.3 MiB.** Retrieved from CloudWatch on 2026-09-02 for 2026-08-28 UTC, the
+day of the 300-label run, at a 60-second period; the mean over the day was
+0.699 percent, 57.3 MiB, and CPU peaked at 99.8 percent of the one vCPU during
+OCR. 8 GiB was not the right size: the task is over-provisioned on memory by
+about 59 times and constrained by CPU, and the recommendation, 2048 MiB with
+the vCPU kept, is recorded as OQ-35 in `docs/OPEN_QUESTIONS.md` rather than
+applied. The record, with what the window did and did not exercise, is
+`docs/09_DEPLOYMENT.md` section 9.
 
 ### Accuracy
 
@@ -522,13 +526,14 @@ five fields did not come back at all.
   accuracy against real label artwork is unmeasured and is the largest open
   technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
-- **The latency and throughput figures are now from the deployed target, and
-  one number is still missing.** The checklist in
+- **The latency and throughput figures are from the deployed target, and the
+  last open box, task memory, is now filled.** The checklist in
   [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9 was run on
   2026-08-28, including the question of whether the batch stream survives a load
-  balancer unbuffered, which it does. The one box still open is the CloudWatch
-  `MemoryUtilization` figure for the batch window, and the README says "memory
-  utilization measurement pending" rather than a number until it is in hand.
+  balancer unbuffered, which it does. The CloudWatch `MemoryUtilization` figure
+  for that window, the last box open, was retrieved on 2026-09-02: a 139 MiB
+  peak against 8192 MiB, recorded in section 9 with the sizing recommendation
+  it leads to in OQ-35.
 - **NFR-1 is met on both single-label paths and is still missed on the
   three-photograph case, and the miss is published rather than redefined.** One
   label image with its application document measures 1.5 seconds against
