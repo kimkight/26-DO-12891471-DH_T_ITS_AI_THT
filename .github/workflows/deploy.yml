@@ -118,9 +118,12 @@ jobs:
           echo "All six deployment variables are set."
 
       # A manual dispatch must not push under a tag shaped like a release
-      # (code review finding 27). The registry is immutable now
-      # (infra/terraform/ecr.tf), so the push would be refused there too; this
-      # refuses it here, before a build, with a sentence that says why.
+      # (code review finding 27). This step is the control. The registry is
+      # MUTABLE, so that a re-run of this workflow on the same commit can push
+      # the same `sha-` tag again (infra/terraform/ecr.tf says why immutability
+      # was applied and reverted; docs/OPEN_QUESTIONS.md OQ-34 records the
+      # decision), and nothing downstream would refuse the push. This refuses
+      # it here, before a build, with a sentence that says why.
       - name: Refuse a dispatch tag shaped like a release
         if: github.event_name == 'workflow_dispatch' && inputs.image_tag != ''
         env:

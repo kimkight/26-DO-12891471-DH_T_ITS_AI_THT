@@ -61,7 +61,7 @@ These exist in the repository today and are verifiable by reading it.
 | No `.env` file reaches the image | `.dockerignore`, `.github/workflows/ci.yml` | `**/.env` and `**/.env.*` at every depth; CI plants one at each depth, builds the frontend stage, and asserts none is in the stage and the planted value is not in the bundle (finding 28) |
 | The task's execution role can pull one image and write one log group | `infra/terraform/iam.tf` | An inline policy naming the stack's repository and log group replaces the account-wide managed policy; the task role still has no policy at all (finding 26) |
 | The task's egress is TCP 443 only | `infra/terraform/network.tf` | Image pull, layer fetch and log delivery are all HTTPS; a compromised container has no other reverse path (finding 26) |
-| Release tags cannot be re-pointed | `infra/terraform/ecr.tf`, `.github/workflows/deploy.yml` | The registry is `IMMUTABLE`; the deploy workflow refuses a dispatch tag matching `^v[0-9]` before it builds (finding 27) |
+| The deploy path refuses a release-shaped dispatch tag | `.github/workflows/deploy.yml` | The deploy workflow refuses a dispatch tag matching `^v[0-9]` before it builds (finding 27). That is the whole of the control: the registry itself does not prevent a tag from being re-pointed. It is `MUTABLE`, so that a re-run of the deploy on the same commit succeeds; it was `IMMUTABLE` for part of v1.3.0 and reverted, because ECR then refuses any push to an existing tag whatever the digest and the workflow tags by commit alone. `infra/terraform/ecr.tf` and OQ-34 record the decision |
 | Automated dependency updates | `.github/dependabot.yml` | Weekly for pip, npm, GitHub Actions, Docker |
 | OIDC instead of static keys, scoped by repository and ref | `.github/workflows/deploy.yml`, `infra/terraform/iam.tf`, `infra/terraform/locals.tf` | `aws-actions/configure-aws-credentials` with `role-to-assume`; no secret access keys. The trust policy admits this repository at `refs/heads/develop`, `refs/heads/main` and `refs/tags/v*`, in both subject formats GitHub issues, and nothing else. **Why the ref and not the environment, checked rather than assumed (2026-09-01, #110):** the `production` environment on this repository has "Deployment branches and tags: No restriction", no protection rules, no environment secrets and no environment variables, and required reviewers are not available on a private repository at this plan. GitHub issues the `environment:production` subject to any job in any workflow on any branch that names the environment, so the trust entry v1.2.0 carried for that subject admitted every branch, and the two branch entries beside it constrained nothing. The ref is the claim GitHub enforces from the token itself. No job in `deploy.yml` declares an environment, because a job that does presents the environment-scoped subject instead of the ref-scoped one, and the two changes have to go together. **What would change it:** a deployment-branch policy (`main` and `v*`) and required reviewers on the environment would make the environment subject a gate worth trusting, and the shape the review suggested (environment on both AWS-touching jobs, environment subject in the trust policy) would then be the stronger one; that setting lives outside this repository, so this table would have to say it is load-bearing. **What the ref condition does not do:** it does not put the image push behind a review that the service update is not behind, or the other way round, because there is no review gate on either; both are gated by who can push to the two branches or create a `v*` tag |
 | Least-privilege workflow tokens | `.github/workflows/ci.yml` | `permissions: contents: read` |
@@ -83,7 +83,7 @@ judgment that the control is unnecessary.
 | Limitation | Why it is acceptable now | What production requires |
 | --- | --- | --- |
 | No authentication (D-9), and the load balancer is internet-facing | Accepted, not defaulted into: see below. The prototype stores nothing, holds no credential and records no identity. Marcus scoped it: "for a prototype? Just don't do anything crazy." The input it receives is a filed application, which is not nothing; the premise at the top of this document says what that changes. | An authentication layer at the edge, agency identity integration, role separation between agents and supervisors, and session management. |
-| Plain HTTP; no TLS, no certificate, no custom domain | There is no domain to attach a certificate to, and the deliverable is a URL an evaluator can open at the load balancer's own DNS name. Traffic, including the filed application and its signature image, is unencrypted in transit. A CIDR restriction was considered and refused, because a URL that refuses reviewers' networks is not the deliverable (decision 5, `CODE_REVIEW_DECISIONS_2026-09.md`). Section 3.1 sizes the fix. | An ACM certificate, an HTTPS listener on port 443, a redirect from port 80 and the matching security group rule: roughly one Terraform block. The certificate is the part that needs a domain. |
+| Plain HTTP; no TLS, no certificate, no custom domain | There is no domain to attach a certificate to, and the deliverable is a URL an evaluator can open at the load balancer's own DNS name. Traffic, including the filed application and its signature image, is unencrypted in transit. **The URL must be given and opened as `http://`; `https://` on the same host does not connect, and will not, because there is no listener on 443** (section 3.1, verified 2026-09-02). A CIDR restriction was considered and refused, because a URL that refuses reviewers' networks is not the deliverable (decision 5, `CODE_REVIEW_DECISIONS_2026-09.md`). Section 3.1 sizes the fix. | An ACM certificate, an HTTPS listener on port 443, a redirect from port 80 and the matching security group rule: roughly one Terraform block. The certificate is the part that needs a domain, and a certificate alone is not the shortcut: ACM will not issue one for an `*.elb.amazonaws.com` name, so HTTPS is a domain purchase as well as the Terraform. |
 | Task runs in a public subnet with a public IP | A Fargate task must reach ECR and CloudWatch Logs to start. The alternatives, a NAT gateway or a set of interface endpoints, each cost more per hour than the task. Its security group accepts inbound traffic only from the load balancer, so the public IP is an egress path rather than an entrance. | Private subnets, with either a NAT gateway or VPC interface endpoints for ECR, S3, and CloudWatch Logs. |
 | Terraform state is local and unencrypted at rest beyond the operator's disk | One operator, one machine, and a stack whose resting state is destroyed. The state file is git-ignored, and it contains the account number and every ARN. | An S3 backend with versioning and server-side encryption, plus a DynamoDB lock table. See 09_DEPLOYMENT.md section 11. |
 | No persistence (D-9) | Removes retention and privacy questions entirely for the exercise. Marcus names "PII considerations, document retention policies." | An audit record of every verification, with a retention schedule set by records management, and a defined disposition. |
@@ -131,6 +131,18 @@ is no path from the application to any other resource in the account.
    on page 1, and the artwork pass reads embedded pictures that clear the
    artwork floor, which the signature does not (OQ-24 is about that floor
    being too strict for real artwork, not too loose for a signature).
+
+   **The access consequence, which is larger than the transport one.** The
+   deployed URL must be given and opened as `http://`. `https://` on the same
+   host does not connect, and will not, because the load balancer has a
+   listener on port 80 only and nothing on 443. A reviewer who types the bare
+   hostname into a browser that tries HTTPS first, or who follows a link a
+   mail client has rewritten to `https://`, gets a connection failure instead
+   of the application. That is SC-4 failing outright rather than partially,
+   and it is why the URL supplied with the submission is written with its
+   scheme. Verified against the running prototype on 2026-09-02:
+   `http://<alb-host>/api/health` returned `1.2.1` and the interface loaded;
+   the same host over `https://` could not connect.
 3. **No attribution.** With no authentication and no access logs, there is no
    record of who used it.
 
@@ -141,7 +153,12 @@ port 80 listener's default action changed from forward to a 301 redirect to
 In `infra/terraform/alb.tf` and `network.tf` that is roughly one Terraform
 block plus two one-line changes. The certificate is the only part that needs
 something this repository does not have, a domain, and validating one is the
-part that takes days rather than minutes.
+part that takes days rather than minutes. A certificate alone is not the
+shortcut: ACM will not issue a certificate for an `*.elb.amazonaws.com` name,
+and the load balancer's own DNS name is the only name this stack has. So HTTPS
+here requires a domain as well as the certificate, the 443 listener and the
+security group rule, which is what makes it a domain purchase rather than one
+Terraform block, and that is the honest sizing.
 
 **Why it is not done for the evaluation stack (decision 5,
 `CODE_REVIEW_DECISIONS_2026-09.md`).** Two mitigations short of TLS were

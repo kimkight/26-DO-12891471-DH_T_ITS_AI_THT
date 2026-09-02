@@ -278,10 +278,17 @@ release. Each item names the finding and the issue.
   replaces the account-wide managed execution policy; the task's egress is
   TCP 443 only, which is all that image pull, layer fetch and log delivery
   use. The task role still has no policy at all.
-- **Release tags cannot be re-pointed** (finding 27). The registry is
-  `IMMUTABLE`, and the deploy workflow refuses a dispatch tag matching
-  `^v[0-9]` before it builds. The runbook says what a re-run on the same
-  commit now needs.
+- **The deploy path refuses a release-shaped dispatch tag** (finding 27).
+  The deploy workflow refuses a dispatch tag matching `^v[0-9]` before it
+  builds. The registry stays `MUTABLE`. It was set to `IMMUTABLE` on this
+  branch first and reverted before the release, one decision reversed inside
+  pull request C: once immutability is on, ECR returns
+  `ImageTagAlreadyExistsException` for any push to an existing tag, whatever
+  the digest, and the workflow tags by commit SHA alone, so a re-run of the
+  deploy on an unchanged commit, which is how this project redeploys, fails
+  at the push step. A re-run on the same commit needs nothing. What
+  immutability would buy, and the cheaper guard that would make it compatible
+  with a re-run, are in OQ-34.
 - **No `.env` file at any depth reaches the image** (finding 28).
   `.dockerignore` excludes `**/.env` and `**/.env.*`; CI plants one at each
   depth, builds the frontend stage from that context, and asserts none is in

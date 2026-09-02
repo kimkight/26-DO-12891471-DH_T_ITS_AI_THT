@@ -43,6 +43,7 @@ updates every artifact the answer affects.
 | [OQ-31](#oq-31) | Open, #122; tracked, not fixed, in v1.3.0 | Nothing; the fanciful name is displayed and never compared |
 | [OQ-32](#oq-32) | Open, #123; measured on synthetic documents in v1.3.0, floor not moved | Nothing; where the margin falls short the agent chooses |
 | [OQ-33](#oq-33) | Open, #128; found in v1.3.0, the test corrected, the panel not changed | Nothing; the result is complete and readable, it scrolls |
+| [OQ-34](#oq-34) | Decided and closed 2026-09-02: the registry stays mutable, the release-tag guard is in the workflow | Nothing; a re-run of the deploy on the same commit works |
 
 ---
 
@@ -1753,3 +1754,83 @@ own screen and saying which of the three she wants, or that scrolling is fine.
 **Who can answer:** the author; taste and a screen.
 **Blocks:** nothing. The result is complete, in reading order and readable; it
 scrolls.
+
+## OQ-34
+
+**Should the container registry's tags be immutable, when the deploy path tags
+by commit alone?**
+
+**Status: Decided and closed 2026-09-02: `MUTABLE`. Immutability was applied
+for code review finding 27 inside pull request C (#130) and reverted on the
+same branch before v1.3.0 was tagged. The guard against re-pointing a release
+tag is the workflow's, not the registry's.**
+
+**What happened.** Finding 27 observed that a manual dispatch of the deploy
+workflow with `image_tag=v1.2.0` could push a new image under an existing
+release tag. The service would keep running the digest it was given, but the
+true release digest, now untagged, would be expired by the repository's
+lifecycle rule within a day, and the release artefact would be gone. Pull
+request C did both of the things the review suggested: it set
+`image_tag_mutability = "IMMUTABLE"` on the repository in
+`infra/terraform/ecr.tf`, and it added a preflight step to
+`.github/workflows/deploy.yml` that refuses a dispatch tag matching `^v[0-9]`
+before anything is built. The first was then checked against the AWS
+documentation and reverted; the second stays.
+
+**What immutability would buy.** A registry-side refusal that does not depend
+on the workflow: no push, from any client with push rights, can replace the
+image under an existing tag. For a release tag that is a stronger property
+than a check in one workflow, because it holds against a dispatch of a
+different workflow, a push from an operator's machine, and a future edit that
+removes the preflight step.
+
+**Why it was reverted.** Once tag immutability is on, ECR returns
+`ImageTagAlreadyExistsException` for a push to any tag that already exists in
+the repository, and it does so whatever the digest being pushed: an identical
+image under an existing tag is refused the same as a different one. The deploy
+workflow tags an image from the commit SHA alone, `sha-<short sha>`, with no
+check that the tag exists. So re-running the deploy workflow on an unchanged
+commit, which is the documented and habitual way this project redeploys and is
+what the runbook step for every release says to do, fails at the push step.
+Before the reversal the runbook told the operator to give a re-run an explicit
+tag instead; that is a working step that turns every re-run into a manual one
+and defeats the point of re-running. On a stack whose posture is deploy, demo,
+destroy, registry-wide immutability protects an artefact that is deleted with
+the stack, and it traded away the ability to re-run a deploy in the week before
+submission. That is the same trade recorded for TLS and for the CIDR
+restriction (decision 5, `CODE_REVIEW_DECISIONS_2026-09.md`): the working
+deliverable is not broken to buy a partial mitigation. The workflow-side
+refusal is the control that addresses the substance of the finding, and the
+`docs/06` control row, the traceability matrix, the CHANGELOG and the runbook
+now say that the registry itself does not prevent a re-point. `terraform`
+treats `image_tag_mutability` as an in-place update, so the change was safe to
+apply and is safe to reverse; nothing is recreated and the images stay.
+
+**What would change the answer.** Any one of three, each of which removes the
+collision between immutability and a re-run:
+
+1. **A deploy path that tags uniquely per run**, for instance
+   `sha-<short sha>-<run number>`, so that no two runs ever push the same tag.
+   Cheap in the workflow, but every re-run then leaves a new tagged image for
+   the lifecycle rule to count, and a release tag would still have to be
+   exempt from the suffix.
+2. **A skip-if-exists guard**: before the build, one
+   `aws ecr describe-images --repository-name <repo> --image-ids imageTag=<tag>`
+   call, and a conditional on the build-and-push step that, when the tag is
+   already present, reuses the digest of the image already in the registry and
+   goes straight to the service update. This is the cheapest of the three,
+   roughly one CLI call plus a condition on one step, and it makes a re-run on
+   the same commit exactly what it should be: a redeploy of the image that
+   commit already produced. It was not built because it is not needed for a
+   demo stack; it is the first thing to build if immutability is wanted back.
+3. **ECR's `IMMUTABLE_WITH_EXCLUSION`** mutability setting, with the moving
+   tags (`sha-*`, or whatever the dispatch path pushes) excluded by filter and
+   the release tags left immutable. That keeps the registry-side property for
+   exactly the tags finding 27 was about and lets the commit-tagged re-runs
+   through; it needs a provider version that carries the setting and the
+   exclusion filter block.
+
+**Who can answer:** the author, if the stack outlives the evaluation window;
+until then the decision above stands.
+**Blocks:** nothing. Re-running the deploy on the same commit works, and a
+release-shaped dispatch tag is refused before a build.
