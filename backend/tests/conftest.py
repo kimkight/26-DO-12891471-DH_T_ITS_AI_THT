@@ -9,6 +9,7 @@ so that no binary image file has to be committed (samples/README.md).
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -35,6 +36,32 @@ requires_fonts = pytest.mark.skipif(
     available_fonts() is None,
     reason="No TrueType font is available to render label artwork with.",
 )
+
+# The opt-in for the wall-clock ceilings (code review finding 23). A test marked
+# `wall_clock` asserts that a real OCR request finished inside NFR-1's budget.
+# That figure is a property of the machine the suite is running on as much as
+# of the code, and on a loaded shared runner a five-second ceiling can be missed
+# with no change in behaviour, which the repository's own rule ("a failing test
+# is never an infra flake") then obliges someone to investigate. So the
+# ceilings are not part of the default gate: the unmarked tests beside them
+# still print the figure on every run, and the published evidence for NFR-1 is
+# the measurement on the deployed target in docs/09_DEPLOYMENT.md section 9.
+# Set the variable to run them locally:
+#
+#     TTB_ASSERT_WALL_CLOCK=1 pytest -m wall_clock
+WALL_CLOCK_FLAG = "TTB_ASSERT_WALL_CLOCK"
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Skip the wall-clock ceilings unless the operator asked for them."""
+    if os.environ.get(WALL_CLOCK_FLAG):
+        return
+    skip = pytest.mark.skip(
+        reason=f"wall-clock ceiling, not in the default gate; set {WALL_CLOCK_FLAG}=1 to assert it"
+    )
+    for item in items:
+        if "wall_clock" in item.keywords:
+            item.add_marker(skip)
 
 
 # How a file carrying each EXIF orientation value stores its pixels: the inverse

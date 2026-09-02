@@ -710,6 +710,44 @@ This section is the record of the runs; the README is the summary of them.
       Registry page whose label artwork the floor excludes wholesale, and it is
       tracked as an open defect rather than accepted.
 
+- [x] **The item 5 margin at three render scales** (#123, OQ-32). The
+      luminance separation between the ticked box and the next darkest measured
+      **12.1 points against the 12.0 floor** on the author's own filing at the
+      default scale, on the very document the margin was derived from. The
+      question was whether the number moves with the render scale, and it was
+      taken across both document shapes at three scales before deciding whether
+      the floor moves. **Measured 2026-09-02 on a session container** (not
+      production hardware, and not on the real documents, which stay on the
+      author's machine) over the two synthetic stand-ins `samples/formmaker.py`
+      builds: the text-layer form with its three boxes drawn and one filled at
+      the grey calibrated against the author's measurement, and the same page
+      rasterised as a scan. The render long edge is `TTB_OCR_LONG_EDGE_PX`; the
+      scale is that over the page's longer side.
+
+      | document | render long edge (scale) | WINE | DISTILLED SPIRITS, ticked | MALT BEVERAGES | separation | read as | empty-box noise |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | text-layer form PDF | 792 px (1.0) | 218.8 | 191.2 | 219.4 | **27.6** | distilled spirits | 0.0 |
+      | rasterised scan | 792 px (1.0) | not sampled | | | | not determined | |
+      | text-layer form PDF | 1600 px (2.0, the default) | 232.6 | 212.1 | 234.6 | **20.5** | distilled spirits | 2.0 |
+      | rasterised scan | 1600 px (2.0, the default) | 223.0 | 194.4 | 226.0 | **28.6** | distilled spirits | 2.8 |
+      | text-layer form PDF | 2400 px (3.0) | 232.4 | 212.5 | 234.3 | **19.9** | distilled spirits | 1.8 |
+      | rasterised scan | 2400 px (3.0) | 228.9 | 196.5 | 223.2 | **26.6** | distilled spirits | 2.4 |
+
+      **The three scales do not agree, so the number does not move.** On the
+      text-layer document the separation is 27.6 at scale 1.0 and about 20 at
+      2.0 and 3.0, a seven-point swing from the render scale alone on a tick
+      whose darkness never changed; on the scan it is 28.6 and 26.6 where it
+      can be read at all, and at scale 1.0 the captions are too small for the
+      engine to find, so nothing is sampled and the agent chooses. The
+      synthetic tick clears 12.0 by eight to sixteen points at every scale that
+      reads; the author's real filing cleared it by 0.1 at the default, and a
+      swing of the size seen here would take that reading either way. What
+      would justify moving the floor is the same table on the two real
+      documents, which is the author's half of this measurement; until then
+      the comment in `backend/app/product_type.py` describes 12.1, not 22, and
+      the margin stays where it is. The empty-box noise, 0.0 to 2.8 points,
+      agrees with the 1.9 the author measured, so the floor's other end stands.
+
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
 section have been updated from this run.

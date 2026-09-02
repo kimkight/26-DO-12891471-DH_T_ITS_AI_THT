@@ -37,6 +37,7 @@ from samples.formmaker import (  # noqa: E402
 from samples.labelmaker import render_png_bytes  # noqa: E402
 from samples.specs import SAMPLE_LABEL  # noqa: E402
 
+from app import application_form  # noqa: E402
 from app.application_form import (  # noqa: E402
     SELF_CONSISTENCY_NOTE,
     parse_application_document,
@@ -495,3 +496,61 @@ class TestAnApplicationDocumentOnTheApiWithNoPhotograph:
         assert body["error"]["code"] == "no_label_to_check"
         assert "image of the label" in body["error"]["message"]
         assert "fields" not in body
+
+
+@requires_tesseract
+@requires_fonts
+class TestTheEncodeHappensOutsideTheLock:
+    """Code review finding 25 (v1.3.0): PNG encoding is Pillow work, not PDFium's.
+
+    ``_PDFIUM_LOCK`` serialises every document in a batch, so what runs under it
+    has to be only what PDFium requires. Until v1.3.0 every embedded picture
+    that cleared the floor was encoded to PNG inside it, whether or not it was
+    ever read. The pictures now leave the lock as decoded copies and are encoded
+    on first use: never under the lock, and never for a picture the prefill
+    pass counts and leaves unread (ADR 0017).
+    """
+
+    @pytest.fixture
+    def encodes(self, monkeypatch) -> dict[str, list[bool]]:
+        """Whether the lock was held at each PNG encode, artwork and page renders apart."""
+        held: dict[str, list[bool]] = {"artwork": [], "pages": []}
+        real_encode = application_form._png_bytes
+        real_content = application_form.EmbeddedArtwork.content
+
+        def page_encode(image):
+            held["pages"].append(application_form._PDFIUM_LOCK.locked())
+            return real_encode(image)
+
+        def artwork_encode(artwork):
+            held["artwork"].append(application_form._PDFIUM_LOCK.locked())
+            return real_content.func(artwork)
+
+        monkeypatch.setattr(application_form, "_png_bytes", page_encode)
+        monkeypatch.setattr(application_form.EmbeddedArtwork, "content", property(artwork_encode))
+        return held
+
+    def test_the_prefill_pass_encodes_no_picture_at_all(self, label_artwork, encodes):
+        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[label_artwork] * 3)
+
+        parsed = parse_application_document(pdf, "application/pdf", read_artwork=False)
+
+        assert document_result(parsed).artwork_images_found == 3
+        assert encodes["artwork"] == []
+        # The item 5 page render is still encoded, after the lock (ADR 0016).
+        assert encodes["pages"], "the item 5 page render is still encoded"
+        assert not any(encodes["pages"]), "a page render was encoded under the lock"
+
+    def test_only_the_pictures_read_are_encoded_and_never_under_the_lock(
+        self, label_artwork, encodes
+    ):
+        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[label_artwork] * 3)
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        result = document_result(parsed)
+        assert result.artwork_images_found == 3
+        assert len(encodes["artwork"]) == result.artwork_images_read
+        assert encodes["artwork"], "at least one picture was read, so at least one was encoded"
+        assert not any(encodes["artwork"]), "an encode ran while the PDFium lock was held"
+        assert not any(encodes["pages"])

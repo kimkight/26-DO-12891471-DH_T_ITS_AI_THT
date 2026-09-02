@@ -71,3 +71,12 @@ ignore = ["S104"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    # A test that asserts an elapsed-time ceiling. Skipped unless
+    # TTB_ASSERT_WALL_CLOCK is set, because a shared CI runner's speed is not a
+    # property of the code and a slow runner would turn a green pull request
+    # red with no change in behaviour (code review finding 23). The figures are
+    # still printed on every run; the evidence for NFR-1 is the section 9
+    # measurement on the deployed target, not this gate. See tests/conftest.py.
+    "wall_clock: asserts a wall-clock ceiling; runs only with TTB_ASSERT_WALL_CLOCK=1",
+]

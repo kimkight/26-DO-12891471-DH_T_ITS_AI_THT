@@ -290,3 +290,18 @@ stream.
   <https://www.ecfr.gov/current/title-27/section-4.36>
 - 27 CFR 5.65, distilled spirits alcohol content and proof,
   <https://www.ecfr.gov/current/title-27/section-5.65>
+
+## Amendment, 2026-09-02: what "nothing is written to disk" turned out to mean
+
+The consequences above say nothing is written to disk. The v1.2.0 code review
+(finding 4) found that to be the wrong claim: the OCR engine reads every image
+through a temporary file that `pytesseract` writes and deletes before the call
+returns, and the multipart parser spools a part over the per-file limit to a
+temporary file before the size check refuses it. Neither outlives the request.
+The decision this record makes is unchanged, and the property it actually
+rests on is retention: the response stream is the only copy of the results,
+there is no job store, and nothing survives the request. NFR-6 was reworded in
+v1.3.0 to say that, and [06_SECURITY_AND_COMPLIANCE.md](../06_SECURITY_AND_COMPLIANCE.md)
+section 3.2 says where the bytes are while a request runs. The text above is
+left as written, because it records what was believed when the decision was
+taken.

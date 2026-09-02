@@ -75,10 +75,12 @@ import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from functools import cached_property
 from typing import Literal
 
 import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_raw
+from PIL import Image
 
 from app import timing
 from app.config import settings
@@ -159,16 +161,27 @@ class EmbeddedArtwork:
     already has, and hands the OCR engine the form's own printed captions mixed
     in with the label text. Lifting the image out gives the pipeline the flat
     artwork on its own, which is the input it handles well.
+
+    ``image`` is the picture itself, copied out of PDFium's buffer while the
+    lock was held, and ``content`` is encoded from it on first use. The encode
+    is Pillow work and not a PDFium call, so it has no business inside the
+    lock, and a picture the prefill pass counts and never reads (ADR 0017) is
+    never encoded at all (v1.3.0, code review finding 25).
     """
 
     page: int
     width: int
     height: int
-    content: bytes
+    image: Image.Image = field(repr=False, compare=False)
 
     @property
     def pixels(self) -> int:
         return self.width * self.height
+
+    @cached_property
+    def content(self) -> bytes:
+        """PNG bytes at the picture's own resolution, encoded outside the lock."""
+        return _png_bytes(self.image)
 
 
 @dataclass(frozen=True)
@@ -310,12 +323,16 @@ class _PdfContents:
     """What one pass over a PDF produced, with every PDFium call already done.
 
     Everything expensive is deliberately left for the caller to do once the lock
-    is released: the rendered pages and the embedded artwork come back as bytes,
-    and Tesseract reads them outside the critical section.
+    is released: the rendered pages and the embedded artwork come back as
+    decoded pictures copied out of PDFium's buffers, the PNG encoding of them
+    happens after the lock, and Tesseract reads them outside the critical
+    section. Until v1.3.0 the encodes happened inside it, for every embedded
+    picture that cleared the floor rather than only the ones read; that was
+    code review finding 25.
     """
 
     text_side: ParsedApplication | None
-    rendered_pages: list[bytes]
+    rendered_pages: list[Image.Image]
     artwork: list[EmbeddedArtwork]
     artwork_found: int
     artwork_rejected: list[RejectedImage]
@@ -324,13 +341,32 @@ class _PdfContents:
     # item 5 caption boxes located in it exactly (ADR 0016). None for the boxes
     # means the page has no text layer and the captions have to be recognized,
     # which happens outside the lock like every other Tesseract read.
-    item_five: tuple[bytes, list[CaptionBox] | None] | None = None
+    item_five: tuple[Image.Image, list[CaptionBox] | None] | None = None
+
+
+def _png_bytes(image: Image.Image) -> bytes:
+    """One decoded picture as PNG bytes. Pillow work; never called under the lock."""
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplication:
     """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
     with _PDFIUM_LOCK, timing.phase("document_pdfium"):
         contents = _read_pdf_with_pdfium(content)
+
+    # The page renders are encoded here, after the lock, because encoding is
+    # Pillow work that serialised every document in a batch for nothing
+    # (finding 25). The embedded artwork encodes itself on first use, inside
+    # the artwork read below, so a picture the prefill pass never reads is
+    # never encoded.
+    rendered_pages = [_png_bytes(page) for page in contents.rendered_pages]
+    item_five_page = (
+        None
+        if contents.item_five is None
+        else (_png_bytes(contents.item_five[0]), contents.item_five[1])
+    )
 
     # The artwork read happens here, outside the lock, for the reason the page
     # OCR below does: Tesseract is the expensive part and there is no reason for
@@ -349,7 +385,7 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # every other expensive step, and only where nothing has answered it already.
     # None here means no page's text layer named the item; the scan branch below
     # gets a second chance at it from the pages it renders anyway.
-    item_five = read_item_five(contents.item_five)
+    item_five = read_item_five(item_five_page)
 
     if contents.text_side is not None:
         return _with_notes(
@@ -364,7 +400,7 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # already the right way up, and the OSD pass costs about as much again as
     # the read it precedes (see app.ocr).
     ocr_lines: list[OcrLine] = []
-    for rendered in contents.rendered_pages:
+    for rendered in rendered_pages:
         with timing.phase("page_ocr"):
             ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
     # Item 5 on a page with no text layer to search (ADR 0016). The captions have
@@ -373,10 +409,10 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # one that is pays for exactly one page.
     if (
         item_five is None
-        and contents.rendered_pages
+        and rendered_pages
         and _ITEM_FIVE_CAPTION.search("\n".join(line.text for line in ocr_lines))
     ):
-        item_five = read_item_five((contents.rendered_pages[0], None))
+        item_five = read_item_five((rendered_pages[0], None))
 
     # A document whose pictures were deliberately left unread is not a document
     # that could not be read (ADR 0017). Raising here would tell an agent their
@@ -619,12 +655,18 @@ def _embedded_images(
     that happens silently is one an agent cannot check. Only the page number,
     the dimensions and the named reason travel: never the picture, never
     anything read out of it. The signature in particular is the most personal
-    artefact on the form, and nothing here writes an extracted image to disk,
-    puts one in a log line, or keeps one past the request (NFR-6).
+    artefact on the form, and nothing here puts an extracted image in a log
+    line or keeps one past the request (NFR-6). A picture that is read goes to
+    the OCR engine through the short-lived temporary file ``pytesseract``
+    writes and deletes; a rejected one is never decoded at all.
 
-    Called under ``_PDFIUM_LOCK``. Every failure here is one image skipped, not
-    a document failing: a PDF can carry an image in a colour space or a filter
-    PDFium will not hand back, and the rest of the file is still readable.
+    Called under ``_PDFIUM_LOCK``, and only PDFium work happens here: the
+    pictures come back decoded and copied, and the PNG encode each one needs
+    before Tesseract can read it is deferred to first use, outside the lock and
+    only for the pictures actually read (finding 25). Every failure here is one
+    image skipped, not a document failing: a PDF can carry an image in a colour
+    space or a filter PDFium will not hand back, and the rest of the file is
+    still readable.
     """
     candidates: list[EmbeddedArtwork] = []
     rejected: list[RejectedImage] = []
@@ -642,7 +684,7 @@ def _embedded_images(
                     )
                     continue
                 reason = _rejection(width, height)
-                if reason is None and (content := _artwork_png(obj, index)) is None:
+                if reason is None and (picture := _artwork_bitmap(obj, index)) is None:
                     reason = "unreadable"
                 if reason is not None:
                     rejected.append(
@@ -650,7 +692,7 @@ def _embedded_images(
                     )
                     continue
                 candidates.append(
-                    EmbeddedArtwork(page=index + 1, width=width, height=height, content=content)
+                    EmbeddedArtwork(page=index + 1, width=width, height=height, image=picture)
                 )
 
     candidates.sort(key=lambda art: (-art.pixels, art.page))
@@ -689,17 +731,16 @@ def _rejection(width: int, height: int) -> RejectionReason | None:
     return None
 
 
-def _artwork_png(image: pdfium.PdfImage, page_index: int) -> bytes | None:
-    """One embedded image as PNG bytes at its own resolution, or None.
+def _artwork_bitmap(image: pdfium.PdfImage, page_index: int) -> Image.Image | None:
+    """One embedded image, decoded at its own resolution and copied, or None.
 
     ``render=False`` asks PDFium for the image's own bitmap rather than for a
     rendering of it as placed on the page, which is what keeps the resolution.
+    ``convert("RGB")`` always returns a new image, so what leaves here owns its
+    pixels and outlives the document handle that is closed under the lock.
     """
     try:
-        pil = image.get_bitmap(render=False).to_pil()
-        buffer = io.BytesIO()
-        pil.convert("RGB").save(buffer, format="PNG")
-        return buffer.getvalue()
+        return image.get_bitmap(render=False).to_pil().convert("RGB")
     except Exception as exc:
         # NFR-6: the class name and the page number, nothing the picture showed.
         logger.warning(
@@ -946,8 +987,8 @@ def _sourced(parsed: ParsedApplication, source: ValueSource) -> ParsedApplicatio
     )
 
 
-def _render_page(document: pdfium.PdfDocument, index: int) -> bytes:
-    """Rasterize one page to PNG bytes, with any filled form fields drawn.
+def _render_page(document: pdfium.PdfDocument, index: int) -> Image.Image:
+    """Rasterize one page, with any filled form fields drawn.
 
     ``init_forms`` is what puts an unflattened form's values into the pixels.
     Without it a scanned-looking render of a filled form shows the blank
@@ -969,16 +1010,16 @@ def _render_scale(page) -> float:
     return max(1.0, settings.ocr_long_edge_px / max(page.get_width(), page.get_height()))
 
 
-def _render_at(page, scale: float) -> bytes:
-    """One already-open page, rasterized to PNG bytes at a given scale."""
-    bitmap = page.render(scale=scale)
-    buffer = io.BytesIO()
-    bitmap.to_pil().save(buffer, format="PNG")
-    # Materialized before the page is closed. ``to_pil`` can hand back an image
-    # sharing the bitmap's buffer, and the bitmap is the page's child, so closing
-    # the page frees it. The encode happens above, inside the caller's block, and
-    # only the bytes leave it.
-    return buffer.getvalue()
+def _render_at(page, scale: float) -> Image.Image:
+    """One already-open page, rasterized at a given scale and copied.
+
+    Copied before the page is closed. ``to_pil`` can hand back an image sharing
+    the bitmap's buffer, and the bitmap is the page's child, so closing the page
+    frees it. The copy is the one PDFium-dependent step; the PNG encode is
+    Pillow work and is done by the caller after the lock is released
+    (finding 25).
+    """
+    return page.render(scale=scale).to_pil().copy()
 
 
 # What identifies item 5's page, in the caption the form prints above the three
@@ -990,13 +1031,13 @@ _ITEM_FIVE_CAPTION = re.compile(r"type\s+of\s+product", re.IGNORECASE)
 
 def _item_five_page(
     document: pdfium.PdfDocument, pages: int
-) -> tuple[bytes, list[CaptionBox] | None] | None:
+) -> tuple[Image.Image, list[CaptionBox] | None] | None:
     """Render the page carrying item 5, with its caption boxes where they exist.
 
     **Every PDFium call for item 5 is here, under the lock**, and nothing
-    expensive is: the page comes back as PNG bytes and the sampling, and the OCR
-    fallback where a page has no text layer, both happen after the lock is
-    released.
+    expensive is: the page comes back as a copied render, and the PNG encode,
+    the sampling, and the OCR fallback where a page has no text layer, all
+    happen after the lock is released.
 
     The page is found by its own caption rather than by number. Item 5 is on page
     1 of TTB F 5100.31 (04/2023), and hard-coding that would be the same mistake

@@ -23,7 +23,14 @@ from starlette.formparsers import MultiPartException
 
 from app import __version__, api
 from app.config import settings
+from app.logging_config import configure_logging
 from app.schemas import ErrorDetail, ErrorResponse
+
+# The application's own logger emits from here on, at TTB_LOG_LEVEL, as one
+# JSON line per record. Uvicorn configures only its own loggers, so without
+# this every INFO record the routes write was discarded (v1.3.0, code review
+# finding 9). See app/logging_config.py.
+configure_logging(settings.log_level)
 
 # Built frontend assets are copied here by the Dockerfile. When running the
 # backend alone (for example under pytest) the directory will not exist, so the
