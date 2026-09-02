@@ -996,11 +996,28 @@ wrong the other way is a system an agent cannot use.
 
 No uploaded image or form data is retained beyond the request lifecycle.
 
+**This is a promise about retention, and it is worded that way since v1.3.0.**
+Until then the first criterion said nothing was written to disk, which was not
+true of any request the service accepted: the OCR engine reads every image
+through a short-lived temporary file, and the multipart parser spools an
+oversize part to one before the size check refuses it (code review finding 4).
+Neither outlives the request, and retention is what an agent is promised and
+what the system guarantees; the claim was corrected rather than the
+implementation contorted to fit it (`docs/CODE_REVIEW_DECISIONS_2026-09.md`,
+decision 4).
+
 **Acceptance criteria**
-- No image or form field is written to disk, database, object storage, or cache.
-- No image content or extracted field value appears in application logs.
+- Nothing uploaded is kept. An upload, and anything read out of it, exists
+  only for the moments the check takes and is gone when the response returns:
+  no artefact of a request survives in the working directory or the temporary
+  directory, and there is no database, no object store and no cache.
+- No image content, uploaded filename or extracted field value appears in
+  application logs.
 - The container mounts no volume for uploaded content.
-- The limitation and its production path are documented.
+- Where the bytes live while a request is being processed, including the OCR
+  engine's temporary file and the parser's spool window, is stated in
+  [06_SECURITY_AND_COMPLIANCE.md](06_SECURITY_AND_COMPLIANCE.md) section 3.2,
+  and the limitation and its production path are documented.
 
 Marcus: "We're not storing anything sensitive for this exercise."
 [Source: Marcus Williams interview]

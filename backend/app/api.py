@@ -30,8 +30,11 @@ documents go through is the FR-11 one the single-label route uses.
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Annotated, TypeVar
 
+import anyio
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.formparsers import MultiPartParser
@@ -69,11 +72,19 @@ __all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
 
 logger = logging.getLogger(__name__)
 
-# Starlette spools any part over 1 MB to a temporary file on disk. NFR-6 says no
-# uploaded image is written to disk, so the spool threshold is raised to the
-# upload limit and nothing within the limit ever reaches the filesystem. This is
-# a class attribute the parser reads through `self`, with no constructor
-# override, so setting it here does reach every request.
+T = TypeVar("T")
+
+# Starlette spools any multipart part over `spool_max_size` to a temporary file.
+# The threshold is raised to the per-file limit so that every part the service
+# accepts stays in memory. A part over the limit rolls over to a temporary file
+# before `verify.check_size` refuses it after parsing, and that file is deleted
+# with the request. NFR-6 is a promise about retention, not about a disk that
+# is never touched, and docs/06_SECURITY_AND_COMPLIANCE.md section 3.2 says
+# where the bytes live and how wide this window is; until v1.3.0 this comment
+# said nothing within the limit reached the filesystem, which was true, and
+# implied nothing above it did either, which was not (code review finding 4).
+# This is a class attribute the parser reads through `self`, with no
+# constructor override, so setting it here does reach every request.
 #
 # max_part_size is raised alongside it, but note what it does and does not do.
 # The parser applies it to non-file parts only; a file part streams into the
@@ -87,6 +98,41 @@ MultiPartParser.spool_max_size = settings.max_upload_bytes
 MultiPartParser.max_part_size = settings.max_upload_bytes
 
 router = APIRouter(prefix="/api", tags=["verification"])
+
+
+# **The check runs in a worker thread, and the number of them is bounded**
+# (v1.3.0, code review finding 8). Every Tesseract pass on the single-label
+# path used to run on the event loop thread, so `GET /api/health` could not be
+# answered until the request finished: measured at 3.34 s of waiting for a
+# 3.35 s request in the review session, and 7.8 s on the deployed target for a
+# three-photograph submission, against a 5 s health-check timeout that stops
+# the task after three misses. The batch path never had this problem, because
+# ADR 0006 gave it a pool.
+#
+# The limiter is not optional. anyio's default thread pool is forty threads,
+# and forty concurrent OCR passes on a 1 vCPU, 8 GiB task would trade a stalled
+# probe for an out-of-memory kill. It is sized like the batch pool, from the
+# same setting, so an operator who pins TTB_BATCH_WORKERS to the task's CPU
+# allocation has pinned this too. `to_thread.run_sync` copies the context, so
+# the timing recording the route opened is the one the thread writes to;
+# `_PDFIUM_LOCK` and `OMP_THREAD_LIMIT=1` already cover a worker thread, because
+# the batch pool has always been one.
+#
+# Created on first use rather than at import, because a limiter is bound to
+# the running event loop's backend.
+_check_limiter: anyio.CapacityLimiter | None = None
+
+
+def _limiter() -> anyio.CapacityLimiter:
+    global _check_limiter  # noqa: PLW0603
+    if _check_limiter is None:
+        _check_limiter = anyio.CapacityLimiter(settings.effective_batch_workers)
+    return _check_limiter
+
+
+async def _off_the_loop(work: Callable[..., T], *args: object) -> T:
+    """Run blocking work in a worker thread, at most `effective_batch_workers` at once."""
+    return await anyio.to_thread.run_sync(work, *args, limiter=_limiter())
 
 
 # What each upload route accepts as a whole request body, checked from
@@ -148,9 +194,11 @@ class UploadSizeLimitMiddleware(BaseHTTPMiddleware):
 
     **That loosens this guard, and the loosening is deliberate and bounded.**
     Before ADR 0007 a single-label body over TTB_MAX_UPLOAD_BYTES was refused
-    here, without being read. It now takes a body up to three times that before
-    this guard fires, and a 25 MB single-photograph submission is read into
-    memory and then refused exactly by verify.check_size after parsing. The
+    here, without being read. It now takes a body up to four times that before
+    this guard fires, and a 25 MB single-photograph submission is parsed, which
+    means Starlette spools it to a temporary file once it passes the per-file
+    limit, and then refused exactly by verify.check_size; the spooled file is
+    deleted with the request (NFR-6, docs/06 section 3.2). The
     alternative was to bound the envelope at one photograph, which would reject
     every two-photograph submission, so there is no version of this that both
     accepts three photographs and refuses 25 MB from the header: the middleware
@@ -270,7 +318,11 @@ async def verify(
     the COLA system integration OOS-1 excludes: it opens no socket and needs no
     credentials.
 
-    Nothing is persisted and nothing is logged about it.
+    Nothing is kept and nothing about its content is logged (NFR-6).
+
+    The reading runs in a worker thread behind a capacity limiter (v1.3.0), so
+    the event loop, and `GET /api/health` with it, keeps answering while a
+    label is being read; see `_off_the_loop`.
     """
     # **The recording opens here, which is the point of it** (NFR-1). Before
     # v1.1.0 the clock started inside `verify_photos`, after the multipart form
@@ -312,119 +364,35 @@ async def _verify(
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
 
-    # Classification happens before anything is compared, and reads each image
-    # exactly once; the read is handed on to whichever side the file lands on
-    # (ADR 0011).
     if not submitted:
         # Distinct from "your document carried no artwork" below, because the
         # agent's next action differs: one needs a file, the other needs a
         # different file (FR-9).
         return _error(422, "no_files", NO_FILES_MESSAGE)
 
-    sorted_files = classify(submitted)
-    documents = [entry for entry in sorted_files if entry.side == "application_document"]
-    labels = [entry for entry in sorted_files if entry.side == "label_image"]
-
-    # Counted after sorting and before anything is compared, and named in the
-    # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
-    # parses the multipart form while resolving these parameters; the guarantee
-    # kept here is that no photograph is verified.
-    if len(labels) > settings.max_label_photos:
-        return _error(
-            413,
-            "too_many_photos",
-            (
-                f"{len(labels)} pictures of the label were submitted. Send at "
-                f"most {settings.max_label_photos} pictures of the same label, "
-                "or use the batch tab for many different labels."
-            ),
-            limit=f"maximum photographs of one label: {settings.max_label_photos}",
-        )
-    if len(documents) > 1:
-        return _error(
-            413,
-            "too_many_application_documents",
-            (
-                f"{len(documents)} of the files you sent read as label "
-                "applications. Send one application for one label, plus any "
-                "photos of that label."
-            ),
-            limit="maximum application documents for one label: 1",
-        )
-
-    document_bytes = 0
+    # Everything that reads pixels, off the event loop and behind the limiter.
     try:
-        parsed_application = None
-        if documents:
-            document = documents[0]
-            document_bytes = len(document.file.content)
-            try:
-                parsed_application = parse_application_document(
-                    document.file.content,
-                    document.file.content_type,
-                    pre_read=document.read,
-                )
-            except UnreadableDocumentError as exc:
-                # FR-9 applied to the application side: the message names the
-                # problem and the response carries no field outcomes at all. The
-                # typed path is still open, and the message says so.
-                raise VerificationError(
-                    code="unreadable_application_document", message=str(exc)
-                ) from exc
-
-        contents = [entry.file.content for entry in labels]
-        pre_read: list[OcrResult | None] = [entry.read for entry in labels]
-
-        # The label side, decided before anything is compared. Pictures the
-        # agent supplied always win: a picture of the bottle in front of them is
-        # evidence about that bottle, and the artwork on file is not.
-        label_source: LabelSource = "uploaded_photographs"
-        if not contents:
-            artwork = parsed_application.label_artwork if parsed_application else None
-            if artwork is None:
-                raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
-            contents = [artwork.content]
-            # **The read comes with it, so this picture is read once** (NFR-1).
-            # `parse_application_document` has just put these exact bytes through
-            # this exact pipeline to fill the application values; running them
-            # through it again produced an identical result for a second full
-            # Tesseract pass, which measurement on 2026-08-30 showed was about
-            # half of this path's total time. This is the same reuse ADR 0011
-            # already does with the classifier's read.
-            pre_read = [parsed_application.label_artwork_read if parsed_application else None]
-            label_source = "application_artwork"
-
-        application, sources = resolve_application(application_values, parsed_application)
-        result = verify_photos(
-            contents,
-            application,
-            application_sources=sources,
-            application_document=(
-                document_result(parsed_application) if parsed_application else None
-            ),
-            label_source=label_source,
-            pre_read=pre_read,
-        )
-        result.files = [_classification(entry) for entry in sorted_files]
+        checked = await _off_the_loop(_check_one_label, submitted, application_values)
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+    result = checked.result
 
     # NFR-6: counts and timings only. No image content, no extracted value, no
     # application value, no filename.
     logger.info(
         "verification completed",
         extra={
-            "bytes_received": sum(len(entry.file.content) for entry in sorted_files),
-            "photos_received": len(contents),
+            "bytes_received": sum(len(entry.file.content) for entry in checked.sorted_files),
+            "photos_received": checked.photos_read,
             # A count of files and a count of each side. No filename, no
             # content, nothing either one said (NFR-6).
-            "files_received": len(sorted_files),
-            "documents_classified": len(documents),
+            "files_received": len(checked.sorted_files),
+            "documents_classified": checked.documents_classified,
             "ocr_ms": result.ocr_ms,
             "beverage_type_supplied": bool(application_values["beverage_type"].strip()),
             # Counts and a path name only. No item value, no filename, nothing
             # the document said (NFR-6).
-            "application_document_bytes": document_bytes,
+            "application_document_bytes": checked.document_bytes,
             "application_document_path": (
                 result.application_document.extraction_path if result.application_document else None
             ),
@@ -443,6 +411,120 @@ async def _verify(
         result.timings.total_ms = record.total_ms
         result.timings.unaccounted_ms = round(max(record.total_ms - record.accounted_ms, 0.0), 1)
     return JSONResponse(status_code=200, content=result.model_dump())
+
+
+@dataclass(frozen=True)
+class _Checked:
+    """What `_check_one_label` hands back to the route, for the response and the log."""
+
+    result: VerificationResult
+    sorted_files: list[ClassifiedFile]
+    documents_classified: int
+    photos_read: int
+    document_bytes: int
+
+
+def _check_one_label(
+    submitted: list[SubmittedFile], application_values: dict[str, str]
+) -> _Checked:
+    """Sort, read and compare, in a worker thread. Raises `VerificationError`.
+
+    This is the body of `POST /api/verify` from the moment the parts are in
+    memory. It is synchronous on purpose: everything in it is Tesseract and
+    PDFium work, and `_off_the_loop` is what keeps it off the event loop.
+    """
+    # Classification happens before anything is compared, and reads each image
+    # exactly once; the read is handed on to whichever side the file lands on
+    # (ADR 0011).
+    sorted_files = classify(submitted)
+    documents = [entry for entry in sorted_files if entry.side == "application_document"]
+    labels = [entry for entry in sorted_files if entry.side == "label_image"]
+
+    # Counted after sorting and before anything is compared, and named in the
+    # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
+    # parses the multipart form while resolving these parameters; the guarantee
+    # kept here is that no photograph is verified.
+    if len(labels) > settings.max_label_photos:
+        raise VerificationError(
+            code="too_many_photos",
+            message=(
+                f"{len(labels)} pictures of the label were submitted. Send at "
+                f"most {settings.max_label_photos} pictures of the same label, "
+                "or use the batch tab for many different labels."
+            ),
+            status_code=413,
+            limit=f"maximum photographs of one label: {settings.max_label_photos}",
+        )
+    if len(documents) > 1:
+        raise VerificationError(
+            code="too_many_application_documents",
+            message=(
+                f"{len(documents)} of the files you sent read as label "
+                "applications. Send one application for one label, plus any "
+                "photos of that label."
+            ),
+            status_code=413,
+            limit="maximum application documents for one label: 1",
+        )
+
+    document_bytes = 0
+    parsed_application = None
+    if documents:
+        document = documents[0]
+        document_bytes = len(document.file.content)
+        try:
+            parsed_application = parse_application_document(
+                document.file.content,
+                document.file.content_type,
+                pre_read=document.read,
+            )
+        except UnreadableDocumentError as exc:
+            # FR-9 applied to the application side: the message names the
+            # problem and the response carries no field outcomes at all. The
+            # typed path is still open, and the message says so.
+            raise VerificationError(
+                code="unreadable_application_document", message=str(exc)
+            ) from exc
+
+    contents = [entry.file.content for entry in labels]
+    pre_read: list[OcrResult | None] = [entry.read for entry in labels]
+
+    # The label side, decided before anything is compared. Pictures the
+    # agent supplied always win: a picture of the bottle in front of them is
+    # evidence about that bottle, and the artwork on file is not.
+    label_source: LabelSource = "uploaded_photographs"
+    if not contents:
+        artwork = parsed_application.label_artwork if parsed_application else None
+        if artwork is None:
+            raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
+        contents = [artwork.content]
+        # **The read comes with it, so this picture is read once** (NFR-1).
+        # `parse_application_document` has just put these exact bytes through
+        # this exact pipeline to fill the application values; running them
+        # through it again produced an identical result for a second full
+        # Tesseract pass, which measurement on 2026-08-30 showed was about
+        # half of this path's total time. This is the same reuse ADR 0011
+        # already does with the classifier's read.
+        pre_read = [parsed_application.label_artwork_read if parsed_application else None]
+        label_source = "application_artwork"
+
+    application, sources = resolve_application(application_values, parsed_application)
+    result = verify_photos(
+        contents,
+        application,
+        application_sources=sources,
+        application_document=(document_result(parsed_application) if parsed_application else None),
+        label_source=label_source,
+        pre_read=pre_read,
+    )
+    result.files = [_classification(entry) for entry in sorted_files]
+    return _Checked(
+        result=result,
+        sorted_files=sorted_files,
+        documents_classified=len(documents),
+        photos_read=len(contents),
+        document_bytes=document_bytes,
+    )
 
 
 @router.post(
@@ -475,13 +557,15 @@ async def read_application(
     request, and the precedence rule is the same in both places: a typed value
     overrides a parsed one.
 
-    Nothing is persisted (NFR-6) and no outbound call is made (NFR-3, OOS-1).
+    Nothing is kept (NFR-6) and no outbound call is made (NFR-3, OOS-1).
     """
     try:
         check_document_media_type(application_document.content_type)
         content = await application_document.read()
         check_size(content)
-        parsed = parse_application_document(content, application_document.content_type)
+        parsed = await _off_the_loop(
+            parse_application_document, content, application_document.content_type
+        )
     except UnreadableDocumentError as exc:
         return _error(422, "unreadable_application_document", str(exc))
     except VerificationError as exc:
@@ -579,7 +663,7 @@ async def classify_uploads(
     the artwork values without verifying has `POST /api/read-application`, which
     still reads everything.
 
-    Nothing is compared, nothing is persisted (NFR-6), and no outbound call is
+    Nothing is compared, nothing is kept (NFR-6), and no outbound call is
     made (NFR-3).
     """
     try:
@@ -590,6 +674,24 @@ async def classify_uploads(
     if not submitted:
         return _error(422, "no_files", NO_FILES_MESSAGE)
 
+    payload = await _off_the_loop(_sort_and_read, submitted)
+
+    # NFR-6: counts only. No filename, no content, nothing any file said.
+    logger.info(
+        "uploads classified",
+        extra={
+            "files_received": len(payload.files),
+            "documents_classified": sum(
+                1 for entry in payload.files if entry.classified_as == "application_document"
+            ),
+            "labels_classified": payload.label_images,
+        },
+    )
+    return JSONResponse(status_code=200, content=payload.model_dump())
+
+
+def _sort_and_read(submitted: list[SubmittedFile]) -> ClassificationResult:
+    """The body of `POST /api/classify`, in a worker thread (see `_off_the_loop`)."""
     sorted_files = classify(submitted)
     documents = [entry for entry in sorted_files if entry.side == "application_document"]
     labels = [entry for entry in sorted_files if entry.side == "label_image"]
@@ -619,7 +721,7 @@ async def classify_uploads(
                 code="unreadable_application_document", message=str(exc), limit=None
             )
 
-    payload = ClassificationResult(
+    return ClassificationResult(
         # Only the first application-side file is read, so any further one is
         # reported as classified and not used rather than silently dropped.
         files=[_classification(entry, used=entry not in documents[1:]) for entry in sorted_files],
@@ -627,17 +729,6 @@ async def classify_uploads(
         label_images=len(labels),
         application_error=application_error,
     )
-
-    # NFR-6: counts only. No filename, no content, nothing any file said.
-    logger.info(
-        "uploads classified",
-        extra={
-            "files_received": len(sorted_files),
-            "documents_classified": len(documents),
-            "labels_classified": len(labels),
-        },
-    )
-    return JSONResponse(status_code=200, content=payload.model_dump())
 
 
 def _oversize_response(limit: int | None = None) -> JSONResponse:

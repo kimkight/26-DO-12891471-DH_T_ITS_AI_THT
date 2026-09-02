@@ -705,8 +705,9 @@ blocked connections to their ML endpoints. Classic."
 ```
 Given a completed verification
 When  the response has been returned
-Then  no image or form field has been written to disk, database, object
-      storage, or cache
+Then  no artefact of the request survives in the working directory or the
+      temporary directory, and no image or form field is in a database,
+      object storage, or cache
 ```
 
 ```

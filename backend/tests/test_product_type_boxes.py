@@ -60,6 +60,7 @@ from samples.formmaker import (  # noqa: E402
 from app import timing  # noqa: E402
 from app.application_form import (  # noqa: E402
     _item_five_page,
+    _png_bytes,
     parse_application_document,
     read_item_five,
 )
@@ -95,9 +96,12 @@ def read_from_pdf(data: bytes):
     """The reading alone, without the rest of the document parse around it."""
     document = pdfium.PdfDocument(io.BytesIO(data))
     try:
-        return read_item_five(_item_five_page(document, len(document)))
+        page = _item_five_page(document, len(document))
     finally:
         document.close()
+    # The render leaves the lock as a picture and is encoded afterwards
+    # (v1.3.0, finding 25), which is what `_parse_pdf` does for the real path.
+    return read_item_five(None if page is None else (_png_bytes(page[0]), page[1]))
 
 
 class TestATextLayerPdf:

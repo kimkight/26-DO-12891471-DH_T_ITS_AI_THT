@@ -615,10 +615,13 @@ says is manual by nature, is the screen reader pass and the greyscale check.
   of it is committed: not to `tests/`, not to `docs/`, not as an encoded blob,
   and not in a pull request description. What is committed is the synthetic
   fixture that reproduces the same defect.
-- **No extracted image is written, logged, or kept, and a signature is not read
-  at all.** A filed application carries the applicant's handwritten signature,
-  which is the most personal artefact on the form. Nothing lifts an embedded
-  image out of a document to disk or to a log line at any point, and the
+- **No extracted image is logged or kept, and a signature is not read at
+  all.** A filed application carries the applicant's handwritten signature,
+  which is the most personal artefact on the form. Nothing keeps an embedded
+  image past the request or puts one in a log line at any point; a picture that
+  is read reaches the OCR engine through the temporary file `pytesseract`
+  writes and deletes before it returns (NFR-6 as reworded in v1.3.0), and a
+  rejected one is never decoded. The
   rejection record the response carries holds a page number, two dimensions and
   a named reason and nothing else, asserted on the record's fields in
   `backend/tests/test_embedded_artwork.py` rather than on one instance of it.

@@ -20,8 +20,8 @@ no user account, and no session.
 | Availability of the service | Resource exhaustion through very large batches | Batch file-count limit enforced before any file is processed (`TTB_MAX_BATCH_FILES`), and a whole-envelope byte cap checked from `Content-Length` before the body is read (`TTB_MAX_BATCH_BYTES`, NFR-7). The deployed values are set to what the task's memory holds; see 09_DEPLOYMENT.md section 4. | A batch inside both caps still occupies the single task for its duration, and there is no queue and no second task to take the next one. |
 | Container runtime | Malicious file exploiting an image decoder | MIME type checked against an allowlist before decoding; decoding runs as an unprivileged user in a container with no mounted volumes | Image parsing libraries remain a real attack surface. A decoder vulnerability could execute in the container. No seccomp or AppArmor profile is defined yet. |
 | Container runtime | Privilege escalation after a compromise | Container runs as UID 10001, non-root, with `nologin` shell; application files owned by root and not writable at runtime | Container escape through a kernel vulnerability is unmitigated by this control. |
-| Uploaded label artwork | Disclosure through retention | Nothing is written to disk, database, object storage, or cache; buffers are released with the request (NFR-6) | Content exists in process memory while the request runs, and could appear in a core dump or memory snapshot. |
-| Uploaded label artwork | Disclosure through logs | No image content or extracted field value is logged (NFR-6) | An unhandled exception could put field content into a stack trace. Error handling must be written with this in mind. |
+| Uploaded label artwork, and the filed application | Disclosure through retention | Nothing is kept: no database, no bucket, no cache and no log of content. An upload lives in process memory, and each image lives briefly in the temporary directory while the OCR engine reads it, and both are gone when the request returns (NFR-6; section 3.2 says exactly where the bytes are). Asserted by `TestNothingIsRetained` in the backend suite, which watches the temporary and working directories across a request | Content exists in process memory, and in the engine's temporary file, while the request runs, and could appear in a core dump or memory snapshot. |
+| Uploaded label artwork, and the filed application | Disclosure through logs | No image content, uploaded filename or extracted field value is logged (NFR-6); the application's logger writes counts, timings and path names, as one JSON line per record, and the retention test asserts the filename and the values are absent from what it wrote | An unhandled exception could put field content into a stack trace. Error handling must be written with this in mind. |
 | Data in transit | Interception | **None in the prototype: the listener is plain HTTP.** See section 3.1. | Label artwork, application field values, and results cross the network in the clear. The production fix is an ACM certificate and an HTTPS listener; even then, traffic from the load balancer to the task would travel inside the VPC unencrypted, so it would still not be end-to-end to the container. |
 | Verification results | A wrong result treated as authoritative | Three-outcome design with a human-review band; every result carries the label value, the application value, and the score, so an agent can check the reasoning (FR-3) | The tool can be wrong. A rushed agent may accept a match without checking. This is the central residual risk and is addressed by design, not eliminated. |
 | Software supply chain | Compromised or vulnerable dependency | `pip-audit` and `npm audit` in CI; Dependabot weekly for pip, npm, GitHub Actions, and Docker; SBOM generated for every image | Base images are not yet pinned by digest. A dependency compromised between audit runs is not detected. |
@@ -81,8 +81,9 @@ balancer's DNS name, for the length of an evaluation window. The deliverable
 the assignment asks for is a working prototype an evaluator can open, and that
 is a URL.
 
-**What bounds it.** Nothing is stored (NFR-6): no database, no object store, no
-disk write, and the batch response stream is the only copy of a result. The
+**What bounds it.** Nothing is kept (NFR-6): no database, no object store, no
+cache, nothing that outlives the request (section 3.2 says where the bytes are
+while it runs), and the batch response stream is the only copy of a result. The
 task holds no credential, and its IAM role has no policy attached at all. There
 is no path from the application to any other resource in the account.
 
@@ -110,6 +111,52 @@ access logs and an application audit trail.
 load balancer's security group to a single address. Between demonstrations, the
 stronger mitigation is `terraform destroy`, which is the runbook's resting
 state.
+
+### 3.2 Where an upload lives while it is checked
+
+NFR-6 is a promise about retention: nothing uploaded is kept. This is the whole
+of what happens to an upload between arrival and answer, stated so that the
+promise can be checked rather than taken. Until v1.3.0 this document said
+nothing was written to disk, and that was not true of any request the service
+accepted (code review finding 4); the claim was corrected, not the code
+(`CODE_REVIEW_DECISIONS_2026-09.md`, decision 4).
+
+**In memory.** The multipart parser holds each part in memory up to the
+per-file limit (`TTB_MAX_UPLOAD_BYTES`, 10 MiB), the route reads it into a
+`bytes` object, the decoded pixel arrays and the parsed document live in
+process memory, and all of it is released when the response is built.
+
+**In the temporary directory, briefly, twice.** The OCR engine reads each
+image through a short-lived temporary file: `pytesseract` writes the decoded
+picture to the temporary directory, runs the Tesseract binary over that path,
+and deletes that file and the engine's output file before the call returns.
+Every label photograph, every embedded picture lifted out of a filed
+application, and every page rendered from a scanned one goes through that
+path. Separately, a part larger than the per-file limit is spooled by
+Starlette to a temporary file before the exact size check refuses it, because
+the whole-request guard reads `Content-Length` and cannot count the parts
+without reading the body it exists not to read: a single-label request may
+legitimately carry up to four files, so the guard bounds the envelope at four
+times the per-file limit. The window is therefore one part between 10 MiB and
+40 MiB on `POST /api/verify` and `POST /api/classify`, and between 10 MiB and
+the batch envelope (3 000 MiB as deployed) on `POST /api/verify-batch`;
+`POST /api/read-application` takes one file and refuses it from the header.
+The spooled file is deleted when the request ends. Both files live in the
+task's ephemeral storage, which is destroyed with the task; closing the window
+from the header is not possible without owning the framework's parser, and
+that is recorded rather than attempted (OQ-30).
+
+**Nowhere else.** Nothing is written to the working directory. There is no
+database, no bucket, no cache, and no log line carries content, a filename or
+an extracted value: the application's logger writes counts, timings and path
+names. `backend/tests/test_verify_integration.py::TestNothingIsRetained`
+asserts, after a real request, that the temporary directory and the working
+directory carry no artefact of it, having first observed that the engine's
+temporary files were created during it, so the test can fail and was broken on
+purpose to prove it; the same assertion covers the batch path in
+`test_batch.py`. The stronger guarantee, feeding the engine over standard
+input so that no temporary file exists at all, is recorded and deliberately not
+taken in OQ-30.
 
 ## 4. FedRAMP posture
 

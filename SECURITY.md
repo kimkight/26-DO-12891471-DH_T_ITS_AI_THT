@@ -37,10 +37,14 @@ beyond it, are in scope.
 
 ## Handling of data
 
-The application persists nothing. Uploaded images and form data exist only in
-process memory for the lifetime of the request, and are not written to disk, a
-database, object storage, or a cache. Logs contain no image content and no
-extracted field values. See NFR-6.
+The application keeps nothing. Uploaded files and form data live in process
+memory for the lifetime of the request, and the OCR engine reads each image
+through a temporary file that it deletes before the call returns; nothing
+survives the request in the working directory, the temporary directory, a
+database, object storage or a cache. Logs contain no image content, no uploaded
+filename and no extracted field values. See NFR-6, and
+`docs/06_SECURITY_AND_COMPLIANCE.md` section 3.2 for where the bytes are while
+a request runs.
 
 ## Secrets
 

@@ -113,7 +113,7 @@ sequenceDiagram
             F-->>A: Field, label value, application value, outcome
         end
     end
-    Note over API: Nothing written to disk. Buffers released with the request.
+    Note over API: Nothing kept. Buffers, and the OCR engine's temporary file, are gone with the request (NFR-6).
 ```
 
 The failure branches are drawn explicitly because they are a graded criterion:
