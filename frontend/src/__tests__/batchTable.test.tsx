@@ -16,6 +16,7 @@ import { BatchTable } from '../components/BatchTable'
 import { resultsToCsv } from '../lib/csv'
 import { rowOutcome } from '../lib/outcomes'
 import { plainMessage } from '../lib/plainLanguage'
+import { pairingStem } from '../lib/pairing'
 import { batchLine } from './fixtures'
 import type { BatchLine } from '../types'
 
@@ -86,7 +87,40 @@ describe('the batch results table', () => {
   it('shows the row error message rather than an empty cell', () => {
     render(<BatchTable lines={LINES} />)
     expect(screen.getByText('Could not read.')).toBeInTheDocument()
-    expect(screen.getByText('All five fields match.')).toBeInTheDocument()
+    // The same wording the single-label view uses (v1.2.0), so the two views
+    // cannot disagree about a row (finding 16).
+    expect(screen.getByText('5 of 5 checks passed.')).toBeInTheDocument()
+  })
+
+  /*
+   * Rows whose worst outcome is not match, review or mismatch (code review
+   * finding 16, #115). The detail cell used to read "All five fields match."
+   * for every one of them.
+   */
+  it('names a value that was not compared, a presence check and an artwork-derived row', () => {
+    render(
+      <BatchTable
+        lines={[
+          batchLine('a.png', 1, 3, ['not_compared', 'match', 'match', 'match', 'match']),
+          batchLine('b.png', 2, 3, ['match', 'match', 'present', 'present', 'match']),
+          batchLine('c.png', 3, 3, ['match', 'artwork_derived', 'match', 'match', 'match']),
+        ]}
+      />,
+    )
+    expect(
+      screen.getByText('4 of 5 checks passed. brand name was not compared.'),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '5 of 5 checks passed. alcohol content is on the label, as the regulation requires. net contents is on the label, as the regulation requires.',
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        '4 of 4 checks passed; 1 read from the artwork only. class type was read from the label artwork and could not be compared against it.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/All five fields match/)).not.toBeInTheDocument()
   })
 })
 
@@ -159,16 +193,52 @@ describe('the batch tab', () => {
     expect(progress).toHaveAttribute('value', '3')
     expect(progress).toHaveAttribute('max', '3')
 
-    // Each row is counted once, under its worst outcome, so the four buckets
+    // Each row is counted once, under its worst outcome, so the seven buckets
     // sum to the row count. b-review.png carries both a needs_review and a
     // mismatch, so it counts as a mismatch and not in both.
     const items = within(screen.getByRole('list')).getAllByRole('listitem')
     expect(items.map((item) => item.textContent)).toEqual([
       '1 fully matching',
+      '0 passing on what the label carries, with nothing declared',
       '0 needing review',
       '1 not matching',
+      '0 with a value not compared',
+      '0 read from the artwork only',
       '1 could not be checked',
     ])
+  })
+
+  /*
+   * The buckets partition every row (code review finding 16, #115). A batch
+   * of one row per category: the counts sum to the row count, and the
+   * finished sentence names each non-zero bucket in the same words.
+   */
+  it('accounts for every row, in a category a reader can name', async () => {
+    const rows: BatchLine[] = [
+      batchLine('1-match.png', 1, 7, ['match', 'match', 'match', 'match', 'match']),
+      // A row of nothing but presence checks: no agreement was tested (FR-15).
+      batchLine('2-present.png', 2, 7, ['present', 'present', 'present', 'present', 'present']),
+      batchLine('3-review.png', 3, 7, ['needs_review', 'match', 'match', 'match', 'match']),
+      batchLine('4-mismatch.png', 4, 7, ['mismatch', 'match', 'match', 'match', 'match']),
+      batchLine('5-not-compared.png', 5, 7, ['not_compared', 'match', 'match', 'match', 'match']),
+      batchLine('6-artwork.png', 6, 7, ['match', 'artwork_derived', 'match', 'match', 'match']),
+      batchLine('7-error.png', 7, 7, null),
+    ]
+    vi.stubGlobal('fetch', streamOf(rows))
+    const user = userEvent.setup()
+    render(<BatchTab />)
+    await runBatch(user)
+    await waitFor(() => expect(screen.getByText('7 of 7 labels checked')).toBeInTheDocument())
+
+    const items = within(screen.getByRole('list')).getAllByRole('listitem')
+    const counts = items.map((item) => Number(item.textContent?.split(' ')[0]))
+    expect(counts).toEqual([1, 1, 1, 1, 1, 1, 1])
+    expect(counts.reduce((sum, count) => sum + count, 0)).toBe(rows.length)
+    expect(
+      within(screen.getByRole('region', { name: 'Results' })).getByRole('status'),
+    ).toHaveTextContent(
+      'Finished. 7 labels checked: 1 fully matching, 1 passing on what the label carries, with nothing declared, 1 needing review, 1 not matching, 1 with a value not compared, 1 read from the artwork only, 1 could not be checked.',
+    )
   })
 
   it('keeps every row that arrived, including the one that failed (US-10)', async () => {
@@ -246,10 +316,32 @@ describe('the batch tab', () => {
   it('counts the pairs it will send and announces the count (NFR-5)', async () => {
     const user = userEvent.setup()
     render(<BatchTab />)
+    // The region exists, labelled and empty, before anything is chosen (4.1.3).
+    expect(screen.getByRole('status', { name: 'Batch pairing' })).toHaveTextContent('')
     await chooseFiles(user)
 
-    const status = screen.getAllByRole('status').find((node) => node.textContent?.includes('pair'))
-    expect(status).toHaveTextContent('3 pairs ready to check.')
+    expect(screen.getByRole('status', { name: 'Batch pairing' })).toHaveTextContent(
+      '3 pairs ready to check.',
+    )
+  })
+
+  /*
+   * The page's fold is the server's fold (code review finding 21). The same
+   * vectors, character for character, are asserted in
+   * `backend/tests/test_batch.py::TestTheFoldIsTheSameOnBothSides`.
+   */
+  it.each([
+    ['Label.PNG', 'label'],
+    ['ÉTIQUETTE.png', 'étiquette'],
+    ['Straße.png', 'straße'],
+    ['STRASSE.pdf', 'strasse'],
+    ['İstanbul.pdf', 'i̇stanbul'],
+  ])('folds %s to %s, exactly as the server does', (filename, expected) => {
+    expect(pairingStem(filename)).toBe(expected)
+  })
+
+  it('does not pair a sharp s with a double s, and neither does the server now', () => {
+    expect(pairingStem('Straße.png')).not.toBe(pairingStem('STRASSE.pdf'))
   })
 
   it('names the files that pair with nothing, before the batch is sent', async () => {
@@ -325,6 +417,12 @@ describe('every batch error code an agent can meet has a plain-language line', (
     'file_too_large',
     'unreadable_image',
     'verification_failed',
+    // The three the single upload can meet that had no line until v1.3.0
+    // (finding 22). `uploadList.test.tsx` reads the whole set off the backend
+    // source, so this list is the batch half of the contract only.
+    'no_files',
+    'no_label_to_check',
+    'too_many_application_documents',
   ]
 
   const FALLBACK = plainMessage('a-code-that-does-not-exist')

@@ -107,7 +107,7 @@ import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import { typedValues } from '../lib/applicationFields'
-import type { SourceMap } from '../lib/applicationFields'
+import type { Disagreements, SourceMap } from '../lib/applicationFields'
 import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
 import { announcement, summary } from '../lib/outcomes'
 import { pendingFromArtwork } from '../lib/pendingArtwork'
@@ -134,6 +134,16 @@ const APPLICATION_FIELDS: (keyof ApplicationData)[] = [
   'net_contents',
   'beverage_type',
 ]
+
+/**
+ * Whether a typed value and a document value are the same value for the
+ * purpose of showing a disagreement: FR-4's tolerance, case and surrounding
+ * space, applied here so that "Stone's Throw" against "STONE'S THROW" is not
+ * flagged as the document contradicting the agent.
+ */
+function sameValue(one: string, other: string): boolean {
+  return one.trim().toLowerCase() === other.trim().toLowerCase()
+}
 
 function onlyTyped(previous: SourceMap, application: ApplicationData): SourceMap {
   const next: SourceMap = {}
@@ -200,6 +210,31 @@ export function SingleLabelTab() {
   const [generation, setGeneration] = useState(0)
   const [cleared, setCleared] = useState('')
   const pickerRef = useRef<HTMLInputElement>(null)
+  /*
+   * Where a typed value and the uploaded document disagree (code review
+   * finding 6, #105): the document's value, kept beside the agent's so the
+   * disagreement is visible rather than resolved silently either way. The
+   * agent's value is the one the check uses, because FR-11's precedence is
+   * that a typed value wins and because an agent who typed a value has read
+   * something the tool has not.
+   */
+  const [disagreements, setDisagreements] = useState<Disagreements>({})
+  /*
+   * Which fields the uploaded document filled, and which of those the agent
+   * then emptied (code review finding 29). An empty typed value alone lets the
+   * server re-derive the field from the document it is sent anyway, so a
+   * blank the agent made on purpose is sent as an instruction.
+   */
+  const [supplied, setSupplied] = useState<(keyof ApplicationData)[]>([])
+  const [blanked, setBlanked] = useState<(keyof ApplicationData)[]>([])
+  /*
+   * The check in flight (code review finding 17, #116). Reset aborts it, and
+   * the counter is what keeps an answer that arrives after a reset, or after a
+   * later check started, from repopulating a screen that no longer asked for
+   * it: the batch tab already had this shape, and the single-label tab did not.
+   */
+  const checkRef = useRef<AbortController | null>(null)
+  const checkCount = useRef(0)
 
   /**
    * Clear everything and go back to the empty state (US-29, NFR-4, NFR-5).
@@ -216,9 +251,17 @@ export function SingleLabelTab() {
    * result cards have gone.
    */
   function reset() {
+    // A check still in flight is cancelled, and its answer, should it arrive
+    // anyway, is disowned by the counter below.
+    checkRef.current?.abort()
+    checkRef.current = null
+    checkCount.current += 1
     setFiles([])
     setApplication(EMPTY_APPLICATION)
     setSources({})
+    setDisagreements({})
+    setSupplied([])
+    setBlanked([])
     setProcessed(false)
     setGaps([])
     setPending([])
@@ -245,6 +288,19 @@ export function SingleLabelTab() {
     // The agent has taken this field over. The source becomes theirs, so the
     // interface never tells them a value came off a document when it did not.
     setSources((previous) => ({ ...previous, [name]: value.trim() ? 'typed' : 'absent' }))
+    // Editing settles any disagreement with the document: what is in the box
+    // is now the agent's answer, whichever way they went.
+    setDisagreements((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([field]) => field !== name)),
+    )
+    // Emptying a box the document filled is an instruction to leave that field
+    // out of the check, and it is sent as one (finding 29). Typing anything
+    // back withdraws it, because a typed value wins on its own.
+    if (!value.trim() && supplied.includes(name)) {
+      setBlanked((previous) => (previous.includes(name) ? previous : [...previous, name]))
+    } else {
+      setBlanked((previous) => previous.filter((field) => field !== name))
+    }
   }
 
   /**
@@ -257,11 +313,18 @@ export function SingleLabelTab() {
   function fillFromClassification(result: ClassificationResult) {
     setProcessed(true)
     if (!result.application_document) {
-      // Nothing on the application side: a label picture and nothing else. What
-      // the agent typed stays theirs; everything they did not type is a gap,
-      // because nothing supplied it.
+      // A photograph and nothing else (code review finding 19, #118). What the
+      // agent typed stays theirs, and nothing is asked of them: a photograph
+      // alone can be checked for the elements a label must carry, and there is
+      // nothing yet to compare it against, which is what the upload panel
+      // says. Opening four boxes and moving focus into the first would be the
+      // tool asking for values it has no reason to expect, and "upload a
+      // clearer image" was advice about the wrong file.
       setSources((previous) => onlyTyped(previous, application))
-      setGaps(APPLICATION_FIELDS.filter((name) => !application[name].trim()))
+      setDisagreements({})
+      setSupplied([])
+      setBlanked([])
+      setGaps([])
       setPending([])
       return
     }
@@ -269,34 +332,55 @@ export function SingleLabelTab() {
   }
 
   /**
-   * Write what the document said into the fields it answers (FR-11).
+   * Merge what the document said into the fields it answers (FR-11).
    *
-   * Every value the document supplied is written into its field, including over
-   * something already typed there: uploading the application is a deliberate
-   * act and the agent is asking for what it says. Nothing is lost that cannot
-   * be typed back, every value stays editable, and the source is recorded per
-   * field so the interface can say where each one came from.
+   * **Agent input wins over absence, and over disagreement** (code review
+   * finding 6, #105). Until v1.3.0 the source map was rebuilt from the
+   * document, so a field the agent had typed and the document did not carry
+   * became "absent": the value stayed in the box, the screen said "Not
+   * supplied" beside it, and the request omitted it. Now a document value
+   * fills only a box the agent has not typed in. Where the agent typed and the
+   * document says something else, the document's value is shown beside the
+   * agent's as a disagreement and the agent's is used: FR-11's precedence, and
+   * the agent can see both and change their mind. A difference of case or
+   * spacing alone is not a disagreement (FR-4).
    */
   function fillFromDocument(document: ApplicationDocumentResult) {
-    const filled = document.fields.filter((entry) => entry.found_on_document)
+    const typed = new Set(
+      APPLICATION_FIELDS.filter((name) => sources[name] === 'typed' && application[name].trim()),
+    )
+    const found = document.fields.filter(
+      (entry) => entry.found_on_document && entry.value && entry.name in EMPTY_APPLICATION,
+    )
+    const disagreeing: Disagreements = {}
+    for (const entry of found) {
+      const name = entry.name as keyof ApplicationData
+      if (typed.has(name) && !sameValue(entry.value ?? '', application[name])) {
+        disagreeing[name] = entry.value ?? ''
+      }
+    }
+    setDisagreements(disagreeing)
     setApplication((previous) => {
       const next = { ...previous }
-      for (const entry of filled) {
-        if (entry.name in next && entry.value) {
-          next[entry.name as keyof ApplicationData] = entry.value
-        }
+      for (const entry of found) {
+        const name = entry.name as keyof ApplicationData
+        if (!typed.has(name)) next[name] = entry.value ?? ''
       }
       return next
     })
     setSources(() => {
       const next: SourceMap = {}
       for (const entry of document.fields) {
-        next[entry.name as keyof ApplicationData] = entry.found_on_document
-          ? documentSource(entry.source)
-          : 'absent'
+        const name = entry.name as keyof ApplicationData
+        if (typed.has(name)) next[name] = 'typed'
+        else next[name] = entry.found_on_document ? documentSource(entry.source) : 'absent'
       }
       return next
     })
+    setSupplied(
+      found.map((entry) => entry.name as keyof ApplicationData).filter((name) => !typed.has(name)),
+    )
+    setBlanked([])
 
     // A gap is a compared value neither the document nor the agent supplied.
     // Something already typed is not a gap: the agent answered it.
@@ -307,9 +391,7 @@ export function SingleLabelTab() {
     // rather than absent. Opening a box and moving focus into it for a value
     // the next click fills in would be the tool asking the agent to do its own
     // work, one second before doing it.
-    const supplied = new Set(
-      filled.map((entry) => entry.name).filter((name) => name in EMPTY_APPLICATION),
-    )
+    const supplied = new Set(found.map((entry) => entry.name))
     const owed = pendingFromArtwork(document)
     const stillComing = new Set(owed)
     setPending(owed.filter((name) => !application[name].trim()))
@@ -323,6 +405,9 @@ export function SingleLabelTab() {
   /** Taking every file back off returns the view to its unprocessed state. */
   function clearFormMarks() {
     setSources((previous) => onlyTyped(previous, application))
+    setDisagreements({})
+    setSupplied([])
+    setBlanked([])
     setProcessed(false)
     setGaps([])
     setPending([])
@@ -338,6 +423,9 @@ export function SingleLabelTab() {
    */
   function openFieldsAfterFailure() {
     setSources((previous) => onlyTyped(previous, application))
+    setDisagreements({})
+    setSupplied([])
+    setBlanked([])
     setProcessed(false)
     setGaps([])
     setPending([])
@@ -368,6 +456,10 @@ export function SingleLabelTab() {
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (!canCheck || checking) return
+    checkRef.current?.abort()
+    const controller = new AbortController()
+    checkRef.current = controller
+    const thisCheck = ++checkCount.current
     setChecking(true)
     setOutcome(null)
     // The clearing announcement is spent. Leaving it would have the region say
@@ -376,7 +468,15 @@ export function SingleLabelTab() {
     // What the agent typed, and nothing the interface filled in from the
     // document (FR-14). See `typedValues` for what posting the rest back does
     // to a document-only submission.
-    setOutcome(await verifyLabel(files, typedValues(application, sources)))
+    const outcome = await verifyLabel(files, typedValues(application, sources), {
+      signal: controller.signal,
+      clearedFields: blanked,
+    })
+    // An answer to a check the agent has since cleared, or superseded, is
+    // about a screen that no longer exists (finding 17). Nothing changes.
+    if (outcome.aborted || thisCheck !== checkCount.current) return
+    checkRef.current = null
+    setOutcome(outcome)
     setChecking(false)
   }
 
@@ -423,6 +523,7 @@ export function SingleLabelTab() {
           <ApplicationFields
             application={application}
             sources={sources}
+            disagreements={disagreements}
             processed={processed}
             gaps={gaps}
             pending={pending}

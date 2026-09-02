@@ -17,6 +17,17 @@ export const SIDES: Record<FileClassification['classified_as'], string> = {
   label_image: 'Label image',
 }
 
+/**
+ * What is true of a photograph uploaded on its own (code review finding 19,
+ * #118). It can be checked for the elements 27 CFR requires the label to carry;
+ * what it cannot be is compared, because nothing has declared a value yet. The
+ * old sentence told the agent to type the values, and the gap fields opened
+ * with "upload a clearer image", which was advice about the wrong file.
+ */
+export const PHOTO_ONLY_NOTE =
+  'No application was uploaded, so the photo can be checked for the elements a label must carry ' +
+  'but there is nothing to compare it against yet; upload the application, or type the values, to compare.'
+
 export function announce(result: ClassificationResult): string {
   const sorted = result.files
     .map((entry) => `${entry.filename}, read as a ${SIDES[entry.classified_as].toLowerCase()}`)
@@ -29,7 +40,7 @@ export function announce(result: ClassificationResult): string {
   }
   const document = result.application_document
   if (!document) {
-    return `${sorted}. No application was uploaded, so type the values you want checked.`
+    return `${sorted}. ${PHOTO_ONLY_NOTE}`
   }
   const found = document.fields.filter((entry) => entry.found_on_document)
   if (!found.length) {

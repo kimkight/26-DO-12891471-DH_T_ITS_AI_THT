@@ -49,9 +49,10 @@ import {
   BEVERAGE_TYPES,
   TEXT_FIELDS,
   TYPED_FIELDS_PANEL,
+  disagreementNote,
   gapAnnouncement,
 } from '../lib/applicationFields'
-import type { SourceMap } from '../lib/applicationFields'
+import type { Disagreements, SourceMap } from '../lib/applicationFields'
 import { fieldSourceMark, sourceChipLabel } from '../lib/applicationSources'
 import type { ApplicationData, ApplicationSource } from '../types'
 
@@ -59,6 +60,13 @@ interface Props {
   application: ApplicationData
   /** Where each value came from, for the values that arrived from a document. */
   sources: SourceMap
+  /**
+   * The document's value where it differs from what the agent typed (code
+   * review finding 6). Shown as a line under the agent's value, in the summary
+   * and in the box, so the disagreement is visible and the agent's value is
+   * still the one used.
+   */
+  disagreements?: Disagreements
   /** Whether anything has been uploaded and read yet. */
   processed: boolean
   /**
@@ -97,14 +105,18 @@ function SummaryLine({
   label,
   value,
   source,
+  disagreement,
 }: {
   label: string
   value: string
   source: ApplicationSource
+  disagreement?: string
 }) {
   // No caveat line under the chip. The chip is the caveat: it names the source
   // in four words, and a sentence repeating it was the third telling of
-  // something the upload card says once above (2026-08-31).
+  // something the upload card says once above (2026-08-31). The one line that
+  // does appear here is a disagreement between the agent and the document,
+  // which is new information rather than a repetition (finding 6).
   return (
     <div className="value-line">
       <span className="value-line__label">{label}</span>
@@ -112,6 +124,9 @@ function SummaryLine({
       <span className={`chip chip--${source === 'typed' ? 'navy' : 'gold'}`}>
         {sourceChipLabel(source)}
       </span>
+      {disagreement ? (
+        <p className="field__source value-line__note">{disagreementNote(disagreement)}</p>
+      ) : null}
     </div>
   )
 }
@@ -119,6 +134,7 @@ function SummaryLine({
 export function ApplicationFields({
   application,
   sources,
+  disagreements = {},
   processed,
   gaps: missing,
   pending = [],
@@ -131,7 +147,12 @@ export function ApplicationFields({
   // Everything that is not a gap stays editable behind the disclosure, pending
   // values included. Only the ones with something in them are summarised.
   const editable = TEXT_FIELDS.filter((field) => !missing.includes(field.name))
-  const read = editable.filter((field) => !pending.includes(field.name))
+  // A field with nothing in it is not summarised: a photograph on its own
+  // leaves every box empty and asks for none of them (finding 19), so there
+  // is nothing to read back and the disclosure keeps its typing label.
+  const read = editable.filter(
+    (field) => !pending.includes(field.name) && application[field.name].trim() !== '',
+  )
   const firstGapRef = useRef<HTMLInputElement>(null)
 
   /*
@@ -165,9 +186,11 @@ export function ApplicationFields({
 
   function textField(field: (typeof TEXT_FIELDS)[number], isFirstGap = false) {
     const mark = fieldSourceMark(sources[field.name] ?? 'absent')
+    const disagreement = disagreements[field.name]
     const describedBy = [
       field.hint ? `${field.name}-hint` : null,
       mark ? `${field.name}-from-form` : null,
+      disagreement ? `${field.name}-disagrees` : null,
     ]
       .filter(Boolean)
       .join(' ')
@@ -177,6 +200,11 @@ export function ApplicationFields({
         {mark ? (
           <p className="field__source" id={`${field.name}-from-form`}>
             {mark}
+          </p>
+        ) : null}
+        {disagreement ? (
+          <p className="field__source" id={`${field.name}-disagrees`}>
+            {disagreementNote(disagreement)}
           </p>
         ) : null}
         {field.hint ? (
@@ -261,6 +289,7 @@ export function ApplicationFields({
               label={field.label}
               value={application[field.name]}
               source={sources[field.name] ?? 'typed'}
+              disagreement={disagreements[field.name]}
             />
           ))}
         </div>
@@ -325,9 +354,16 @@ export function ApplicationFields({
         </button>
 
         <div className="disclosure__panel" id={TYPED_FIELDS_PANEL} hidden={!open}>
+          {/*
+            The last clause changed in v1.3.0 (code review finding 29). It used
+            to promise that an empty box was not compared, while the server
+            re-read a blanked value from the document it was sent anyway. The
+            blank is now sent as an instruction, and the sentence says what
+            that instruction does.
+          */}
           <p className="field__hint">
-            The check runs on whatever is in these boxes; a value you type wins, and an empty box is
-            not compared.
+            The check runs on whatever is in these boxes: a value you type wins, and a box you leave
+            or make empty is left out of the check, even where the application supplied it.
           </p>
 
           {(processed ? editable : TEXT_FIELDS).map((field) => textField(field))}

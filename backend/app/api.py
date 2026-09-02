@@ -289,6 +289,17 @@ async def verify(
     alcohol_content: Annotated[str, Form()] = "",
     net_contents: Annotated[str, Form()] = "",
     beverage_type: Annotated[str, Form()] = "",
+    cleared_fields: Annotated[
+        list[str],
+        Form(
+            description=(
+                "Application fields the agent emptied after the uploaded "
+                "document filled them, repeated once per field. A cleared "
+                "field is left out of the check rather than re-read from the "
+                "document (v1.3.0, code review finding 29)."
+            )
+        ),
+    ] = [],  # noqa: B006
 ) -> JSONResponse:
     """Verify one label from whatever was uploaded for it.
 
@@ -343,6 +354,7 @@ async def verify(
                 "net_contents": net_contents,
                 "beverage_type": beverage_type,
             },
+            frozenset(cleared_fields),
         )
 
 
@@ -352,6 +364,7 @@ async def _verify(
     image: list[UploadFile],
     application_document: UploadFile | None,
     application_values: dict[str, str],
+    cleared_fields: frozenset[str] = frozenset(),
 ) -> JSONResponse:
     """The handler proper, inside the recording opened by the route.
 
@@ -372,7 +385,9 @@ async def _verify(
 
     # Everything that reads pixels, off the event loop and behind the limiter.
     try:
-        checked = await _off_the_loop(_check_one_label, submitted, application_values)
+        checked = await _off_the_loop(
+            _check_one_label, submitted, application_values, cleared_fields
+        )
     except VerificationError as exc:
         return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
     result = checked.result
@@ -425,7 +440,9 @@ class _Checked:
 
 
 def _check_one_label(
-    submitted: list[SubmittedFile], application_values: dict[str, str]
+    submitted: list[SubmittedFile],
+    application_values: dict[str, str],
+    cleared_fields: frozenset[str] = frozenset(),
 ) -> _Checked:
     """Sort, read and compare, in a worker thread. Raises `VerificationError`.
 
@@ -508,7 +525,9 @@ def _check_one_label(
         pre_read = [parsed_application.label_artwork_read if parsed_application else None]
         label_source = "application_artwork"
 
-    application, sources = resolve_application(application_values, parsed_application)
+    application, sources = resolve_application(
+        application_values, parsed_application, cleared_fields
+    )
     result = verify_photos(
         contents,
         application,

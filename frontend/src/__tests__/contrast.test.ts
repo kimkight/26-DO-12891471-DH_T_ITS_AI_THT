@@ -15,8 +15,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { presentation } from '../lib/outcomes'
-import type { Outcome } from '../types'
+import { OUTCOMES, presentation } from '../lib/outcomes'
 
 // Resolved from the project root rather than from `import.meta.url`: under the
 // jsdom environment that is an http URL, and `fileURLToPath` rejects it.
@@ -132,15 +131,11 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
    * named by it, and the tint named by it, both clear 4.5:1.
    */
   it('every outcome the interface can present has a checked colour pair', () => {
-    const outcomes: Outcome[] = [
-      'match',
-      'needs_review',
-      'mismatch',
-      'not_compared',
-      'present',
-      'artwork_derived',
-    ]
-    const tones = new Set(outcomes.map((outcome) => presentation(outcome).tone))
+    // Read off the definitions, not typed here (finding 7, 1.4.3): the list
+    // this walked until v1.3.0 was a copy, which is the thing the comment
+    // above says it is not.
+    expect(OUTCOMES.length).toBeGreaterThanOrEqual(6)
+    const tones = new Set(OUTCOMES.map((outcome) => presentation(outcome).tone))
 
     for (const tone of tones) {
       for (const surface of [...surfaces, `${tone}-tint`]) {
@@ -162,18 +157,10 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
    * where a change would be made.
    */
   it('outcomes that share a colour do not share a word or a shape', () => {
-    const outcomes: Outcome[] = [
-      'match',
-      'needs_review',
-      'mismatch',
-      'not_compared',
-      'present',
-      'artwork_derived',
-    ]
-    const shown = outcomes.map((outcome) => presentation(outcome))
+    const shown = OUTCOMES.map((outcome) => presentation(outcome))
 
-    expect(new Set(shown.map((entry) => entry.label)).size).toBe(outcomes.length)
-    expect(new Set(shown.map((entry) => entry.glyph)).size).toBe(outcomes.length)
+    expect(new Set(shown.map((entry) => entry.label)).size).toBe(OUTCOMES.length)
+    expect(new Set(shown.map((entry) => entry.glyph)).size).toBe(OUTCOMES.length)
     // And the pair that makes it matter: same tone, different word and shape.
     expect(presentation('present').tone).toBe(presentation('match').tone)
     expect(presentation('present').label).not.toBe(presentation('match').label)
@@ -193,6 +180,35 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
 
   it('the focus ring used on the navy masthead is visible against it', () => {
     expect(ratio(token('focus-on-dark'), token('accent-dark'))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+  })
+
+  /*
+   * The ring token each ground actually draws, read off the stylesheet's own
+   * rules rather than assumed (finding 7, 1.4.11). Until v1.3.0 the gold ring
+   * was drawn on the prototype banner as well as on the masthead, where it
+   * computes to about 1.5:1 on the pale gold wash, while this file checked the
+   * navy ring against that wash and passed. So: every selector that switches
+   * the ring to the dark-ground token must be on the navy masthead, and the
+   * banner, which keeps the default, is checked with the default.
+   */
+  it('switches to the gold ring on the navy masthead only, and the banner keeps the navy ring', () => {
+    const rules = [
+      ...DECLARATIONS.matchAll(/([^{}]+)\{([^}]*outline-color:\s*var\(--focus-on-dark\)[^}]*)\}/g),
+    ]
+    expect(rules.length).toBeGreaterThanOrEqual(1)
+    for (const [, selectors] of rules) {
+      for (const selector of selectors.split(',')) {
+        expect(selector.trim(), `${selector.trim()} draws the dark-ground ring`).toMatch(
+          /^\.masthead\b/,
+        )
+      }
+    }
+    // The banner's ground, with the ring the stylesheet leaves it: the default.
+    expect(ratio(token('focus'), token('notice'))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+    // And the ring the masthead switches to, on the masthead's ground.
+    expect(ratio(token('focus-on-dark'), token('accent-dark'))).toBeGreaterThanOrEqual(AA_NON_TEXT)
+    // The dark ring on the banner's ground would fail, which is why it is not drawn there.
+    expect(ratio(token('focus-on-dark'), token('notice'))).toBeLessThan(AA_NON_TEXT)
   })
 
   it('the prototype banner is readable, and its gold edge is visible on it', () => {
@@ -248,8 +264,17 @@ describe('every colour pair the interface can produce meets WCAG 2.1 AA', () => 
    * `aria-selected` is what a screen reader reads, but the fill still has to be
    * a visible boundary: WCAG 1.4.11 puts non-text UI at 3:1.
    */
-  it('the active pill is distinguishable from the track it sits in', () => {
-    expect(ratio(token('page'), token('accent-wash'))).toBeGreaterThanOrEqual(1.2)
+  it('the active pill is carried by weight, a shadow and aria-selected, not by its fill', () => {
+    // The fill alone is about 1.2:1 against the track and is not claimed as
+    // the boundary (finding 7, 1.4.11): until v1.3.0 this test asserted 1.2
+    // under a comment citing 3:1, a threshold fitted to the measurement. What
+    // carries the state is asserted instead: the active rule changes weight
+    // and adds a shadow, and `aria-selected` is what is read out.
+    expect(ratio(token('page'), token('accent-wash'))).toBeLessThan(AA_NON_TEXT)
+    const active = DECLARATIONS.match(/\.tab--active\s*\{[^}]*\}/)
+    expect(active, 'index.css does not define .tab--active').not.toBeNull()
+    expect(active![0]).toMatch(/font-weight:\s*[6-9]00/)
+    expect(active![0]).toMatch(/box-shadow:/)
     expect(ratio(token('accent-dark'), token('accent-wash'))).toBeGreaterThanOrEqual(AA_BODY)
   })
 

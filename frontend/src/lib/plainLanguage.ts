@@ -12,11 +12,26 @@
  * MIME types in the sentence an agent reads first.
  */
 
-const MESSAGES: Record<string, string> = {
+export const MESSAGES: Record<string, string> = {
   unreadable_image: "We couldn't read this label. Try a clearer image.",
   no_text_found: "We couldn't find any text on this image. Try a clearer image.",
   unsupported_media_type: 'That file is not an image we can read. Send a JPEG, PNG, WebP or TIFF.',
-  file_too_large: 'That image is too large. Send a smaller one.',
+  // The server sends this code for three different things and names which in
+  // its message; `plainMessage` reads that to say what was actually too large
+  // (code review finding 30). This is the one-file case.
+  file_too_large: 'That file is too large. Send a smaller one.',
+  // The single-label envelope, and the batch envelope, each too large as a whole.
+  submission_too_large:
+    'Those files are too large to send together. Send fewer photos of the label, or smaller ones.',
+  batch_envelope_too_large:
+    'That batch is too large to send in one go. Split it into smaller batches and send them one after another.',
+  // The three the single upload can meet that had no line until v1.3.0
+  // (code review finding 22). Each says what to do next.
+  no_files: 'Nothing was uploaded. Choose the label application, a photo of the label, or both.',
+  no_label_to_check:
+    'The application you uploaded has no label picture we could read, so there is nothing to check yet. Add a photo of the label.',
+  too_many_application_documents:
+    'More than one of these files reads as a label application. Keep one application for one label, plus any photos of it.',
   all_photos_unreadable:
     "We couldn't read any of the photos of this label. Try clearer photos, in better light.",
   too_many_photos: 'That is more photos than we can read for one label. Remove one and try again.',
@@ -50,7 +65,14 @@ const MESSAGES: Record<string, string> = {
  * action is the same whether or not this build recognizes the code, so the
  * fallback says what that action is.
  */
-export function plainMessage(code: string | undefined): string {
+export function plainMessage(code: string | undefined, message?: string | null): string {
+  if (code === 'file_too_large' && message) {
+    // Keyed on the server's own wording for the two envelope cases, because
+    // the code is the same for all three and the limit string names only a
+    // byte count. An unrecognised wording falls through to the one-file line.
+    if (/fewer photographs/i.test(message)) return MESSAGES.submission_too_large
+    if (/smaller batches/i.test(message)) return MESSAGES.batch_envelope_too_large
+  }
   if (code && code in MESSAGES) return MESSAGES[code]
   return "We couldn't check this label. Try again, and tell your administrator if it keeps happening."
 }

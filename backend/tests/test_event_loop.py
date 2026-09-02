@@ -37,7 +37,11 @@ async def test_health_is_answered_while_a_label_is_being_read(monkeypatch):
     order: list[str] = []
     reading = threading.Event()
 
-    def slow_check(submitted, application_values):
+    # The stub takes whatever the route passes, so that a new argument on the
+    # real function (v1.3.0 added `cleared_fields`) cannot turn this test into
+    # a stub that raises before it signals, which is a hang rather than a
+    # failure; the bounded wait below is the second half of the same guard.
+    def slow_check(submitted, application_values, *rest, **named):
         reading.set()
         time.sleep(0.5)  # Tesseract, from the loop's point of view
         order.append("check")
@@ -61,8 +65,10 @@ async def test_health_is_answered_while_a_label_is_being_read(monkeypatch):
         tasks.start_soon(check)
         # Wait until the stub is actually running in its worker thread. If the
         # check were on the loop, the loop would be blocked here and the probe
-        # below could not run until the check had finished.
-        await anyio.to_thread.run_sync(reading.wait)
+        # below could not run until the check had finished. Bounded, so that a
+        # stub that never runs fails the test instead of parking it forever.
+        started = await anyio.to_thread.run_sync(reading.wait, 10)
+        assert started, "the stubbed check never started"
 
         response = await client.get("/api/health")
         assert response.status_code == 200
@@ -82,7 +88,7 @@ async def test_the_timing_recording_follows_the_check_into_its_thread(monkeypatc
 
     seen: list[timing.Recording | None] = []
 
-    def check(submitted, application_values):
+    def check(submitted, application_values, *rest, **named):
         seen.append(timing.current())
         raise VerificationError(code="no_label_to_check", message="stubbed")
 

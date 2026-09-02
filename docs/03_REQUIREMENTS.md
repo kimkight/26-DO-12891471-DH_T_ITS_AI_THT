@@ -598,8 +598,18 @@ apply to a label image. The note under OOS-1 in
 - The check boxes are located from their own captions and never from a pixel
   coordinate, because the form has editions and renders at different scales.
 - Given a field the agent typed and a document that also carries it, then the
-  typed value is used and the response says the value was typed. A blank field
-  is not a correction and the parsed value stands.
+  typed value is used and the response says the value was typed. Where the two
+  differ by more than case or spacing, the screen shows what the document said
+  under the agent's value, so the choice is visible rather than silent.
+- Given a field the agent typed and a document uploaded afterwards that does
+  not carry it, then the typed value stands: agent input wins over absence as
+  it wins over a document value, and the field is neither emptied nor marked
+  not supplied (code review finding 6, #105).
+- Given a field the agent has emptied after a document filled it, then the
+  field is left out of the check as declared absent. The interface names the
+  emptied fields in the request (`cleared_fields`) so that the server does not
+  re-derive the value from the document it was also sent, and the hint above
+  the boxes says that a blank does this (finding 29).
 - Given any parsed value, then it is presented in an editable field before a
   verification runs, marked as read from the application form, and the
   verification uses what is in the field.
@@ -758,10 +768,27 @@ able to see which one at a glance.
   shown at all; one collapsed disclosure holds them.
 - Given at least one gap, then focus moves to the first missing field, the view
   scrolls to it, and a live region says which value is missing and what to do
-  about it: enter it, or upload a clearer image.
+  about it: enter it, or upload a clearer image. The file picker's own hint
+  says beforehand that the cursor will move when an application leaves a value
+  unread, which is what WCAG 3.2.2 asks of a change of context (v1.3.0).
+- Given a photograph and no application, then nothing is a gap: no box opens,
+  focus stays where it was, and the upload panel says the true thing, that the
+  photograph can be checked for the elements a label must carry and that there
+  is nothing to compare it against yet (v1.3.0, code review finding 19).
+  "Upload a clearer image" is advice about a document, and is not given about a
+  photograph.
+- Given a value the agent typed before uploading, then the upload never
+  discards it: a document that lacks the field leaves the typed value in place
+  and marked as typed, and a document that carries a different value shows the
+  document's value beside the agent's as a visible disagreement while the check
+  uses the agent's (v1.3.0, code review finding 6; FR-11's precedence). A
+  difference of case or spacing alone is not a disagreement (FR-4).
 - Given any value that was read, then it remains editable behind that same
   disclosure, and a value the agent types is used instead of the one that was
-  read (FR-11's precedence, unchanged).
+  read (FR-11's precedence, unchanged). A value the agent makes empty after the
+  document filled it is left out of the check rather than re-read from the
+  document (v1.3.0, code review finding 29): the browser sends the emptied
+  fields as `cleared_fields`, and the hint above the boxes says so.
 - Given the beverage type, then it is stated on its own line: read where the
   document stated it in text, and otherwise reported as not read from the form,
   because the product-type boxes are check marks and a text layer cannot report
@@ -888,6 +915,21 @@ by whoever reads it and by nobody who does not, so the ceiling is a number in a
 test. `frontend/src/__tests__/quietScreen.test.tsx` holds it, and
 `frontend/tests/a11y.spec.ts` holds the author's own target: the single-label
 result for a clean document fits one screen at 1280 by 800 without scrolling.
+
+**The one-screen target is not met, and the test that said it was did not
+measure it (2026-09-02, #128, OQ-33).** The test asserted where the panel's
+footnote ended relative to the viewport, which is a function of how far the
+page had scrolled, and the page had scrolled for reasons that had nothing to do
+with the panel: the gap boxes opening for a photograph on its own moved focus
+into the first of them, and the test runner scrolls the check button into view
+before pressing it. Measured in document coordinates, from the panel's heading
+to its footnote, a clean five-row result runs to about 1655 px at 1280 wide,
+which is two screens. The test now measures the panel itself and is annotated as
+an expected failure with that figure, so the target stays asserted and the run
+goes red the day the panel fits, which is the signal to take the annotation
+off. Whether the panel should be denser, laid out in two columns of cards at
+1280, or held to a different target is the author's decision and is not made
+here.
 
 - One sentence per row, at most. Where a chip or a value's own label already says
   something, the row does not say it again in prose.

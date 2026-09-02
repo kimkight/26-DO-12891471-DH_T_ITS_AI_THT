@@ -42,6 +42,7 @@ updates every artifact the answer affects.
 | [OQ-30](#oq-30) | Decided and closed 2026-09-02: NFR-6 reworded, engine not re-plumbed | Nothing; the stronger guarantee and the spool window are recorded with what would change the answer |
 | [OQ-31](#oq-31) | Open, #122; tracked, not fixed, in v1.3.0 | Nothing; the fanciful name is displayed and never compared |
 | [OQ-32](#oq-32) | Open, #123; measured on synthetic documents in v1.3.0, floor not moved | Nothing; where the margin falls short the agent chooses |
+| [OQ-33](#oq-33) | Open, #128; found in v1.3.0, the test corrected, the panel not changed | Nothing; the result is complete and readable, it scrolls |
 
 ---
 
@@ -1714,3 +1715,41 @@ the synthetic form does (then the fix is not the floor but the window
 **Who can answer:** the author, with the real documents; measurement.
 **Blocks:** nothing. Where the separation falls short the agent chooses, which
 is FR-1's direction of error.
+
+## OQ-33
+
+**Should the clean single-label result be made to fit one screen at 1280 by
+800, and how?**
+
+**Status: Open, filed 2026-09-02 as #128; the test corrected in v1.3.0, the
+panel not changed.**
+
+**What happened.** NFR-4 carries the author's target that a clean result fits
+one screen at 1280 by 800 without scrolling, and `frontend/tests/a11y.spec.ts`
+held it. The test measured where the panel's footnote ended relative to the
+viewport, which depends on how far the page has scrolled, and the page had
+scrolled for two reasons unrelated to the panel: a photograph uploaded on its
+own opened the gap boxes and moved focus into the first (a smooth scroll), and
+the test runner scrolls the check button into view before pressing it. Fixing
+#118 took the focus move away for that case, the page stopped scrolling, and
+the test went red on a panel exactly as tall as before. Measured in document
+coordinates, heading to footnote, the panel is about 1655 px at 1280 wide:
+five cards of about 202 px each, the photo notes, the summary line and the
+heading. The 412 px recorded against #74 was a viewport-relative figure taken
+after the same scrolling. The test now measures the panel itself and is
+annotated as an expected failure with the figure, so the run is green while the
+panel is known not to fit and red the day it does.
+
+**Options.** A denser card (the "On the label" and "On the application" pair on
+one line, the reason folded behind a disclosure); two columns of cards at 1280
+and wider; or a different target, one screen for the summary line and the
+first card with the rest reachable by scrolling. Each is a layout decision with
+a NFR-5 cost to check (reflow at 320 wide, reading order, the disclosure's
+name), and none is a correctness fix.
+
+**What would change the answer:** the author looking at a clean result on her
+own screen and saying which of the three she wants, or that scrolling is fine.
+
+**Who can answer:** the author; taste and a screen.
+**Blocks:** nothing. The result is complete, in reading order and readable; it
+scrolls.

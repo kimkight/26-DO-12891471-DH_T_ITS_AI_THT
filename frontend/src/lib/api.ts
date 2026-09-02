@@ -27,6 +27,12 @@ export interface SingleOutcome {
   error: UiError | null
   /** Round trip as the agent experienced it, in seconds. */
   seconds: number
+  /**
+   * The request was cancelled before it answered (v1.3.0, code review
+   * finding 17): the agent cleared the form while the check was in flight.
+   * Neither a result nor an error, and nothing on the screen should change.
+   */
+  aborted?: boolean
 }
 
 export interface ApplicationOutcome {
@@ -42,7 +48,7 @@ export interface ClassifyOutcome {
 function toUiError(body: unknown): UiError {
   const error = (body as { error?: ErrorDetail } | null)?.error
   const detail = [error?.message, error?.limit].filter(Boolean).join(' ')
-  return { message: plainMessage(error?.code), detail: detail || null }
+  return { message: plainMessage(error?.code, error?.message), detail: detail || null }
 }
 
 /**
@@ -57,6 +63,7 @@ function toUiError(body: unknown): UiError {
 export async function verifyLabel(
   files: File[],
   application: ApplicationData,
+  options: { signal?: AbortSignal; clearedFields?: string[] } = {},
 ): Promise<SingleOutcome> {
   const body = new FormData()
   /*
@@ -73,12 +80,22 @@ export async function verifyLabel(
   for (const [key, value] of Object.entries(application)) {
     body.append(key, value)
   }
+  /*
+   * A value the document supplied and the agent then blanked (code review
+   * finding 29). An empty typed value alone would let the server re-derive it
+   * from the document it is being sent anyway, so the blank is sent as an
+   * instruction the server honours: leave this field out of the check.
+   */
+  for (const name of options.clearedFields ?? []) body.append('cleared_fields', name)
 
   const started = performance.now()
   let response: Response
   try {
-    response = await fetch('/api/verify', { method: 'POST', body })
-  } catch {
+    response = await fetch('/api/verify', { method: 'POST', body, signal: options.signal })
+  } catch (cause) {
+    if ((cause as Error)?.name === 'AbortError') {
+      return { result: null, error: null, seconds: 0, aborted: true }
+    }
     return {
       result: null,
       error: { message: NETWORK_MESSAGE, detail: null },
@@ -106,14 +123,20 @@ export async function verifyLabel(
  * The request goes to this application's own origin. Nothing here reaches TTB
  * (OOS-1, NFR-3).
  */
-export async function classifyUploads(files: File[]): Promise<ClassifyOutcome> {
+export async function classifyUploads(
+  files: File[],
+  signal?: AbortSignal,
+): Promise<ClassifyOutcome & { aborted?: boolean }> {
   const body = new FormData()
   for (const file of files) body.append('files', file)
 
   let response: Response
   try {
-    response = await fetch('/api/classify', { method: 'POST', body })
-  } catch {
+    response = await fetch('/api/classify', { method: 'POST', body, signal })
+  } catch (cause) {
+    // The list changed before this answered (code review finding 18); the
+    // caller has already sent the new list and this answer is about nothing.
+    if ((cause as Error)?.name === 'AbortError') return { result: null, error: null, aborted: true }
     return { result: null, error: { message: NETWORK_MESSAGE, detail: null } }
   }
   if (!response.ok) return { result: null, error: toUiError(await safeJson(response)) }
