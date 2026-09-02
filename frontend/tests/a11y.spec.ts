@@ -99,6 +99,33 @@ async function stubDocumentOnlyResult(page: import('@playwright/test').Page) {
   })
 }
 
+/**
+ * Answer the per-file classification the batch tab makes from the file's own
+ * extension, read out of the multipart body, so a PDF is an application and
+ * an image is a label without a server (ADR 0020).
+ */
+async function stubClassify(page: import('@playwright/test').Page) {
+  await page.route('**/api/classify', async (route) => {
+    const body = route.request().postDataBuffer()?.toString('latin1') ?? ''
+    const name = /filename="([^"]+)"/.exec(body)?.[1] ?? 'file'
+    const isPdf = name.toLowerCase().endsWith('.pdf')
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        files: [
+          isPdf
+            ? { ...CLASSIFIED_APPLICATION.files[0], filename: name }
+            : { ...CLASSIFIED_PHOTO.files[0], filename: name },
+        ],
+        application_document: null,
+        label_images: isPdf ? 0 : 1,
+        application_error: null,
+      }),
+    })
+  })
+}
+
 /** Upload a label image and run the check, leaving the result on the page. */
 async function runCheck(page: import('@playwright/test').Page) {
   await page.goto('/')
@@ -132,11 +159,12 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
   test('the batch tab', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('tab', { name: 'Check many labels' }).click()
-    // Both pickers, and the pairing rule that says how they go together
-    // (ADR 0009), are on the page rather than behind a disclosure.
-    await expect(page.getByLabel('Label images')).toBeVisible()
-    await expect(page.getByLabel('COLA documents')).toBeVisible()
-    await expect(page.getByText(/They are matched by name/)).toBeVisible()
+    // One picker, taking applications and images together (ADR 0020). The
+    // naming convention is on the Help tab, not on this screen.
+    await expect(page.getByLabel('Files for these labels')).toBeVisible()
+    await expect(page.getByLabel('Label images')).toHaveCount(0)
+    await expect(page.getByLabel('COLA documents')).toHaveCount(0)
+    await expect(page.getByText(/They are matched by name/)).toHaveCount(0)
     const found = await violations(page)
     expect(report(found)).toBe('')
   })
@@ -226,33 +254,98 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
     expect(report(found)).toBe('')
   })
 
-  test('the batch pickers and the pairing count are reachable by keyboard', async ({ page }) => {
+  test('the batch picker and the label count are reachable by keyboard', async ({ page }) => {
+    await stubClassify(page)
     await page.goto('/')
     await page.getByRole('tab', { name: 'Check many labels' }).click()
     const panel = page.locator('#panel-batch')
 
-    // Tab from the selected tab into the panel: the two pickers are the first
-    // two stops, in reading order (NFR-5).
+    // Tab from the selected tab into the panel: the picker is the first stop,
+    // in reading order (NFR-5).
     await page.getByRole('tab', { name: 'Check many labels' }).focus()
     await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('Label images')).toBeFocused()
-    await page.keyboard.press('Tab')
-    await expect(panel.getByLabel('COLA documents')).toBeFocused()
+    await expect(panel.getByLabel('Files for these labels')).toBeFocused()
 
-    await panel.getByLabel('Label images').setInputFiles([
+    await panel.getByLabel('Files for these labels').setInputFiles([
       { name: '0001-stones-throw.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
       { name: '0002-hollow-creek.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
+      { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
     ])
-    await panel
-      .getByLabel('COLA documents')
-      .setInputFiles([
-        { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
-      ])
 
-    // Announced through a live region, and visible, from one sentence.
+    // Each file's chip, from the same classification the single-label tab
+    // shows (FR-12), and the labels described in one sentence that is both
+    // visible and announced (ADR 0020, NFR-5).
+    await expect(panel.getByText('Label application', { exact: true })).toBeVisible()
+    await expect(panel.getByText('Label image', { exact: true })).toHaveCount(2)
     await expect(
-      panel.getByText('1 pair ready to check, 1 image with no matching document.'),
+      panel.getByText('2 labels to check: 1 with an application and an image, 1 image on its own.'),
     ).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Check 2 labels' })).toBeEnabled()
+  })
+
+  /*
+   * The batch results table (ADR 0020): a real table with a caption and
+   * headers, one row per label in submission order, and a row button that
+   * opens the field-by-field detail without moving focus. Asserted on the
+   * built page because the table's relationships and the detail's markup are
+   * what axe checks, and jsdom cannot say whether the row button's focus ring
+   * is drawn.
+   */
+  test('the batch results table opens a row from the keyboard and stays axe-clean', async ({
+    page,
+  }) => {
+    await stubClassify(page)
+    await page.route('**/api/verify-batch', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/x-ndjson',
+        body: BATCH_LINES.map((line) => JSON.stringify(line)).join('\n') + '\n',
+      })
+    })
+    await page.goto('/')
+    await page.getByRole('tab', { name: 'Check many labels' }).click()
+    const panel = page.locator('#panel-batch')
+    await panel.getByLabel('Files for these labels').setInputFiles([
+      { name: 'first.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
+      { name: 'second.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
+      { name: 'third.png', mimeType: 'image/png', buffer: Buffer.from([137, 80]) },
+    ])
+    await panel.getByRole('button', { name: 'Check 3 labels' }).click()
+    await expect(panel.getByText('3 of 3 labels checked')).toBeVisible()
+
+    const table = panel.getByRole('table')
+    await expect(table).toHaveAccessibleName(/one row per label/)
+    await expect(table.getByRole('columnheader')).toHaveText([
+      'Label',
+      'Brand',
+      'Class or type',
+      'Outcome',
+      'Checks',
+    ])
+    // Submission order, although the stub sent the lines out of it.
+    await expect(table.getByRole('rowheader')).toHaveText(['first.pdf', 'second.pdf', 'third.png'])
+
+    const toggle = table.getByRole('button', { name: 'second.pdf' })
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    // Reached by the keyboard, so :focus-visible applies and the ring is the
+    // one the global rule draws, read from the computed style (2.4.7).
+    await toggle.focus()
+    await page.keyboard.press('Shift+Tab')
+    await page.keyboard.press('Tab')
+    await expect(toggle).toBeFocused()
+    const ring = await toggle.evaluate((node) => getComputedStyle(node).outlineStyle)
+    expect(ring).not.toBe('none')
+    await page.keyboard.press('Enter')
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    await expect(toggle).toBeFocused()
+    const detail = panel.getByRole('region', { name: 'Label 2 of 3: second.pdf' })
+    await expect(detail).toBeVisible()
+    await expect(detail.locator('.summary-line')).toHaveText('1 of 5 checks passed')
+    await expect(detail.getByRole('article')).toHaveCount(5)
+    await expect(detail.getByText('Needs review').first()).toBeVisible()
+
+    const found = await violations(page)
+    expect(report(found)).toBe('')
   })
 
   test('the results, including a needs-review card and an error notice', async ({ page }) => {
@@ -1492,3 +1585,41 @@ const CLASSIFIED_PHOTO = {
   label_images: 1,
   application_error: null,
 }
+
+/**
+ * Three batch lines, sent out of submission order so the table has to put
+ * them back (ADR 0020). `RESULT` carries four outcomes, so the middle row's
+ * detail is the interesting one.
+ */
+const BATCH_LINES = [
+  {
+    filename: 'third.png',
+    filenames: ['third.png'],
+    position: 3,
+    index: 1,
+    total: 3,
+    status: 'ok',
+    result: CLEAN_RESULT,
+    error: null,
+  },
+  {
+    filename: 'first.pdf',
+    filenames: ['first.pdf'],
+    position: 1,
+    index: 2,
+    total: 3,
+    status: 'ok',
+    result: { ...CLEAN_RESULT, label_source: 'application_artwork' },
+    error: null,
+  },
+  {
+    filename: 'second.pdf',
+    filenames: ['second.pdf'],
+    position: 2,
+    index: 3,
+    total: 3,
+    status: 'ok',
+    result: { ...RESULT, label_source: 'application_artwork' },
+    error: null,
+  },
+]

@@ -100,16 +100,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { ApplicationFields } from './ApplicationFields'
 import { ErrorMessage } from './ErrorMessage'
-import { PhotoNotes } from './PhotoNotes'
-import { ResultCard } from './ResultCard'
+import { ResultDetail } from './ResultDetail'
 import { Kicker } from './Ui'
 import { UploadPanel } from './UploadPanel'
 import { verifyLabel } from '../lib/api'
 import type { SingleOutcome } from '../lib/api'
 import { typedValues } from '../lib/applicationFields'
 import type { Disagreements, SourceMap } from '../lib/applicationFields'
-import { ARTWORK_LABEL_LINE, documentSource } from '../lib/applicationSources'
-import { announcement, summary } from '../lib/outcomes'
+import { documentSource } from '../lib/applicationSources'
+import { announcement } from '../lib/outcomes'
 import { pendingFromArtwork } from '../lib/pendingArtwork'
 import { EMPTY_APPLICATION } from '../types'
 import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
@@ -581,47 +580,12 @@ export function SingleLabelTab() {
 
         {outcome?.error ? <ErrorMessage error={outcome.error} /> : null}
 
-        {result ? (
-          <>
-            {/*
-              The summary line, and the reason it is not "5 of 5 fields match"
-              (FR-14, ADR 0013). Where some of the five rows compared a value
-              against the artwork it was read from, saying five would count
-              fields that could not have come out any other way. The line says
-              what is true instead: how many of the verifiable ones match, and
-              how many were only read.
-            */}
-            <p className="summary-line">{summary(result.fields.map((field) => field.outcome))}</p>
-            {/*
-              The limit of what a search establishes is on the Help tab now
-              (US-28), under "Why is the brand name found but not judged for
-              type size or placement?". It is a true and important sentence and
-              it is not a sentence an agent needs in the middle of reading five
-              results; it is the same sentence every time, on every check, and a
-              caveat printed on every check is read on none of them.
-
-              `reasonWithoutLimit` still runs on each row. The API appends the
-              limit to every searched reason because a caller with no interface
-              has nowhere else to read it (OOS-4), and stripping it here is what
-              keeps it from arriving on the row by the back door.
-            */}
-            {result.label_source === 'application_artwork' ? (
-              <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
-            ) : null}
-            <PhotoNotes photos={result.photos} />
-            <div className="cards">
-              {result.fields.map((field) => (
-                <ResultCard
-                  key={field.name}
-                  field={field}
-                  warning={result.warning_detail}
-                  photoCount={result.photos.length}
-                />
-              ))}
-            </div>
-            <p className="footnote">This tool recommends. You decide.</p>
-          </>
-        ) : null}
+        {/*
+          The result block is `ResultDetail`, which the batch tab renders for
+          a selected row too (ADR 0020): one component, so the two tabs cannot
+          show a result differently.
+        */}
+        {result ? <ResultDetail result={result} /> : null}
 
         {/*
           The reset (US-29), beside the results rather than at the top of the

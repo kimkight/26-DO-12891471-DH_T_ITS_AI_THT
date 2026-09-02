@@ -7,16 +7,20 @@ Run from the repository root:
 
 Writes ``samples/images/*.png`` (git-ignored), ``samples/expected.csv`` (ground
 truth, committed), ``samples/applications/applications.csv`` (the application
-side of each case, committed) and ``samples/applications/documents/*.pdf``
-(git-ignored), one synthetic Public COLA Registry printout per label.
+side of each case, committed), ``samples/applications/documents/*.pdf``
+(git-ignored), one synthetic Public COLA Registry printout per label, and
+``samples/applications/filed/*.pdf`` (git-ignored), the same printout with the
+label artwork affixed, which is what an importer actually files.
 
-The documents are what a batch submission is made of now: label images plus COLA
-documents paired by filename stem, so ``01-spirits-clean.png`` is submitted
-alongside ``01-spirits-clean.pdf``
-([ADR 0009](../docs/adr/0009-batch-cola-documents.md)). ``applications.csv`` is
-no longer an input to any API. It stays because it is the application side of
-the accuracy tier, which runs the engine in process, and because it is the file
-the documents are written from.
+The documents are what a batch submission is made of: a pile of files grouped
+into rows by filename stem, so ``01-spirits-clean.png`` and
+``01-spirits-clean.pdf`` are one row
+([ADR 0009](../docs/adr/0009-batch-cola-documents.md)), and a filed document
+that carries its own artwork is a row on its own
+([ADR 0020](../docs/adr/0020-batch-items-are-derived.md)). ``applications.csv``
+is no longer an input to any API. It stays because it is the application side
+of the accuracy tier, which runs the engine in process, and because it is the
+file the documents are written from.
 
 Images are regenerated rather than committed because label artwork can carry
 third-party trade dress and the assignment grants no rights to redistribute real
@@ -43,12 +47,13 @@ from samples.formmaker import (  # noqa: E402
     as_pdf_bytes,
     registry_printout_lines,
 )
-from samples.labelmaker import render  # noqa: E402
+from samples.labelmaker import render, render_png_bytes  # noqa: E402
 from samples.specs import SPECS  # noqa: E402
 
 IMAGES_DIR = REPO_ROOT / "samples" / "images"
 APPLICATIONS_DIR = REPO_ROOT / "samples" / "applications"
 DOCUMENTS_DIR = APPLICATIONS_DIR / "documents"
+FILED_DIR = APPLICATIONS_DIR / "filed"
 EXPECTED_CSV = REPO_ROOT / "samples" / "expected.csv"
 APPLICATIONS_CSV = APPLICATIONS_DIR / "applications.csv"
 
@@ -152,15 +157,47 @@ def write_documents() -> list[Path]:
     return written
 
 
+def write_filed_documents() -> list[Path]:
+    """The same printouts with the label artwork affixed (ADR 0010, ADR 0020).
+
+    An applicant affixes the label artwork to the application, so a filed
+    document carries a picture of the label. One of these is a complete batch
+    row on its own: the artwork inside it is the label side, and no image of
+    the same name is needed. This is the set `scripts/measure.py --batch
+    --filed` submits, and the set section 9 of docs/09_DEPLOYMENT.md measures
+    the batch path on. The artwork is the same rendered label the image set
+    carries, defects included, so the seeded mismatches survive.
+    """
+    FILED_DIR.mkdir(parents=True, exist_ok=True)
+    written = []
+    for spec in SPECS:
+        application = spec.application
+        document = ApplicationSpec(
+            brand_name=application.get("brand_name", ""),
+            class_type=application.get("class_type", ""),
+            alcohol_content=application.get("alcohol_content", ""),
+            net_contents=application.get("net_contents", ""),
+            beverage_type=application.get("beverage_type", ""),
+        )
+        path = FILED_DIR / f"{Path(spec.filename).stem}.pdf"
+        path.write_bytes(
+            as_pdf_bytes(registry_printout_lines(document), images=[render_png_bytes(spec)])
+        )
+        written.append(path)
+    return written
+
+
 def main() -> int:
     images = write_images()
     write_expected()
     write_applications()
     documents = write_documents()
+    filed = write_filed_documents()
     print(f"Rendered {len(images)} labels into {IMAGES_DIR.relative_to(REPO_ROOT)}")
     print(f"Wrote {EXPECTED_CSV.relative_to(REPO_ROOT)}")
     print(f"Wrote {APPLICATIONS_CSV.relative_to(REPO_ROOT)}")
     print(f"Wrote {len(documents)} COLA documents into {DOCUMENTS_DIR.relative_to(REPO_ROOT)}")
+    print(f"Wrote {len(filed)} filed applications into {FILED_DIR.relative_to(REPO_ROOT)}")
     return 0
 
 

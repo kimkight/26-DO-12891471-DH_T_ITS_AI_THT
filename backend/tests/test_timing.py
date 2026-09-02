@@ -291,10 +291,10 @@ class TestTheBatchPathTimesEachRowSeparately:
     def test_each_line_carries_its_own_phases(self, artwork):
         pdf = document([artwork])
         files = [
-            ("images", ("a.png", artwork, "image/png")),
-            ("images", ("b.png", artwork, "image/png")),
-            ("application_documents", ("a.pdf", pdf, "application/pdf")),
-            ("application_documents", ("b.pdf", pdf, "application/pdf")),
+            ("files", ("a.png", artwork, "image/png")),
+            ("files", ("b.png", artwork, "image/png")),
+            ("files", ("a.pdf", pdf, "application/pdf")),
+            ("files", ("b.pdf", pdf, "application/pdf")),
         ]
         response = client.post("/api/verify-batch", files=files)
         assert response.status_code == 200

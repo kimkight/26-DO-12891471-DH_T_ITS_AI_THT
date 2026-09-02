@@ -132,6 +132,8 @@ export function batchLine(
   if (!outcomes) {
     return {
       filename,
+      filenames: [filename],
+      position: index,
       index,
       total,
       status: 'error',
@@ -143,7 +145,16 @@ export function batchLine(
       },
     }
   }
-  return { filename, index, total, status: 'ok', result: verification(outcomes), error: null }
+  return {
+    filename,
+    filenames: [filename],
+    position: index,
+    index,
+    total,
+    status: 'ok',
+    result: verification(outcomes),
+    error: null,
+  }
 }
 
 /** One value read off an uploaded COLA document (FR-11, ADR 0008). */

@@ -324,15 +324,14 @@ def verify_image(
 ) -> VerificationResult:
     """Verify one label from one photograph.
 
-    Kept as its own entry point because that is what the batch path submits: one
-    image per label, paired with one COLA document (FR-8, ADR 0006, ADR 0007,
-    ADR 0009). It is a call to ``verify_photos`` with a list of one, so a batch
-    row runs exactly the code a single-photograph submission runs.
+    A call to ``verify_photos`` with a list of one. Until v1.4.0 this was the
+    batch path's entry point, one image per label paired with one COLA
+    document (ADR 0009); a batch row now runs the whole single-label check in
+    ``app.check`` (ADR 0020), and this stays as the plain one-photograph
+    entry point for a caller with the bytes in hand.
 
-    The two FR-11 arguments are passed straight through. A batch row supplies
-    them, because every value on the batch path is read off that row's document
-    rather than typed; a caller that omits them gets the response this function
-    always returned.
+    The two FR-11 arguments are passed straight through; a caller that omits
+    them gets the response this function always returned.
     """
     return verify_photos(
         [content],

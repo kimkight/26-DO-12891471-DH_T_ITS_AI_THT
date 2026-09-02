@@ -46,6 +46,7 @@ updates every artifact the answer affects.
 | [OQ-34](#oq-34) | Decided and closed 2026-09-02: the registry stays mutable, the release-tag guard is in the workflow | Nothing; a re-run of the deploy on the same commit works |
 | [OQ-35](#oq-35) | Open; measured 2026-09-02, recommendation recorded, Terraform unchanged | Nothing; the task runs. It costs about 59 times the memory it uses |
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
+| [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
 
 ---
 
@@ -1953,3 +1954,52 @@ them wrongly is worse than none.
 **Who can answer:** the author, with the CloudTrail record, in the next
 infrastructure change alongside OQ-35.
 **Blocks:** nothing. The deploy works through the three live subjects.
+
+---
+
+## OQ-37
+
+**Classifying an image on arrival is an OCR pass, and the check makes it
+again. Should the batch tab pay it twice?**
+
+**Status: Open. Measured 2026-09-02 (section 9 of
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md)); recorded rather than designed around.**
+
+**What was measured.** The batch tab classifies every file on arrival with the
+single-label tab's `POST /api/classify`, one request per file, two in flight
+(ADR 0020). For twenty filed PDFs that is 0.46 s in total: the header decides
+the side and the artwork is not read (ADR 0017). For twenty label PNGs it is
+23 s on a one-worker task, about 2.3 s a call, because an image has no text
+layer and deciding whether it is a form or a label is the same OCR pass the
+check makes. The two are in different requests, so the check then reads each
+image again, another 25 s for twenty. The single-label tab pays the same
+double read for one photograph and it was never noticeable; at twenty it is.
+
+**Why nothing is done about it here.** The obvious fix, keeping the classify
+read on the server for the check to reuse, is a server-side cache of parsed
+uploads, and NFR-6 forbids it: nothing uploaded is kept past the request it
+arrived in. The check is available from the first file, so the chips never
+block a batch; what is lost is the agent's time watching "Reading..." settle
+two files at a time.
+
+**The options, each with its cost.**
+
+1. **A cheaper classification for images.** Read a downscaled copy, or the
+   top of the image only, looking for the form's own markers rather than the
+   whole text. Cheap to build; its accuracy against real photographs of forms
+   is unmeasured, and a wrong side is the failure ADR 0011 exists to make
+   visible rather than silent.
+2. **Classify images from the extension on arrival and let the check
+   correct it.** Free, and it puts a guess in the chip, which is the thing
+   ADR 0011 removed; the chip would say "label image" for a scanned form
+   until the check said otherwise.
+3. **Classify the batch's images in one request instead of twenty**, so the
+   HTTP overhead goes and the server reads them in its pool. Saves little on
+   a one-worker task, where the reads serialize anyway.
+4. **Accept it.** The measured case is twenty photographs; an importer's
+   drop is filed applications, for which the chips settle in under a second.
+
+**Who can answer:** the author, from how the batch tab is actually used: if
+drops are applications, option 4 costs nothing; if they are photographs,
+option 1 is the one to measure.
+**Blocks:** nothing.

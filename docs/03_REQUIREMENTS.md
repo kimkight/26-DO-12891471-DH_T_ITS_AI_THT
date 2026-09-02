@@ -415,42 +415,67 @@ section 2.
 **Priority:** Must
 **Source:** Sarah Chen interview
 
-Accept multiple labels with their application data in a single submission and
-return per-label, per-field results.
+Accept many labels in a single submission, as what an importer actually files,
+and return per-label, per-field results that are the single-label check's.
 
 **Acceptance criteria**
-- Given a batch of labels with application data, when it is submitted, then the
-  response contains a result set for every label in the batch.
-- Given one unreadable image in a batch, then that label reports an error and
+- Given a batch of files, filed COLA applications, label images or both, when
+  it is submitted, then the response contains a result set for every label in
+  the batch, where a label is every file that shares a filename stem.
+- Given a filed application that carries its own label artwork and no image of
+  the same name, then that label is checked against the artwork inside it, and
+  the result says so.
+- Given a label image with no application of the same name, then that label is
+  checked for the elements a label must carry, the comparison rows say there is
+  nothing to compare against yet, and it is not an error.
+- Given one unreadable file in a batch, then that label reports an error and
   every other label still returns results.
-- Given a batch exceeding the configured file-count limit, then the request is
+- Given a batch exceeding the configured limit on labels, then the request is
   rejected with a message naming the limit, before any file is processed.
-- The result identifies which label each result belongs to.
+- The result identifies which label each result belongs to, names every file
+  the label was made from, and carries the label's position in submission order.
 - Given a batch submission, then it is one multipart request to
-  `POST /api/verify-batch` carrying the label images plus one COLA document for
-  each, and results stream back as newline-delimited JSON so progress is visible
-  while the batch runs. See [ADR 0006](adr/0006-batch-execution-model.md) for
-  the stream and [ADR 0009](adr/0009-batch-cola-documents.md) for what a batch
-  is made of.
-- Given an image whose stem matches no submitted document, or a document whose
-  stem matches no submitted image, then that item reports an error on its own
+  `POST /api/verify-batch` carrying one repeated `files` part, and results
+  stream back as newline-delimited JSON so progress is visible while the batch
+  runs. See [ADR 0006](adr/0006-batch-execution-model.md) for the stream and
+  [ADR 0020](adr/0020-batch-items-are-derived.md) for what a row is.
+- Given two files that share a stem and both read as label images, or both read
+  as applications, then that label reports an error naming the files on its own
   result line and the rest of the batch still returns results.
 - Given a document that cannot be read, then that label reports an error naming
   the document, no field reports a match for it, and the rest of the batch still
   returns results.
+- Given any row, then its outcomes, its summary line and its field-by-field
+  detail are what `POST /api/verify` returns for the same files, because they
+  are produced by the same function.
 
-**Batch submission contract.** [ADR 0009](adr/0009-batch-cola-documents.md).
-Repeated `images` parts and repeated `application_documents` parts in one
-request, **paired by filename stem**: `0001-stones-throw.png` pairs with
-`0001-stones-throw.pdf`. The stem is the filename with its final extension
-removed, compared without regard to case; only the final extension is removed,
-so `0001-stones-throw.front.png` pairs with `0001-stones-throw.front.pdf`.
+**Batch submission contract.** [ADR 0020](adr/0020-batch-items-are-derived.md).
+One repeated `files` part, the part `POST /api/verify` takes, **grouped into
+rows by filename stem**: `0001-stones-throw.png` and `0001-stones-throw.pdf`
+are one row. The stem is the filename with its final extension removed,
+compared without regard to case; only the final extension is removed, so
+`0001-stones-throw.front.png` groups with `0001-stones-throw.front.pdf`. That
+rule is [ADR 0009](adr/0009-batch-cola-documents.md)'s, kept. What each file
+in a row is comes from the file itself (FR-12), never from its extension. The
+older `images` and `application_documents` parts are still accepted and folded
+into the same pile.
 
-Each document is read by the FR-11 parser, and what it says is the application
-side for that label. Every value on this path is parsed rather than typed, so
-each row's result carries the parsed block and says per field whether the
-document supplied the value or did not carry it. A value the document does not
-carry is not compared, per FR-2, rather than guessed.
+**What changed on 2026-09-02, and why.** Until v1.4.0 the contract was two
+required parts paired by stem, and the pairing was a precondition: an image
+with no document was an error, a document with no image was an error, and a
+batch with no images was refused before it started. That required an image for
+every label when a filed application carries its own artwork, and asked the
+agent to sort files the server sorts. The author, testing the deployed page:
+"It should also accept the COLA application, pdf or images (with a single
+choose file; not 2)." A row is now whatever shares a stem, checked for what it
+can be checked for, and the stem is a convenience for an agent who wants an
+image checked against a particular application.
+
+Each row's application is read by the FR-11 parser, and what it says is the
+application side for that label. Every value on this path is parsed rather than
+typed, so each row's result carries the parsed block and says per field whether
+the document supplied the value or did not carry it. A value the document does
+not carry is not compared, per FR-2, rather than guessed.
 
 The beverage type for a row comes from its document, and where the document does
 not state it the row says so. No comparison currently reads it: A-12's proof
@@ -470,21 +495,22 @@ reasoning, including the alternatives rejected, is in
 Sarah's case: "we get these big importers who dump 200, 300 label applications
 on us at once. Right now we literally have to process them one at a time."
 [Source: Sarah Chen interview] The default configured batch limit is 300 labels,
-which is the top of the range she names, and it is enforced on the images and on
-the documents alike, before anything is processed. `(Assumption)` A-1
+which is the top of the range she names, and it is enforced on rows, the labels,
+before anything is processed: 300 applications with their 300 images is 300
+labels, not 600 files. `(Assumption)` A-1
 
 **One photograph per label, and that is a stated limit rather than an oversight.**
 FR-1 accepts up to `TTB_MAX_LABEL_PHOTOS` photographs of one label on the
 single-label path ([ADR 0007](adr/0007-multi-photo-single-label.md)). The batch
-path does not: a stem pairing several images to one document would need a rule
-for a group only partly readable and an answer for what a per-row error means
-when one photograph of three failed. None of that is difficult and none of it is
-asked for by any source, so it is not invented here. Two images on one stem are
-an error, not a multi-photograph label. An agent with a bulk submission of round
-bottles has to check those labels one at a time on the single-label tab. The
-limitation is asserted in
+path does not: a row holding several images would need a rule for a group only
+partly readable and an answer for what a per-row error means when one
+photograph of three failed. None of that is difficult and none of it is asked
+for by any source, so it is not invented here. Two label images on one stem are
+one ambiguous row, not a multi-photograph label, and the message sends the
+agent to the single-label tab. An agent with a bulk submission of round bottles
+has to check those labels one at a time there. The limitation is asserted in
 `backend/tests/test_multi_photo.py::TestTheBatchPathIsUnaffected` and
-`backend/tests/test_batch.py::TestPairing` so it cannot change without being
+`backend/tests/test_batch.py::TestRowsAreDerivedNotDemanded` so it cannot change without being
 noticed, and it is recorded in ADR 0007 under "Deliberately out of scope this
 session".
 
@@ -662,13 +688,17 @@ prevent.
 **On the batch path, this is how every value arrives.** Written when it was not:
 the batch kept the CSV contract in A-14, and per-row COLA documents were called
 a possible future extension. [ADR 0009](adr/0009-batch-cola-documents.md) built
-them on 2026-08-28 and removed the CSV. A batch row is one label image paired
-with one COLA document by filename stem, nothing is typed, and each row's result
+them on 2026-08-28 and removed the CSV; [ADR 0020](adr/0020-batch-items-are-derived.md)
+made a batch row the single-label check itself on 2026-09-02. A batch row is
+every file that shares a filename stem, nothing is typed, and each row's result
 carries the parsed block and the per-field source exactly as a single-label
-submission with an attached document does. A row's document now fills values
-from its own embedded artwork too; the row still requires its label image,
-because batch rows are enumerated from the images so that the stream can report
-a total before any document is read (ADR 0010, "Effect on the batch path").
+submission does, because it is one. A row's document fills values from its own
+embedded artwork, and where the row has no image that artwork is the label
+side, exactly as on the single-label path; a row that is a photograph alone is
+checked for what a label must carry. Until v1.4.0 a row required its label
+image, because rows were enumerated from the images so that the stream could
+report a total before any document was read; rows are now enumerated from
+names, which keeps the total first without the image.
 
 ### FR-12 One upload, sorted by the tool rather than by the agent
 
@@ -731,10 +761,12 @@ repeated `files` part. The older `image` and `application_document` parts remain
 accepted and are routed through the same classifier, so a caller written against
 v1.0 keeps working. `POST /api/classify` sorts an upload and reads the
 application side without comparing anything, which is what lets the interface
-show the classification and the parsed values before a check runs. The batch
-path keeps `images` and `application_documents` unchanged, because ADR 0009
-pairs by filename stem and a batch is already sorted; ADR 0011 records why the
-two paths differ.
+show the classification and the parsed values before a check runs.
+`POST /api/verify-batch` takes the same one `files` part since v1.4.0
+([ADR 0020](adr/0020-batch-items-are-derived.md)); it kept `images` and
+`application_documents` as two required parts until then, for a reason
+ADR 0011 recorded and ADR 0020 removes. The older names are still accepted on
+both routes.
 
 ### FR-13 The values that were read go quiet; the ones that were not go loud
 
