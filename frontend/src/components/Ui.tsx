@@ -13,6 +13,7 @@
  * the decoration say nothing.
  */
 import { useEffect, useRef } from 'react'
+import { canPreview, previewPlaceholder } from '../lib/preview'
 
 /** The glyphs the kickers and tiles use. Geometric, and none of them a mark. */
 type GlyphName = 'label' | 'document' | 'stack' | 'check'
@@ -153,16 +154,7 @@ export function TileHeading({
   )
 }
 
-/**
- * Whether this environment can make an object URL for a chosen file.
- *
- * A constant rather than a per-render check: it is a property of the platform,
- * not of the file. jsdom does not implement `createObjectURL`, and the unit
- * tests render this tree with real `File` objects, so without this the preview
- * would throw in every one of them. In a browser it is always true, and the
- * Chromium accessibility run is what exercises the real path.
- */
-const CAN_PREVIEW = typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function'
+// `CAN_PREVIEW` and the per-type decision live in lib/preview.ts.
 
 /**
  * The chosen file, previewed so an agent can see what they picked.
@@ -193,25 +185,28 @@ const CAN_PREVIEW = typeof URL !== 'undefined' && typeof URL.createObjectURL ===
  */
 export function FilePreview({ file }: { file: File }) {
   const imageRef = useRef<HTMLImageElement>(null)
+  const drawable = canPreview(file)
 
   useEffect(() => {
     const node = imageRef.current
-    if (!node) return
+    if (!node || !drawable) return
     const url = URL.createObjectURL(file)
     node.src = url
     return () => {
       node.removeAttribute('src')
       URL.revokeObjectURL(url)
     }
-  }, [file])
+  }, [file, drawable])
 
   return (
     <div className="preview">
       <div className="preview__viewport">
-        {CAN_PREVIEW ? (
+        {drawable ? (
           <img className="preview__image" ref={imageRef} alt={`Preview of ${file.name}`} />
         ) : (
-          <p className="preview__fallback">Preview unavailable in this browser.</p>
+          <p className="preview__fallback" data-testid="preview-placeholder">
+            {previewPlaceholder(file)}
+          </p>
         )}
       </div>
       <p className="preview__caption">{file.name}</p>

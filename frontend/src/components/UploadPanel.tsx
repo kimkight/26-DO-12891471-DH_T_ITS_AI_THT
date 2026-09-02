@@ -28,11 +28,11 @@
  * agent who cannot see the list has no other way to learn that their COLA form
  * was read as a label.
  */
-import { useId, useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
 import { FilePreview, TileHeading } from './Ui'
-import { SIDES, announce } from '../lib/uploadAnnouncement'
+import { PHOTO_ONLY_NOTE, SIDES, announce } from '../lib/uploadAnnouncement'
 import { classifyUploads } from '../lib/api'
 import type { UiError } from '../lib/api'
 import { pendingFromArtwork } from '../lib/pendingArtwork'
@@ -101,19 +101,37 @@ export function UploadPanel({
   const [result, setResult] = useState<ClassificationResult | null>(null)
   const [error, setError] = useState<UiError | null>(null)
   const [spoken, setSpoken] = useState('')
+  /*
+   * The classification in flight, and a count of them (code review finding 18,
+   * #117). Every change to the list sends the whole list again, so the answer
+   * that matters is always the last one sent; an earlier answer arriving late
+   * described a list the agent no longer has, and used to fill the boxes and
+   * announce a file that had been removed. The controller cancels it; the
+   * counter disowns it if it arrives anyway.
+   */
+  const requestRef = useRef<AbortController | null>(null)
+  const requestCount = useRef(0)
 
   async function send(next: File[]) {
+    requestRef.current?.abort()
+    const thisRequest = ++requestCount.current
     onFilesChange(next)
     setResult(null)
     setError(null)
     if (!next.length) {
+      requestRef.current = null
+      setReading(false)
       setSpoken('')
       onCleared()
       return
     }
+    const controller = new AbortController()
+    requestRef.current = controller
     setReading(true)
     setSpoken('Reading what you uploaded.')
-    const outcome = await classifyUploads(next)
+    const outcome = await classifyUploads(next, controller.signal)
+    if (outcome.aborted || thisRequest !== requestCount.current) return
+    requestRef.current = null
     setReading(false)
     if (outcome.error || !outcome.result) {
       setError(outcome.error)
@@ -158,9 +176,17 @@ export function UploadPanel({
           Upload the label application, an image of the label, or both
         </h3>
       </TileHeading>
+      {/*
+        The second sentence of the hint is the advice WCAG 3.2.2 asks for
+        before an input changes the context: when an application leaves a
+        value unread, focus moves to the box for it (FR-13). Saying so here,
+        before the file is chosen, is what makes that move a change the agent
+        was told about rather than one that happens to them (code review
+        finding 7).
+      */}
       <DropZone
         label="Files for this label"
-        hint="Drag files here, or choose them: PDF, JPEG, PNG, WebP or TIFF."
+        hint="Drag files here, or choose them: PDF, JPEG, PNG, WebP or TIFF; if the application leaves a value unread, the cursor moves to the box for it."
         accept={ACCEPTED_UPLOADS}
         multiple
         files={[]}
@@ -171,13 +197,19 @@ export function UploadPanel({
       {files.length ? (
         <ul className="upload-panel__files">
           {files.map((file, position) => {
-            const entry = result?.files.find((item) => item.filename === file.name)
+            // By position, not by name (code review finding 31): the server
+            // reports the files in the order they were sent, which is this
+            // list's order, and two files can share a name and differ.
+            const entry = result?.files[position]
             return (
               <li className="upload-panel__file" key={`${file.name}-${position}`}>
                 {/*
                   A picture is previewed, a PDF is named. The frame carries the
                   filename in its own caption, so naming it twice would be noise
-                  on screen and a duplicate for a screen reader.
+                  on screen and a duplicate for a screen reader. A picture the
+                  browser cannot draw, which is every TIFF, gets the frame with
+                  an honest placeholder in it rather than a broken image
+                  (finding 32; see `FilePreview`).
                 */}
                 {file.type.startsWith('image/') ? (
                   <FilePreview file={file} />
@@ -227,6 +259,16 @@ export function UploadPanel({
             detail: result.application_error.message,
           }}
         />
+      ) : null}
+
+      {/*
+        A photograph on its own (code review finding 19, #118). The true thing,
+        said once here: it can be checked for what a label must carry, and
+        there is nothing to compare it against yet. No box opens and focus
+        stays where it was; the same sentence goes to this panel's live region.
+      */}
+      {result && !document && !result.application_error ? (
+        <p className="upload-panel__summary">{PHOTO_ONLY_NOTE}</p>
       ) : null}
 
       {document ? (

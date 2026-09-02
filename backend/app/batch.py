@@ -81,7 +81,12 @@ def pairing_stem(filename: str) -> str:
     """
     name = filename.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     base, separator, _ = name.rpartition(".")
-    return (base if separator and base else name).casefold()
+    # `lower`, not `casefold`, since v1.3.0: the page previews the pairing with
+    # JavaScript's `toLowerCase`, and `casefold` also rewrites `ß` to `ss`, so
+    # `Straße.png` paired with `STRASSE.pdf` here and not there (code review
+    # finding 21). The two plain lower-case mappings agree, and the same vectors
+    # are asserted on both sides.
+    return (base if separator and base else name).lower()
 
 
 @dataclass(frozen=True)

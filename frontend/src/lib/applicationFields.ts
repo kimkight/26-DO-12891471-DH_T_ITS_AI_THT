@@ -40,6 +40,17 @@ export const TYPED_FIELDS_PANEL = 'typed-application-values'
 export type SourceMap = Partial<Record<keyof ApplicationData, ApplicationSource>>
 
 /**
+ * The document's value for a field the agent typed differently (code review
+ * finding 6). Shown beside the agent's value; the agent's is used.
+ */
+export type Disagreements = Partial<Record<keyof ApplicationData, string>>
+
+/** The line shown where the uploaded document disagrees with a typed value. */
+export function disagreementNote(documentValue: string): string {
+  return `The application you uploaded says "${documentValue}"; the check uses your value.`
+}
+
+/**
  * The application values to send with the check: the agent's own, and no others
  * (FR-11, FR-14, ADR 0013).
  *

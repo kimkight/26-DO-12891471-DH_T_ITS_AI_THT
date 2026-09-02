@@ -653,3 +653,32 @@ class TestTheSameArtworkRulesApplyPerRow:
         assert entry["found_on_label"] is False
         assert entry["outcome"] == "mismatch"
         assert "27 CFR 5.63(b)(2)" in entry["reason"]
+
+
+class TestTheFoldIsTheSameOnBothSides:
+    """Code review finding 21 (v1.3.0): the page's pairing preview uses the server's rule.
+
+    The server folded with `casefold`, which rewrites `ß` to `ss`, and the page
+    with `toLowerCase`, which does not, so `Straße.png` paired with
+    `STRASSE.pdf` on the server and not on the page. Both sides now use their
+    language's plain lower-case mapping, and these vectors are asserted in
+    `frontend/src/__tests__/batchTable.test.tsx` as well, character for
+    character, so a divergence fails a test rather than a batch.
+    """
+
+    @pytest.mark.parametrize(
+        ("filename", "expected"),
+        [
+            ("Label.PNG", "label"),
+            ("ÉTIQUETTE.png", "étiquette"),
+            ("Straße.png", "straße"),
+            ("STRASSE.pdf", "strasse"),
+            ("İstanbul.pdf", "i̇stanbul"),
+        ],
+    )
+    def test_the_plain_lower_case_mapping(self, filename, expected):
+        assert pairing_stem(filename) == expected
+
+    def test_a_sharp_s_and_a_double_s_no_longer_pair(self):
+        """What `casefold` would have paired, and the page would not have."""
+        assert pairing_stem("Straße.png") != pairing_stem("STRASSE.pdf")

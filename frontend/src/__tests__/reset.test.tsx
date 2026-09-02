@@ -270,7 +270,10 @@ describe('the batch view holds state, so it gets one too', () => {
     await user.click(screen.getByRole('button', { name: BATCH_RESET }))
 
     await waitFor(() => expect(screen.getByLabelText('Label images')).toHaveFocus())
-    expect(document.querySelector('[role="status"]')?.textContent).toContain(
+    // The progress region by name: the pairing region is now always mounted
+    // and labelled too (finding 7, 4.1.3), so "the first status region" is no
+    // longer the one that speaks here.
+    expect(screen.getByRole('status', { name: 'Batch progress' })).toHaveTextContent(
       'The batch was cleared',
     )
   })

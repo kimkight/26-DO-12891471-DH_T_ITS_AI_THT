@@ -197,8 +197,16 @@ body {
   border-radius: 4px;
 }
 
-.masthead :focus-visible,
-.prototype-banner :focus-visible {
+/*
+ * The gold ring belongs to the navy band only. Until v1.3.0 this rule also
+ * covered the prototype banner, whose ground is the pale gold wash, where the
+ * gold ring computes to about 1.5:1 and would have been invisible had anything
+ * in the banner been focusable (code review finding 7, criterion 1.4.11). The
+ * banner now takes the default navy ring, which clears 3:1 on that wash;
+ * contrast.test.ts reads this rule and checks each ring against the ground
+ * its selector actually names.
+ */
+.masthead :focus-visible {
   outline-color: var(--focus-on-dark);
 }
 

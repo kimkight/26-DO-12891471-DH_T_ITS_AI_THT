@@ -29,7 +29,7 @@ import { DropZone } from './DropZone'
 import { ErrorMessage } from './ErrorMessage'
 import { verifyBatch } from '../lib/api'
 import type { UiError } from '../lib/api'
-import { rowOutcome } from '../lib/outcomes'
+import { ROW_BUCKETS, rowOutcome } from '../lib/outcomes'
 import { downloadCsv } from '../lib/csv'
 import { describePairing, pair } from '../lib/pairing'
 import { Chip, Kicker } from './Ui'
@@ -117,12 +117,24 @@ export function BatchTab() {
   const clearable = images.length > 0 || documents.length > 0 || lines.length > 0 || error !== null
 
   const done = lines.length
-  const counts = {
-    checked: lines.filter((line) => rowOutcome(line) === 'match').length,
-    review: lines.filter((line) => rowOutcome(line) === 'needs_review').length,
-    mismatch: lines.filter((line) => rowOutcome(line) === 'mismatch').length,
-    failed: lines.filter((line) => rowOutcome(line) === 'error').length,
-  }
+  /*
+   * One count per bucket, over the same `rowOutcome` the chip uses, so the
+   * seven counts sum to the row count (code review finding 16, #115). The
+   * finished sentence names only the buckets that are not zero, because a
+   * screen reader user should not sit through four zeroes to reach the one
+   * number that matters.
+   */
+  const tally = ROW_BUCKETS.map((bucket) => ({
+    ...bucket,
+    count: lines.filter((line) => rowOutcome(line) === bucket.outcome).length,
+  }))
+  const counts = Object.fromEntries(
+    tally.map((bucket) => [bucket.outcome, bucket.count]),
+  ) as Record<(typeof ROW_BUCKETS)[number]['outcome'], number>
+  const finished = tally
+    .filter((bucket) => bucket.count > 0)
+    .map((bucket) => `${bucket.count} ${bucket.label}`)
+    .join(', ')
 
   return (
     <div className="layout">
@@ -168,14 +180,20 @@ export function BatchTab() {
             reader user learns what a sighted agent learns from the counts.
             `role="status"` rather than an alert: this is the state of the
             submission, not an error to clear.
+
+            Always in the DOM and labelled, since v1.3.0 (code review finding
+            7, criterion 4.1.3). It used to be mounted at the same moment as
+            its text, which is the pattern the conformance report says this
+            interface avoids, and it carried no name, so a screen reader could
+            not say which region had spoken.
           */}
-          {chosen ? (
-            <p className="field__hint" role="status" aria-live="polite">
+          <p className="field__hint" role="status" aria-live="polite" aria-label="Batch pairing">
+            {chosen ? (
               <Chip tone="navy" dot>
                 {pairingSentence}
               </Chip>
-            </p>
-          ) : null}
+            ) : null}
+          </p>
 
           {pairing.imagesWithoutDocument.length || pairing.documentsWithoutImage.length ? (
             <details className="details">
@@ -235,11 +253,16 @@ export function BatchTab() {
         </Kicker>
         <h2 id="batch-results-heading">Results</h2>
 
-        <div className="visually-hidden" role="status" aria-live="polite">
+        <div
+          className="visually-hidden"
+          role="status"
+          aria-live="polite"
+          aria-label="Batch progress"
+        >
           {running
             ? `Checked ${done} of ${total || images.length} labels.`
             : done > 0
-              ? `Finished. ${done} labels checked. ${counts.review} need review, ${counts.mismatch} do not match, ${counts.failed} could not be checked.`
+              ? `Finished. ${done} labels checked: ${finished}.`
               : cleared}
         </div>
 
@@ -286,18 +309,11 @@ export function BatchTab() {
               review" would need pluralisation logic for no gain.
             */}
             <ul className="summary">
-              <li>
-                <strong>{counts.checked}</strong> fully matching
-              </li>
-              <li>
-                <strong>{counts.review}</strong> needing review
-              </li>
-              <li>
-                <strong>{counts.mismatch}</strong> not matching
-              </li>
-              <li>
-                <strong>{counts.failed}</strong> could not be checked
-              </li>
+              {tally.map((bucket) => (
+                <li key={bucket.outcome}>
+                  <strong>{bucket.count}</strong> {bucket.label}
+                </li>
+              ))}
             </ul>
 
             <BatchTable lines={lines} />

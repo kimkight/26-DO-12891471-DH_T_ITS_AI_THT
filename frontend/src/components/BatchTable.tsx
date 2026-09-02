@@ -13,7 +13,7 @@
  */
 import { useMemo, useState } from 'react'
 import { OutcomeBadge } from './OutcomeBadge'
-import { countOf, presentation, rowOutcome } from '../lib/outcomes'
+import { countOf, rowOutcome, rowSummary } from '../lib/outcomes'
 import type { BatchLine } from '../types'
 
 type Column = 'filename' | 'status' | 'needs_review' | 'mismatch'
@@ -133,7 +133,7 @@ export function BatchTable({ lines }: { lines: BatchLine[] }) {
                 </td>
                 <td className="numeric">{line.result ? countOf(line, 'needs_review') : ''}</td>
                 <td className="numeric">{line.result ? countOf(line, 'mismatch') : ''}</td>
-                <td className="detail">{line.error ? line.error.message : summarize(line)}</td>
+                <td className="detail">{rowSummary(line)}</td>
               </tr>
             )
           })}
@@ -143,14 +143,12 @@ export function BatchTable({ lines }: { lines: BatchLine[] }) {
   )
 }
 
-/** The row's own one-line summary, so the table says something without expanding. */
-function summarize(line: BatchLine): string {
-  if (!line.result) return ''
-  const attention = line.result.fields.filter(
-    (field) => field.outcome === 'needs_review' || field.outcome === 'mismatch',
-  )
-  if (!attention.length) return 'All five fields match.'
-  return attention
-    .map((field) => `${field.display_name} ${presentation(field.outcome).spoken}`)
-    .join('. ')
-}
+/*
+ * The detail cell is `rowSummary` from lib/outcomes.ts, the same "4 of 5 checks
+ * passed" the single-label view prints, followed by every field that was not
+ * a match in the words the live region uses. Until v1.3.0 a second tally
+ * here said "All five fields match." for any row with nothing to review and
+ * nothing mismatched, which is what a row with a value not compared, or a
+ * presence check, or an artwork-derived field read as (code review finding
+ * 16, #115).
+ */

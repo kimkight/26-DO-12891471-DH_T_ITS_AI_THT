@@ -22,6 +22,7 @@ one into a result line for that row without failing the request (FR-8, NFR-2).
 from __future__ import annotations
 
 import time
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -203,7 +204,9 @@ _DOCUMENT_SOURCES: dict[str, ApplicationSource] = {
 
 
 def resolve_application(
-    typed: dict[str, str], parsed: ParsedApplication | None
+    typed: dict[str, str],
+    parsed: ParsedApplication | None,
+    cleared: Collection[str] = (),
 ) -> tuple[dict[str, str], dict[str, ApplicationSource]]:
     """Decide each application value, and record where it came from (FR-11).
 
@@ -217,7 +220,13 @@ def resolve_application(
     **A typed value always wins.** An agent who corrects a field has read the
     document and disagreed with what was read off it, and the tool defers to the
     agent everywhere else it makes a judgement (FR-3, OOS-8). A blank field is
-    not a correction: it is the absence of one, so the parsed value stands.
+    not a correction: it is the absence of one, so the parsed value stands,
+    **unless the caller says the blank was deliberate.** ``cleared`` names the
+    fields an agent emptied after the document filled them (v1.3.0, code review
+    finding 29): the interface used to say an empty box was not compared while
+    the server re-derived the value from the document it was sent anyway, so a
+    blank was an instruction that was not honoured. A cleared field is reported
+    as absent and takes the not-compared or presence path.
 
     The returned source map is reported per field, because a submission can mix
     all three and a result that did not say which was which would leave an agent
@@ -230,6 +239,8 @@ def resolve_application(
     for name in APPLICATION_FIELDS:
         entered = (typed.get(name) or "").strip()
         from_document = (parsed.values.get(name) if parsed else None) or ""
+        if not entered and name in cleared:
+            from_document = ""
         if entered:
             values[name] = entered
             sources[name] = "typed"

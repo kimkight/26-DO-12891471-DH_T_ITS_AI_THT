@@ -135,6 +135,98 @@ scale 1.0, so the floor does not move (OQ-32, #123).
 - The fanciful-name capture over-runs on a Registry printout: OQ-31 and #122.
 - The item 5 margin: measured, recorded, not moved: OQ-32 and #123.
 
+### The screen (pull request B)
+
+Every item here is something an agent using the tool can hit, and every one
+has a test; the four accessibility tests were each broken on purpose and
+watched go red before they were committed.
+
+#### Fixed
+
+- **A typed value survives a document uploaded afterwards** (finding 6, #105).
+  The source map was rebuilt from the document, so a field the agent had
+  typed and the document did not carry became "absent": the value stayed in
+  the box, the screen said "Not supplied" beside it, and the request omitted
+  it. Agent input now wins over absence, as FR-11's precedence always said it
+  should. Where the document carries a different value the disagreement is
+  shown under the agent's value ("The application you uploaded says ...; the
+  check uses your value") in the summary and in the box, and the agent's
+  value is the one sent; a difference of case or spacing alone is not a
+  disagreement (FR-4). Editing the box settles it. `typedFirst.test.tsx`.
+- **Four Section 508 conformance rows said things the code contradicted, and
+  the four tests behind them could not fail** (finding 7, #106). Rows 4.1.3,
+  3.2.2, 2.4.4 and 1.4.11 now describe what the code does; 4.1.1 and 1.3.2
+  are corrected on the smaller points the review noted. The two batch-tab
+  status regions are labelled ("Batch pairing", "Batch progress") and the
+  pairing region is always mounted; the stylesheet no longer draws the gold
+  ring on the pale banner; the file picker's hint says the cursor will move
+  when an application leaves a value unread, which is the advice 3.2.2 asks
+  for. The status-region test opens the batch tab and names all five regions;
+  the name-role-value test runs a check first and asserts five chips, none a
+  button, none focusable; the text-spacing test locates a chip as a chip and
+  checks its word is not clipped; the contrast test reads the ring token for
+  each ground off the stylesheet's own rules, walks the outcome list off the
+  outcome definitions, and asserts the active pill's weight and shadow rather
+  than a fill threshold fitted to the measurement. Section 508 is WCAG 2.0 A
+  and AA via 36 CFR 1194 Appendix A E205.4, verified to 2.1 AA, as before.
+- **The batch table and tally account for every row** (finding 16, #115). A
+  row whose worst outcome was not compared, present or artwork-derived was
+  counted in none of the four buckets and its detail cell read "All five
+  fields match." The tally has seven buckets that partition what `rowOutcome`
+  returns, the finished announcement names each non-zero one, and the detail
+  cell is the single-label wording, "4 of 5 checks passed", followed by every
+  field that was not a match. A test submits one row of each kind and
+  asserts the buckets sum to the row count.
+- **Reset cancels a check in flight** (finding 17, #116). An `AbortController`
+  is held per check, aborted on reset and when a later check starts, and a
+  counter disowns an answer that arrives after the screen stopped asking, so
+  a late result cannot repopulate a cleared form or overwrite "The form was
+  cleared." `inFlight.test.tsx`, with the response released by hand.
+- **A file removed before its classification returns is ignored** (finding 18,
+  #117). Each change to the list cancels the request for the previous list;
+  an answer for a list the agent no longer has fills nothing and announces
+  nothing. Tested with a removal mid-flight and with two overlapping requests
+  resolving out of order.
+- **A photograph alone opens no box, moves no focus, and says the true thing**
+  (finding 19, #118). It can be checked for the elements a label must carry,
+  and there is nothing to compare it against yet; the upload panel and its
+  live region say so, and the four gap boxes and the focus move are gone for
+  that case. "Upload a clearer image" is not said about a photograph.
+- **Blanking a document-read value removes it from the check** (finding 29).
+  An empty typed value let the server re-derive the field from the document it
+  was sent anyway. The interface now sends the blanked fields as
+  `cleared_fields`, the server treats each as declared absent, and the hint
+  above the boxes says what a blank does. Backend and frontend tests.
+- **The pairing preview implements the server's rule** (finding 21). The
+  server folded with `casefold`, which rewrites `ß` to `ss`; the page folds
+  with `toLowerCase`, which does not, so `Straße.png` paired on the server
+  and not on the page. The server now uses the plain lower-case mapping too,
+  and the same vectors are asserted on both sides. The preview is kept: the
+  runbook's section 8.4 relies on the count before sending, and the code is
+  small and now provably the same rule.
+- **Three server error codes have plain-language lines** (finding 22):
+  `no_label_to_check`, `too_many_application_documents` and `no_files`. The
+  test reads every code off the backend's own source, so a code added without
+  a line fails the build.
+- **`file_too_large` says what was too large** (finding 30): a file, a
+  submission of several, or a batch, read off the server's message.
+- **Two files with the same name get their own chips** (finding 31): the
+  classification is matched by position, which is submission order.
+- **A TIFF shows an honest placeholder** (finding 32): the preview frame says
+  the browser cannot draw a TIFF and the server reads it as usual, instead of
+  a broken-image glyph.
+
+#### Found, not fixed
+
+- **The clean result does not fit one screen at 1280 by 800, and the test that
+  said so was measuring scroll position** (#128, OQ-33). Removing the focus
+  move for a photograph on its own (#118) stopped the page scrolling under the
+  test, and the panel it then measured is about 1655 px from heading to
+  footnote, as it was before. The test now measures the panel in document
+  coordinates and is annotated as an expected failure with the figure, so it
+  turns red the day the panel fits; NFR-4 keeps the target and records that it
+  is not met. Making it fit is a layout decision for the author.
+
 ## [1.2.1] - 2026-09-01
 
 A hotfix from `main`, carrying the corrections a hiring panel would trip over

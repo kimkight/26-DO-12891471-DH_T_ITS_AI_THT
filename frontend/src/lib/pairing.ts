@@ -9,7 +9,13 @@
  * The rule, stated once: the stem is the filename with its final extension
  * removed, compared without regard to case. `0001-stones-throw.png` pairs with
  * `0001-stones-throw.pdf`. It must stay identical to `pairing_stem` in
- * `backend/app/batch.py`.
+ * `backend/app/batch.py`, and since v1.3.0 it is: both sides lower-case the
+ * stem with their language's plain lower-case mapping (`toLowerCase` here,
+ * `str.lower` there). The server used `casefold`, which also rewrites `ß` to
+ * `ss`, so `Straße.png` paired with `STRASSE.pdf` on the server and not on
+ * the page (code review finding 21). The same vectors are asserted on both
+ * sides, in `batchTable.test.tsx` and `test_batch.py`, so a divergence fails
+ * a test rather than a batch.
  */
 
 export interface Pairing {
