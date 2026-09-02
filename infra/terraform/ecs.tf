@@ -199,6 +199,6 @@ resource "aws_ecs_service" "app" {
   # that still fills the service events with pull errors.
   depends_on = [
     aws_lb_listener.http,
-    aws_iam_role_policy_attachment.task_execution,
+    aws_iam_role_policy.task_execution,
   ]
 }
