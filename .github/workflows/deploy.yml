@@ -58,7 +58,9 @@ on:
 
 # The workflow default is read-only. id-token: write is granted to the two
 # jobs that assume the AWS role and to no other; contents: write is granted to
-# the one job that attaches the SBOM to a release and to no other.
+# the one job that attaches the SBOM to a release and to no other; actions:
+# read is granted to the one job that runs anchore/sbom-action and to no other
+# (v1.3.1; the comment on that job's permissions says why it is needed).
 permissions:
   contents: read
 
@@ -158,7 +160,19 @@ jobs:
     name: build and push image
     needs: preflight
     runs-on: ubuntu-latest
+    # actions: read is for anchore/sbom-action and for nothing else here. On a
+    # release event the action's own release-asset step is on by default: it
+    # lists this run's artifacts, finds none (upload-artifact is false below,
+    # and the workflow's own upload comes after), and then lists the workflow
+    # runs on the release's target branch to look for one. That REST call
+    # needs actions: read, and the v1.3.0 deploy (run 20) failed on it with
+    # "Resource not accessible by integration" after the image was pushed and
+    # before the deploy job ran (v1.3.1). The action attaches nothing itself,
+    # because the artifact below is named by digest and not by the action's
+    # default name; attach-sbom is what attaches it, with its own contents:
+    # write. A dispatch is not a release and the action makes no such call.
     permissions:
+      actions: read
       contents: read
       id-token: write
     outputs:
