@@ -182,8 +182,14 @@ describe('a result checked against the application’s own artwork', () => {
 
 describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)', () => {
   const panels = [
-    photo(1, { origin: 'application_artwork', artwork_panel: { page: 2, width: 1350, height: 300 } }),
-    photo(2, { origin: 'application_artwork', artwork_panel: { page: 3, width: 1050, height: 309 } }),
+    photo(1, {
+      origin: 'application_artwork',
+      artwork_panel: { page: 2, width: 1350, height: 300 },
+    }),
+    photo(2, {
+      origin: 'application_artwork',
+      artwork_panel: { page: 3, width: 1050, height: 309 },
+    }),
   ]
 
   it('names each panel by its page and size, so three pieces of artwork are not three of the same line', () => {
@@ -226,6 +232,8 @@ describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)'
     })
     render(<PhotoNotes photos={panels} document={document} />)
     expect(screen.getByText(/page 2 of the application, 1350 by 300 pixels/)).toBeInTheDocument()
-    expect(screen.getByText(/set aside as too small to be label artwork: 687 by 195 on page 5/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/set aside as too small to be label artwork: 687 by 195 on page 5/),
+    ).toBeInTheDocument()
   })
 })

@@ -89,9 +89,7 @@ export function photoItemLabel(photo: PhotoResult): string {
 export function artworkNote(document: ApplicationDocumentResult | null | undefined): string | null {
   if (!document) return null
   const rejected = document.artwork_images_rejected ?? []
-  const unread = (document.artwork_images_accepted ?? []).filter(
-    (image) => image.status !== 'read',
-  )
+  const unread = (document.artwork_images_accepted ?? []).filter((image) => image.status !== 'read')
   const parts: string[] = []
   if (rejected.length) {
     const sizes = rejected.map((image) => `${image.width} by ${image.height} on page ${image.page}`)
