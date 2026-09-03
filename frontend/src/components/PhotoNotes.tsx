@@ -16,12 +16,19 @@
 import { hasPhotoNotes, photoItemLabel, photoListHeading, photoNote } from '../lib/photos'
 import type { PhotoResult } from '../types'
 
-export function PhotoNotes({ photos }: { photos: PhotoResult[] }) {
+export function PhotoNotes({
+  photos,
+  idPrefix = 'card',
+}: {
+  photos: PhotoResult[]
+  /** See `ResultCard`: two results on one page must not share heading ids. */
+  idPrefix?: string
+}) {
   if (!hasPhotoNotes(photos)) return null
 
   return (
-    <section className="photo-notes" aria-labelledby="photo-notes-heading">
-      <h3 className="card__subtitle" id="photo-notes-heading">
+    <section className="photo-notes" aria-labelledby={`${idPrefix}-photo-notes-heading`}>
+      <h3 className="card__subtitle" id={`${idPrefix}-photo-notes-heading`}>
         {photoListHeading(photos)}
       </h3>
       <ul className="photo-notes__list">

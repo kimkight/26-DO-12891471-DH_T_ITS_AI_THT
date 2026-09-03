@@ -133,47 +133,58 @@ sequenceDiagram
     participant W as Per-label processing
     participant R as Result assembler
 
-    A->>API: POST /api/verify-batch (N images + N COLA documents)
-    API->>V: Check both counts against TTB_MAX_BATCH_FILES
-    API->>V: Pair each image with the document of the same filename stem
+    A->>API: POST /api/verify-batch (one repeated files part: applications, images, or both)
+    API->>V: Group the files into rows by filename stem, on names alone
+    API->>V: Check the row count against TTB_MAX_BATCH_FILES
     alt Count exceeds limit
         V-->>A: Rejected before any file is processed, limit named
     else Within limit
-        loop For each label, independently
-            V->>W: Validate and process one label
-            alt Label fails
-                W-->>R: Error for this label only
-            else Label succeeds
-                W-->>R: Per-field outcomes for this label
+        loop For each row, independently, in the worker pool
+            V->>W: Classify the row's files, then run the single-label check (app.check)
+            alt Row fails
+                W-->>R: Error for this row only
+            else Row succeeds
+                W-->>R: Per-field outcomes for this row
             end
         end
-        R-->>A: One result set per label, each identified
+        R-->>A: One line per row, each identified and carrying its submission position
     end
-    Note over W,R: One failing label never fails the batch (US-10).
+    Note over W,R: One failing row never fails the batch (US-10).
 ```
 
-**What a batch is made of** ([ADR 0009](adr/0009-batch-cola-documents.md)).
-Label images plus one COLA document for each, in one multipart request as
-repeated `images` and `application_documents` parts, **paired by filename
-stem**: `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`. The stem is
-the filename with its final extension removed, compared without regard to case,
-and only the final extension is removed. Each document is read by the FR-11
-parser inside the worker pool, per row, so the reading is parallelized and a
-document that cannot be read is that row's error rather than the batch's.
+**What a batch is made of** ([ADR 0020](adr/0020-batch-items-are-derived.md)).
+One pile of files in one repeated `files` part, the part the single-label route
+takes. **A row is every file that shares a filename stem**: `0001-stones-throw.pdf`
+and `0001-stones-throw.png` are one row. The stem is the filename with its final
+extension removed, compared without regard to case, and only the final extension
+is removed; that rule is ADR 0009's, kept. Grouping is on names alone, so the
+total is known before any file is read and the first line of the stream can
+carry it (NFR-2).
 
-This replaced a CSV of application data keyed by image filename, assumed as
-A-14. Nothing an importer files with TTB produces such a file; what they file is
-a COLA form plus label images, which FR-11 can read. A-14 is marked superseded
-rather than deleted.
+**Each row is the single-label check.** Inside the worker pool the row's files
+are classified from the files themselves (`classify.py`, ADR 0011) and handed
+to `check.py`, the function that is the body of `POST /api/verify`. So a filed
+application that carries its own label artwork is a complete row, checked
+against that artwork (ADR 0010); a photograph on its own is a valid row, checked
+for what a label must carry; an application and an image on one stem are the
+ordinary pair, whichever extension each has; and the outcomes, the parsed block
+and the per-field sources are exactly a single-label submission's, because they
+come from the same code.
 
-Every value on this path is parsed rather than typed, so each row's result
-carries the same parsed block and the same per-field source marks a single-label
-submission with an attached document carries.
+This replaced two required parts, `images` and `application_documents`, paired
+by stem and refused when either was missing (ADR 0009), which itself replaced a
+CSV of application data keyed by image filename, assumed as A-14. Nothing an
+importer files with TTB produces such a file; what they file is a COLA form
+plus label images, which FR-11 can read. A-14 is marked superseded rather than
+deleted. The two older part names are still accepted and folded into the pile.
 
-Pairing failures are per row, not per batch. An image with no document, a
-document with no image, two documents on one stem and two images on one stem
-each report an error on their own line; only a submission with no images at all,
-or no documents at all, is refused as a whole.
+Failures are per row, not per batch. A file that cannot be read or classified,
+two applications on one stem, two label images on one stem (this path holds one
+image per row; the single-label tab merges several), and an application with no
+readable artwork and no image each report an error on their own line; only a
+submission with no files at all, or more rows than the limit, is refused as a
+whole. An image with no application, or an application with no image, is not
+an error.
 
 Isolation between labels is the design property that matters here. Sarah's
 scenario is a 300-application drop; losing 299 good results to one bad image
@@ -210,7 +221,8 @@ find out why it exists.
 | `compare.py` | Normalization, `rapidfuzz` scoring, the three outcomes, the A-12 alcohol content rules and the A-13 net contents rules | FR-3, FR-4, FR-7, A-4, A-12, A-13 | `tests/test_compare.py` |
 | `schemas.py` | The response contract, including `external_call_made` and the warning detail block | FR-2, FR-3, FR-6, NFR-1, NFR-3 | asserted through `tests/test_api_validation.py` and `tests/test_verify_integration.py` |
 | `verify.py` | The single-image pipeline both routes run: the MIME and size checks, OCR, parse, compare, and the assembled result | FR-1, FR-2, FR-3, FR-9, NFR-1 | `tests/test_verify_integration.py`, `tests/test_batch.py` |
-| `batch.py` | The filename-stem pairing of images with COLA documents, the per-row pairing errors, the bounded worker pool, and the NDJSON writer | FR-8, FR-9, FR-11, NFR-2, NFR-6 | `tests/test_batch.py` |
+| `check.py` | The single-label check as one function both routes call: sort the files, read the application, decide the label side, compare. The body of `POST /api/verify` until v1.4.0, lifted out so that a batch row runs exactly it (ADR 0020) | FR-1 through FR-7, FR-9, FR-11, FR-12, NFR-1, NFR-6, ADR 0010, ADR 0011 | `tests/test_one_upload.py`, `tests/test_embedded_artwork.py`, `tests/test_batch.py::TestTheBatchIsTheSameCheck` |
+| `batch.py` | The grouping of one pile of files into rows by filename stem, the two per-row ambiguity errors, the bounded worker pool running each row through `check.py`, and the NDJSON writer | FR-8, FR-9, FR-11, FR-12, NFR-2, NFR-6, ADR 0020 | `tests/test_batch.py` |
 | `classify.py` | Decide what each uploaded file is from the file itself: a PDF by its header, an image by whether its text reads as a COLA form. Returns the OCR result alongside the verdict, so the side it lands on reads it no second time | FR-12, FR-11, FR-1, FR-9, NFR-6, ADR 0011 | `tests/test_one_upload.py` |
 | `warning.py` | The 27 CFR 16.21 statement, the exact body comparison, the separate capitalization check, and the character-level difference plus the near-miss routing that sends a one or two character difference to human judgement rather than to a mismatch | FR-5, FR-6, OOS-4, ADR 0012 | `tests/test_warning.py`, `tests/test_warning_near_miss.py` |
 | `api.py` | `POST /api/verify`, `POST /api/classify`, `POST /api/verify-batch` and `POST /api/read-application`, the upload-size middleware, and the FR-9 error shapes | FR-1, FR-2, FR-8, FR-9, FR-11, FR-12, NFR-6, NFR-7 | `tests/test_api_validation.py`, `tests/test_verify_integration.py`, `tests/test_one_upload.py`, `tests/test_batch.py`, `tests/test_cola_document_api.py` |
@@ -444,8 +456,9 @@ this origin.
 | `components/PhotoNotes.tsx` | What was done to each submitted photograph, rendered only when there is something to say | FR-10, ADR 0007, A-15 | `src/__tests__/multiPhoto.test.tsx` |
 | `components/ApplicationFields.tsx` | The application values after an upload has been read: a read-only line per value that was found, a visible field per value that was not, focus and the announcement on the first gap, and one collapsed disclosure holding the boxes for what was found | FR-13, FR-11, FR-3, NFR-4, NFR-5 | `src/__tests__/quietFields.test.tsx`, `applicationFirst.test.tsx`, `tests/a11y.spec.ts` |
 | `components/UploadPanel.tsx` | The one file picker, the list of chosen files with what each was taken to be, the application summary, and the live region that announces each accepted file with its classification | FR-12, FR-11, FR-9, NFR-4, NFR-5 | `src/__tests__/oneUpload.test.tsx`, `multiPhoto.test.tsx`, `tests/a11y.spec.ts` |
-| `components/BatchTab.tsx` | The two pickers, images and COLA documents, the pairing rule stated on screen with the pair count announced, the progress indicator driven by the stream, the summary counts, and the results CSV download | FR-8, FR-11, NFR-2, NFR-5 | `src/__tests__/batchTable.test.tsx`, `tests/a11y.spec.ts` |
-| `components/BatchTable.tsx` | The sortable results table with a status chip per row | FR-8, FR-10, NFR-5 | `src/__tests__/batchTable.test.tsx` |
+| `components/BatchTab.tsx` | The one picker, the queue of files each classified on arrival and shown with the single-label tab's chip, the rows grouped by the server's stem rule and described in one announced sentence, the progress indicator driven by the stream, the summary counts, the detail for the selected row in `ResultDetail`, and the results CSV download | FR-8, FR-11, FR-12, NFR-2, NFR-5, ADR 0020 | `src/__tests__/batchTable.test.tsx`, `src/__tests__/reset.test.tsx`, `tests/a11y.spec.ts` |
+| `components/BatchTable.tsx` | The results table, one row per label in submission order with a pending state, an outcome chip and the checks tally per row, and a row button that opens the detail | FR-8, FR-10, NFR-2, NFR-5, ADR 0020 | `src/__tests__/batchTable.test.tsx`, `tests/a11y.spec.ts` |
+| `components/ResultDetail.tsx` | One label's result, field by field: the summary line, the artwork note, the photograph notes, the five cards and the closing line, rendered by both tabs | FR-10, FR-14, FR-15, ADR 0020 | `src/__tests__/batchTable.test.tsx`, `src/__tests__/outcomes.test.tsx` |
 | `components/ResultCard.tsx` | One field's card, and the warning's separate capitalization and bold-type sections | FR-3, FR-6, FR-10, OOS-4 | `src/__tests__/outcomes.test.tsx` |
 | `components/OutcomeBadge.tsx` | An outcome as text, then shape, then colour | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
 | `components/DropZone.tsx` | A real file input with a bound label, plus drag and drop on top | NFR-4, NFR-5 | `tests/a11y.spec.ts` |
@@ -454,7 +467,7 @@ this origin.
 | `lib/outcomes.ts` | The text, shape and tone for each outcome, and the live-region sentence | FR-10, NFR-5 | `src/__tests__/outcomes.test.tsx` |
 | `lib/plainLanguage.ts` | API error codes rendered as something an agent can act on | FR-9, NFR-4 | `src/__tests__/liveRegion.test.tsx` |
 | `lib/csv.ts` | The results CSV, built in the browser. Output only: nothing is submitted as CSV | FR-8, D-9 | `src/__tests__/batchTable.test.tsx` |
-| `lib/pairing.ts` | The ADR 0009 pairing rule, mirrored from `batch.py`, so the page can say what will pair before anything is sent | FR-8, NFR-4, NFR-5 | `src/__tests__/batchTable.test.tsx` |
+| `lib/pairing.ts` | The stem rule and the grouping into rows, mirrored from `batch.py`, so the page can lay out one row per label before anything is sent and describe the labels in one sentence (ADR 0020) | FR-8, NFR-2, NFR-4, NFR-5 | `src/__tests__/batchTable.test.tsx` |
 | `lib/photos.ts` | The wording for each photograph's note, and the per-field attribution label | FR-10, ADR 0007 | `src/__tests__/multiPhoto.test.tsx` |
 | `index.css` | One light palette, defined as tokens, with every contrast pair checked, and the bundled font imported rather than linked | NFR-3, NFR-5 | `src/__tests__/contrast.test.ts` |
 
@@ -488,7 +501,7 @@ Four notes that are not obvious from the table:
 
 | Component | Responsibility | Explicitly not responsible for |
 | --- | --- | --- |
-| React SPA | Collect the images, the typed application values and the COLA documents; present per-field outcomes accessibly; show batch progress and what will pair; build the results CSV in the browser | Any comparison logic; any judgment about compliance; retaining anything past the page |
+| React SPA | Collect the files, on both tabs through one control, and the typed application values; present per-field outcomes accessibly, in one component on both tabs; show batch progress and the rows a batch will have before it is sent; build the results CSV in the browser | Any comparison logic; any judgment about compliance; retaining anything past the page |
 | FastAPI routing layer | HTTP contract, request lifecycle, error shaping | Image decoding; matching |
 | Validation | Size, MIME type, and batch count limits, enforced before decoding | Content correctness |
 | Extraction (Tesseract, OpenCV) | Turn image pixels into text for the five fields | Deciding whether a value is correct |

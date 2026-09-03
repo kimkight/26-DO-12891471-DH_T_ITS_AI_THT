@@ -274,29 +274,29 @@ class TestDisagreementBetweenPhotographs:
 
 
 class TestTheBatchPathIsUnaffected:
-    def test_the_batch_route_still_takes_one_image_per_label(self, sample_label_png):
+    def test_the_batch_route_still_takes_one_image_per_label(self):
         """ADR 0007 leaves the batch path at one photograph per label.
 
-        ADR 0009 changed what the application side of a batch is, from one CSV
-        to one COLA document per label paired by filename stem, and left this
-        limitation where it was: a stem pairing several images to one document
-        would need a rule for a group only partly readable, and no source asks
-        for one. Two images on one stem are an error, not a multi-photograph
-        label, and that is asserted in test_batch.py.
+        ADR 0009 changed what the application side of a batch is, and ADR 0020
+        changed what a row is, from a demanded pair to whatever shares a stem;
+        both left this limitation where it was: a row holding several label
+        images would need a rule for a group only partly readable, and no
+        source asks for one. Two images on one stem are one ambiguous row, not
+        a multi-photograph label, and the message sends the agent to this tab.
         """
         response = client.post(
             "/api/verify-batch",
             files=[
-                ("images", ("01.png", sample_label_png, "image/png")),
-                (
-                    "application_documents",
-                    ("01.pdf", REGISTRY_PRINTOUT, "application/pdf"),
-                ),
+                ("files", ("01.png", b"not an image", "image/png")),
+                ("files", ("01.jpeg", b"not an image", "image/jpeg")),
+                ("files", ("01.pdf", REGISTRY_PRINTOUT, "application/pdf")),
             ],
         )
         assert response.status_code == 200
-        line = response.text.strip().splitlines()[0]
-        assert '"filename": "01.png"' in line or '"filename":"01.png"' in line
+        lines = response.text.strip().splitlines()
+        assert len(lines) == 1
+        assert '"duplicate_label_stem"' in lines[0]
+        assert "single-label tab" in lines[0]
 
 
 class TestWhatThreePhotographsCost:

@@ -935,25 +935,48 @@ class VerificationResult(BaseModel):
 
 
 class BatchLine(BaseModel):
-    """One line of the batch NDJSON stream (FR-8, NFR-2, ADR 0006).
+    """One line of the batch NDJSON stream (FR-8, NFR-2, ADR 0006, ADR 0020).
 
-    One JSON object per line, one line per item, emitted as each item finishes
-    rather than in submission order. ``filename`` is what FR-8's fourth
-    criterion requires: "The result identifies which label each result belongs
-    to." It is null only on a batch-level error, which is a problem with the
-    submission rather than with any one label.
+    One JSON object per line, one line per row, emitted as each row finishes
+    rather than in submission order. A row is every submitted file that shares
+    a filename stem: a label application, a label image, or both. ``filename``
+    is what FR-8's fourth criterion requires: "The result identifies which
+    label each result belongs to." It is null only on a batch-level error,
+    which is a problem with the submission rather than with any one label.
 
     ``index`` and ``total`` exist for NFR-2's second criterion, that "batch
     progress is observable to the user rather than presenting as a frozen
     page". A client can render "42 of 300" from the first line it receives
     without waiting for the batch to end or counting parts itself.
+    ``position`` is for the other thing a client shows: the rows in the order
+    the agent submitted them, each filled in as its line arrives.
 
     Exactly one of ``result`` and ``error`` is set. An error line carries no
     field outcomes at all, which is FR-9's last criterion applied per row.
     """
 
     filename: str | None = Field(
-        description="The image this line belongs to. Null only on a batch-level error."
+        description=(
+            "The file this row is named after: its label image where the row "
+            "has one, otherwise its first file. Null only on a batch-level "
+            "error."
+        )
+    )
+    filenames: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every file this row was made from, in submission order: one or "
+            "two, grouped by filename stem (ADR 0020). What each was taken to "
+            "be is in `result.files` on an ok line."
+        ),
+    )
+    position: int = Field(
+        default=0,
+        description=(
+            "1-based position of this row in submission order, counted by the "
+            "row's first file. Rows finish out of order, so a client that "
+            "shows them in the order submitted places each line by this."
+        ),
     )
     index: int = Field(description="1-based position of this line in the emission order.")
     total: int = Field(description="How many lines this batch will emit in total.")

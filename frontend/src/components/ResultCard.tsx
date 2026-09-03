@@ -75,11 +75,17 @@ export function ResultCard({
   field,
   warning,
   photoCount = 1,
+  idPrefix = 'card',
 }: {
   field: FieldResult
   warning?: WarningResult
   /** How many photographs of the label were submitted (ADR 0007). */
   photoCount?: number
+  /**
+   * The prefix of the heading id, so two results on one page (the batch
+   * tab's detail beside the single-label tab's result) do not share ids.
+   */
+  idPrefix?: string
 }) {
   const { tone } = presentation(field.outcome)
   const isWarning = field.name === 'government_warning'
@@ -104,10 +110,10 @@ export function ResultCard({
   const source = sourceLabel(field.source_photo, photoCount)
 
   return (
-    <article className={`card card--${tone}`} aria-labelledby={`card-${field.name}`}>
+    <article className={`card card--${tone}`} aria-labelledby={`${idPrefix}-${field.name}`}>
       <header className="card__header">
         <OutcomeBadge outcome={field.outcome} />
-        <h3 className="card__title" id={`card-${field.name}`}>
+        <h3 className="card__title" id={`${idPrefix}-${field.name}`}>
           {field.display_name}
         </h3>
       </header>

@@ -26,6 +26,7 @@ python samples/generate_samples.py
 | `expected.csv` | Ground truth: one row per image | Yes |
 | `applications/applications.csv` | The application side of each case. No longer an API input; see below | Yes |
 | `applications/documents/*.pdf` | One synthetic Registry printout per label, named to pair with its image (ADR 0009) | No, git-ignored; regenerated like the artwork |
+| `applications/filed/*.pdf` | The same printout with the label artwork affixed: a filed application, a complete batch row on its own (ADR 0020) | No, git-ignored; regenerated like the artwork |
 
 ### COLA application documents
 
@@ -72,12 +73,18 @@ by `backend/tests/test_samples.py`.
 
 `applications/` holds the comparison side of a test case, in two forms.
 
-**`applications/documents/*.pdf` is what a batch submission carries.** Per
-[ADR 0009](../docs/adr/0009-batch-cola-documents.md), a batch is label images
-plus one COLA document each, paired by filename stem:
-`01-spirits-clean.png` goes with `01-spirits-clean.pdf`.
-`generate_samples.py` writes one synthetic Public COLA Registry printout per
-label, carrying that label's declared values.
+**`applications/documents/*.pdf` is the application side of a paired batch
+row.** Per [ADR 0009](../docs/adr/0009-batch-cola-documents.md), files that
+share a filename stem are one row: `01-spirits-clean.png` and
+`01-spirits-clean.pdf` are one label. `generate_samples.py` writes one synthetic
+Public COLA Registry printout per label, carrying that label's declared values.
+
+**`applications/filed/*.pdf` is a batch row on its own.** The same printout with
+the rendered label affixed as an embedded image, which is what an importer
+actually files, and since [ADR 0020](../docs/adr/0020-batch-items-are-derived.md)
+a complete row: the artwork inside it is the label side and no image of the
+same name is needed. `scripts/measure.py --batch --filed` submits this set, and
+section 9 of `docs/09_DEPLOYMENT.md` measures the batch path on it.
 
 A Registry printout rather than a blank TTB F 5100.31, because the form has no
 item for the class or type designation, the alcohol content or the net contents

@@ -392,7 +392,12 @@ export interface ErrorDetail {
 
 /** One line of the batch NDJSON stream (FR-8, ADR 0006). */
 export interface BatchLine {
+  /** The file the row is named after: its label image where it has one, else its first file. */
   filename: string | null
+  /** Every file the row was made from, in submission order (ADR 0020). */
+  filenames: string[]
+  /** 1-based submission order of the row, which is how the table places it. */
+  position: number
   index: number
   total: number
   status: 'ok' | 'error'

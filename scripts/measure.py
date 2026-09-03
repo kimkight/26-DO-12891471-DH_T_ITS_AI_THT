@@ -6,6 +6,7 @@ Run from the repository root, after samples/generate_samples.py:
     python scripts/measure.py                          # accuracy, in process
     python scripts/measure.py --batch --url "$URL"     # a batch, over HTTP
     python scripts/measure.py --batch --url "$URL" --copies 25   # 300 labels
+    python scripts/measure.py --batch --url "$URL" --filed   # filed applications, no images
 
 Prints a Markdown table of per-field precision, recall, review rate, false match
 rate, and latency, following the metric definitions in
@@ -20,11 +21,13 @@ service and reports what came back and when, which is what
 docs/09_DEPLOYMENT.md section 9 asks for and what the in-process mode cannot
 answer. Say which one produced a figure whenever one is recorded.
 
-**The batch mode follows the ADR 0009 contract**: label images plus one COLA
-document each, paired by filename stem, sent as repeated `images` and
-`application_documents` parts. There is no CSV. `--copies` repeats the sample
-set under fresh stems so that the full 300-label batch section 9 asks for can
-actually be sent from a twelve-label sample set.
+**The batch mode follows the ADR 0020 contract**: one repeated `files` part,
+grouped into rows by filename stem on the server. By default each row is a
+label image plus the COLA document of the same name; with `--filed` each row is
+one filed application carrying its own artwork and no image at all, which is
+the shape section 9 measures the batch path on since v1.4.0. There is no CSV.
+`--copies` repeats the sample set under fresh stems so that the full 300-label
+batch section 9 asks for can actually be sent from a twelve-label sample set.
 
 **What ground truth means here, stated because it bounds what these numbers
 show.** The ground truth outcome for each field is computed by running the same
@@ -63,6 +66,7 @@ from samples.generate_samples import (  # noqa: E402
     APPLICATIONS_CSV,
     DOCUMENTS_DIR,
     EXPECTED_CSV,
+    FILED_DIR,
     IMAGES_DIR,
 )
 from samples.generate_samples import main as generate  # noqa: E402
@@ -256,38 +260,45 @@ IMAGE_TYPE = "image/png"
 DOCUMENT_TYPE = "application/pdf"
 
 
-def batch_parts(copies: int) -> list[tuple[str, str, str, bytes]]:
+def batch_parts(copies: int, filed: bool = False) -> list[tuple[str, str, str, bytes]]:
     """Every part of one batch submission, as (field, filename, type, bytes).
 
-    Each copy after the first gets a fresh stem on both sides of the pair, so
-    the pairing still holds and no two labels collide. That is what lets a
-    twelve-label sample set stand in for the 300-label batch at the configured
-    cap; it measures throughput and memory, not accuracy, and the labels being
-    repeated does not change either.
+    Each copy after the first gets a fresh stem, so no two rows collide. That
+    is what lets a twelve-label sample set stand in for the 300-label batch at
+    the configured cap; it measures throughput and memory, not accuracy, and
+    the labels being repeated does not change either.
+
+    Everything goes in the one `files` part (ADR 0020). Without `--filed` each
+    row is the label image plus the Registry printout of the same name; with it
+    each row is the filed application alone, artwork inside, no image.
     """
     if not IMAGES_DIR.is_dir() or not any(IMAGES_DIR.glob("*.png")):
+        generate()
+    if filed and not any(FILED_DIR.glob("*.pdf")):
         generate()
 
     parts: list[tuple[str, str, str, bytes]] = []
     for copy in range(copies):
         suffix = "" if copy == 0 else f"-copy{copy + 1:03d}"
         for image_path in sorted(IMAGES_DIR.glob("*.png")):
+            stem = f"{image_path.stem}{suffix}"
+            if filed:
+                filed_path = FILED_DIR / f"{image_path.stem}.pdf"
+                if not filed_path.is_file():
+                    raise SystemExit(
+                        f"No filed application for {image_path.name}. Run "
+                        "samples/generate_samples.py, which writes one per label."
+                    )
+                parts.append(("files", f"{stem}.pdf", DOCUMENT_TYPE, filed_path.read_bytes()))
+                continue
             document_path = DOCUMENTS_DIR / f"{image_path.stem}.pdf"
             if not document_path.is_file():
                 raise SystemExit(
                     f"No COLA document for {image_path.name}. Run "
                     "samples/generate_samples.py, which writes one per label."
                 )
-            stem = f"{image_path.stem}{suffix}"
-            parts.append(("images", f"{stem}.png", IMAGE_TYPE, image_path.read_bytes()))
-            parts.append(
-                (
-                    "application_documents",
-                    f"{stem}.pdf",
-                    DOCUMENT_TYPE,
-                    document_path.read_bytes(),
-                )
-            )
+            parts.append(("files", f"{stem}.png", IMAGE_TYPE, image_path.read_bytes()))
+            parts.append(("files", f"{stem}.pdf", DOCUMENT_TYPE, document_path.read_bytes()))
     return parts
 
 
@@ -311,7 +322,7 @@ def multipart_body(parts: list[tuple[str, str, str, bytes]]) -> bytes:
     return b"".join(chunks)
 
 
-def run_batch(url: str, copies: int) -> str:
+def run_batch(url: str, copies: int, filed: bool = False) -> str:
     """Submit one batch and report what came back, and when.
 
     The arrival time of every line is recorded, because whether the response
@@ -320,8 +331,8 @@ def run_batch(url: str, copies: int) -> str:
     application and here buffered the whole response and NFR-2 is not met on
     the deployed path however green the tests are.
     """
-    parts = batch_parts(copies)
-    labels = sum(1 for field, *_ in parts if field == "images")
+    parts = batch_parts(copies, filed)
+    labels = len({name.rsplit(".", 1)[0].lower() for _, name, *_ in parts})
     body = multipart_body(parts)
 
     request = urllib.request.Request(  # noqa: S310
@@ -337,6 +348,9 @@ def run_batch(url: str, copies: int) -> str:
     arrivals: list[float] = []
     statuses: dict[str, int] = {}
     codes: dict[str, int] = {}
+    reads: list[int] = []
+    passes: list[int] = []
+    row_ms: list[float] = []
     started = time.perf_counter()
     try:
         with urllib.request.urlopen(request) as response:  # noqa: S310
@@ -351,6 +365,11 @@ def run_batch(url: str, copies: int) -> str:
                 if status == "error":
                     code = (record.get("error") or {}).get("code", "unknown")
                     codes[code] = codes.get(code, 0) + 1
+                timings = (record.get("result") or {}).get("timings") or {}
+                if timings:
+                    reads.append(int(timings.get("tesseract_reads", 0)))
+                    passes.append(int(timings.get("ocr_passes", 0)))
+                    row_ms.append(float(timings.get("total_ms", 0.0)))
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", "replace")[:500]
         raise SystemExit(f"The service refused the batch: HTTP {error.code}. {detail}") from error
@@ -361,9 +380,14 @@ def run_batch(url: str, copies: int) -> str:
     if not arrivals:
         raise SystemExit("The response carried no lines at all.")
 
+    shape = (
+        "each a filed application carrying its own artwork, no images"
+        if filed
+        else "each a label image with the COLA document of the same name"
+    )
     lines = [
-        f"Batch of {labels} labels, each with its own COLA document, submitted to "
-        f"{url} as one multipart request (ADR 0009). Envelope: "
+        f"Batch of {labels} labels, {shape}, submitted to {url} as one multipart "
+        f"request in one `files` part (ADR 0020). Envelope: "
         f"{len(body) / 1_048_576:.1f} MiB.",
         "",
         "| Measurement | Value |",
@@ -379,6 +403,16 @@ def run_batch(url: str, copies: int) -> str:
         "| --- | --- |",
     ]
     lines += [f"| {status} | {count} |" for status, count in sorted(statuses.items())]
+    if row_ms:
+        median_ms = statistics.median(row_ms)
+        lines += [
+            "",
+            "| Per row, from `result.timings` | Min | Median | Max |",
+            "| --- | --- | --- | --- |",
+            f"| `total_ms` | {min(row_ms):.0f} | {median_ms:.0f} | {max(row_ms):.0f} |",
+            f"| `tesseract_reads` | {min(reads)} | {statistics.median(reads):.0f} | {max(reads)} |",
+            f"| `ocr_passes` | {min(passes)} | {statistics.median(passes):.0f} | {max(passes)} |",
+        ]
     if codes:
         lines += ["", "| Error code | Count |", "| --- | --- |"]
         lines += [f"| {code} | {count} |" for code, count in sorted(codes.items())]
@@ -404,6 +438,14 @@ def main() -> int:
     )
     parser.add_argument("--url", help="Base URL of the deployed service, for --batch.")
     parser.add_argument(
+        "--filed",
+        action="store_true",
+        help=(
+            "Send the filed applications alone, artwork inside and no images, "
+            "so every row is checked against its own artwork (ADR 0020)."
+        ),
+    )
+    parser.add_argument(
         "--copies",
         type=int,
         default=1,
@@ -422,7 +464,7 @@ def main() -> int:
         parser.error("--batch needs --url, the base URL of the deployed service")
     if arguments.copies < 1:
         parser.error("--copies has to be at least 1")
-    print(run_batch(arguments.url, arguments.copies))
+    print(run_batch(arguments.url, arguments.copies, arguments.filed))
     return 0
 
 

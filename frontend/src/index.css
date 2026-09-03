@@ -1828,3 +1828,75 @@ main {
   width: 100%;
   justify-content: center;
 }
+
+/* ------------------------------------------------------- batch: the table */
+
+/*
+ * The row's label is a button that opens the field-by-field detail under the
+ * table (ADR 0020). It is styled as the linked text an agent expects to select
+ * rather than as a pill, because five pill buttons down a column read as five
+ * calls to action and there is only one thing to do here. The underline is the
+ * affordance; the focus ring comes from the global :focus-visible rule.
+ */
+.row-toggle {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--accent);
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  cursor: pointer;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+.row-toggle[aria-expanded='true'] {
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+/*
+ * The open row: a tinted band and a gold edge, and aria-current in the markup,
+ * so the state is carried by more than the colour (1.4.1).
+ */
+.batch-table tr[aria-current='true'] th,
+.batch-table tr[aria-current='true'] td {
+  background: var(--accent-wash);
+}
+
+.batch-table tr[aria-current='true'] th {
+  box-shadow: inset 3px 0 0 var(--gold);
+}
+
+/*
+ * The detail under the table: ruled off from it, with the same cards the
+ * single-label tab renders. Hidden with the `hidden` attribute when no row is
+ * open, which the global rule honours.
+ */
+.batch-detail {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.batch-detail__heading {
+  margin: 0 0 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow-wrap: break-word;
+}
+
+.batch-detail__files {
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.875rem;
+}

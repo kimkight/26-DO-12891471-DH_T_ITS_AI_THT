@@ -488,33 +488,34 @@ NDJSON line arrives in one flush at the end, the progress display shows nothing
 until it is over, and NFR-2 is not met even though every test passes. **This
 has never been verified against a load balancer.**
 
-A batch is label images plus one COLA document each, paired by filename stem
-([ADR 0009](adr/0009-batch-cola-documents.md)).
-`samples/generate_samples.py` writes both sides, so
+A batch is one pile of files grouped into rows by filename stem, each row the
+single-label check ([ADR 0020](adr/0020-batch-items-are-derived.md); the stem
+rule is [ADR 0009](adr/0009-batch-cola-documents.md)'s).
+`samples/generate_samples.py` writes both sides and the filed set, so
 `samples/applications/documents/01-spirits-clean.pdf` is already named to pair
 with `samples/images/01-spirits-clean.png`.
 
 ```bash
 curl -N -s \
-  -F 'images=@samples/images/01-spirits-clean.png' \
-  -F 'images=@samples/images/02-spirits-case-difference.png' \
-  -F 'images=@samples/images/03-spirits-title-case-warning.png' \
-  -F 'images=@samples/images/04-spirits-altered-warning.png' \
-  -F 'images=@samples/images/05-spirits-no-warning.png' \
-  -F 'application_documents=@samples/applications/documents/01-spirits-clean.pdf' \
-  -F 'application_documents=@samples/applications/documents/02-spirits-case-difference.pdf' \
-  -F 'application_documents=@samples/applications/documents/03-spirits-title-case-warning.pdf' \
-  -F 'application_documents=@samples/applications/documents/04-spirits-altered-warning.pdf' \
-  -F 'application_documents=@samples/applications/documents/05-spirits-no-warning.pdf' \
+  -F 'files=@samples/images/01-spirits-clean.png' \
+  -F 'files=@samples/images/02-spirits-case-difference.png' \
+  -F 'files=@samples/images/03-spirits-title-case-warning.png' \
+  -F 'files=@samples/applications/documents/01-spirits-clean.pdf' \
+  -F 'files=@samples/applications/documents/02-spirits-case-difference.pdf' \
+  -F 'files=@samples/applications/documents/03-spirits-title-case-warning.pdf' \
+  -F 'files=@samples/applications/filed/04-spirits-altered-warning.pdf' \
+  -F 'files=@samples/applications/filed/05-spirits-no-warning.pdf' \
   "$URL/api/verify-batch" \
   | while IFS= read -r line; do printf '%s  %s\n' "$(date +%T)" "${line:0:80}"; done
 ```
 
-`scripts/measure.py --batch --url "$URL"` sends the same shape of request and
-prints the arrival spread as a number; use whichever is easier to read. There is
-no `applications` CSV part any more: sending one is ignored, and a submission
-with no `application_documents` at all is refused with a message stating the
-pairing rule.
+Five rows: three pairs, grouped by name, and two filed applications on their
+own, checked against the artwork inside them (ADR 0020). Everything goes in the
+one `files` part; the older `images` and `application_documents` names still
+work. `scripts/measure.py --batch --url "$URL"` sends the same shape of request
+and prints the arrival spread as a number, and `--filed` sends the filed set
+alone; use whichever is easier to read. There is no `applications` CSV part any
+more: sending one is ignored.
 
 `-N` disables curl's own buffering, so what you are watching is the network.
 **Read the timestamps.** Lines should arrive spread across the run, roughly one
@@ -556,11 +557,14 @@ This section is the record of the runs; the README is the summary of them.
         `enable_execute_command` on the service, currently off). **Not used for
         anything below.**
       - `--batch --url "$URL"`: submits a real batch over HTTP, following the
-        ADR 0009 contract, and prints total wall clock, per-label time, when the
-        first and last lines arrived, the spread between them, and the counts by
-        status and error code. This is the mode that produced the batch row.
-        It needs `samples/generate_samples.py` to have run, which writes the
-        images and the paired COLA documents.
+        ADR 0020 contract (one `files` part; it followed ADR 0009's two parts
+        when the batch row below was taken), and prints total wall clock,
+        per-label time, when the first and last lines arrived, the spread
+        between them, the counts by status and error code, and since v1.4.0
+        `total_ms`, `tesseract_reads` and `ocr_passes` per row. `--filed`
+        sends the filed applications alone. This is the mode that produced the
+        batch rows. It needs `samples/generate_samples.py` to have run, which
+        writes the images, the paired COLA documents and the filed set.
 - [x] **NFR-1 end to end through the load balancer.** Measured 2026-08-28,
       build `sha-f66a4e2`. One label, the synthetic 1200x1600 fixture rotated
       90 degrees, submitted with a Public COLA Registry printout attached:
@@ -859,6 +863,62 @@ This section is the record of the runs; the README is the summary of them.
       set from, and the one that would justify moving it, is the first, and it
       is the measurement OQ-32 still asks the author for. The floor stays at
       12.0.
+
+- [x] **The batch path on filed applications alone** (v1.4.0,
+      [ADR 0020](adr/0020-batch-items-are-derived.md)). **Measured 2026-09-02
+      on a session container**, not production hardware, against a local
+      uvicorn with `TTB_BATCH_WORKERS=1` as the task definition sets it, so
+      that rows run one at a time as they do on the deployed task. The
+      fixtures are `samples/applications/filed/*.pdf`, the synthetic Registry
+      printout with the rendered label affixed, copied under fresh stems for
+      the larger batches; no image was sent, so every row's label side is the
+      artwork inside its application. One warm-up batch of one was run first
+      and discarded.
+
+      | Batch | Wall clock | Per label | First line | `tesseract_reads` per row | `ocr_passes` per row | row `total_ms`, median |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | 1 filed application | 1.32 s | 1.32 s | 1.31 s | 2 | 1 | 1310 |
+      | 5 filed applications | 5.95 s | 1.19 s | 1.25 s | 2 (max 4) | 1 | 1238 |
+      | 20 filed applications | 24.64 s | 1.23 s | 1.33 s | 2 (max 4) | 1 | 1244 |
+
+      Every row returned `ok` with `label_source` `application_artwork`. One
+      OCR pass per row: the artwork is read once to fill the application values
+      and that read is the label side (ADR 0017); the two `tesseract_reads` are
+      the orientation detection and the read, and the rows at 4 are the ones
+      where the 180-degree check ran. The per-label cost is the single-label
+      document path's, about 1.2 s on this container, and it does not rise
+      with the batch: a batch is the check, many times, in one worker.
+
+      **The capacity limiter holds.** During the 20-row batch `GET /api/health`
+      was polled every 250 ms from a second thread: 98 probes, median 2 ms,
+      maximum 4 ms, none over one second. The stream is a synchronous
+      generator Starlette iterates in a worker thread and each row runs in the
+      pool, so the event loop is never inside a Tesseract call;
+      `backend/tests/test_event_loop.py` asserts the same ordering with a
+      stubbed row.
+
+      **Classify on arrival, for a twenty-file drop**, one `POST /api/classify`
+      per file with two in flight, which is what the batch tab does:
+
+      | Twenty files | Wall clock | Per call, median |
+      | --- | --- | --- |
+      | filed PDFs | 0.46 s | 45 ms |
+      | label PNGs | 22.96 s | 2 300 ms |
+
+      For applications it is the cheap text-layer read the single-label tab
+      learned to make in v1.2.0 (ADR 0017): the PDF header decides the side
+      and the artwork is not read, so twenty chips settle in under half a
+      second. **For images it is not cheap, and this is said here rather than
+      designed around.** An image has no text layer; deciding whether it is a
+      form or a label is an OCR pass, the same pass the check makes, and the
+      two are in different requests so the check reads the image again. A drop
+      of twenty label photographs therefore takes about 23 seconds to settle
+      its chips on a one-worker task and about 25 seconds more to check, and
+      the chips arrive two at a time while the agent waits. The check is
+      available from the first file, so nothing blocks on the chips; what the
+      agent sees is "Reading..." beside each image for longer than they would
+      like. The follow-up, and why it is not done here, is
+      [OQ-37](OPEN_QUESTIONS.md#oq-37).
 
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)

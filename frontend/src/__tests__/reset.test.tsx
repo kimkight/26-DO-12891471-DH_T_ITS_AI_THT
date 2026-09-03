@@ -249,11 +249,13 @@ describe('the batch view holds state, so it gets one too', () => {
     expect(screen.queryByRole('button', { name: BATCH_RESET })).not.toBeInTheDocument()
   })
 
-  it('clears both pickers and returns the check to its disabled state', async () => {
+  it('clears the queue and returns the check to its disabled state', async () => {
     const user = userEvent.setup()
     render(<BatchTab />)
-    await user.upload(screen.getByLabelText('Label images'), image('0001.png'))
-    await user.upload(screen.getByLabelText('COLA documents'), pdf('0001.pdf'))
+    await user.upload(screen.getByLabelText('Files for these labels'), [
+      image('0001.png'),
+      pdf('0001.pdf'),
+    ])
 
     await user.click(screen.getByRole('button', { name: BATCH_RESET }))
 
@@ -262,14 +264,14 @@ describe('the batch view holds state, so it gets one too', () => {
     expect(screen.getByRole('button', { name: /Check .*labels/ })).toBeDisabled()
   })
 
-  it('moves focus to the first picker and announces the clearing', async () => {
+  it('moves focus to the picker and announces the clearing', async () => {
     const user = userEvent.setup()
     render(<BatchTab />)
-    await user.upload(screen.getByLabelText('Label images'), image('0001.png'))
+    await user.upload(screen.getByLabelText('Files for these labels'), image('0001.png'))
 
     await user.click(screen.getByRole('button', { name: BATCH_RESET }))
 
-    await waitFor(() => expect(screen.getByLabelText('Label images')).toHaveFocus())
+    await waitFor(() => expect(screen.getByLabelText('Files for these labels')).toHaveFocus())
     // The progress region by name: the pairing region is now always mounted
     // and labelled too (finding 7, 4.1.3), so "the first status region" is no
     // longer the one that speaks here.

@@ -1,44 +1,64 @@
-"""Batch verification: pairing by filename stem, a bounded worker pool, an NDJSON stream.
+"""Batch verification: one file part, rows grouped by stem, each row the single-label check.
 
 Governing requirements: FR-8 (many labels in one submission, per-label results,
 the count limit refused before anything is processed, every result naming its
-label, and pairing failures reported per row), FR-9 (one unreadable image, or
-one unreadable document, is that row's error rather than the batch's), FR-11
-(the application side of every row is read off the applicant's own COLA
-document), NFR-2 (the batch does not fail as a whole and its progress is
-observable), NFR-6 (nothing is persisted and no field value reaches the logs),
-NFR-7 (the file count is checked before processing).
+label, one bad file never failing the batch), FR-9 (a per-row error names the
+problem and reports no match), FR-11 (the application side of a row is read off
+its own COLA document), FR-12 (one upload, sorted by the tool), NFR-2 (the batch
+does not fail as a whole and its progress is observable), NFR-6 (nothing is
+persisted and no field value reaches the logs), NFR-7 (the count is checked
+before processing).
 Decision references: [ADR 0006](../../docs/adr/0006-batch-execution-model.md)
-for the stream, [ADR 0009](../../docs/adr/0009-batch-cola-documents.md) for what
-a batch is made of, [ADR 0008](../../docs/adr/0008-cola-form-as-application-input.md)
-for how one document is read.
+for the stream, [ADR 0020](../../docs/adr/0020-batch-items-are-derived.md) for
+what a row is, which supersedes the pairing contract of
+[ADR 0009](../../docs/adr/0009-batch-cola-documents.md).
 
-**A batch is label images plus COLA documents, paired by filename stem.**
-``0001-stones-throw.png`` pairs with ``0001-stones-throw.pdf``: the stem is the
-filename with its final extension removed, compared without regard to case. Each
-document is read by the FR-11 parser, and what it says is the application side
-for that label. There is no CSV. A-14, which invented one, is superseded by
-ADR 0009: no source ever stated that format, and what an importer actually files
-with TTB is, per application, a COLA form plus label images.
+**A batch is a pile of files, and a row is every file that shares a stem.**
+The stem is the filename with its final extension removed, compared without
+regard to case, exactly as ADR 0009 defined it: ``0001-stones-throw.pdf`` and
+``0001-stones-throw.png`` land in one row. What changed in v1.4.0 is what the
+stem is for. It used to be a precondition: an image with no document of the
+same name was an error, a document with no image was an error, and a batch
+with no images at all was refused before it started. Now it is a convenience.
+Each row is classified from its files (ADR 0011) and handed to the same check
+the single-label tab runs (``app.check``), so:
+
+- a filed application that carries its own label artwork is a complete row on
+  its own, checked against that artwork (ADR 0010);
+- a photograph with no application is a valid row too, checked for what a
+  label must carry, with the comparison rows saying there is nothing to
+  compare against yet;
+- an application and an image that share a stem are the ordinary pair, and
+  since the sides are decided by classification rather than by extension, a
+  scan of the form and a photograph of the label pair correctly whichever
+  extension each has;
+- a file that cannot be classified, or cannot be read, is a visible row with
+  a plain error, never an absence.
+
+**The total is known before any file is read**, which is what NFR-2's progress
+display depends on. Grouping is on names alone, so the first line of the
+stream can say "1 of 300" before the first OCR pass has started. The cost of
+that is one rule the agent still has to know: two label images that share a
+stem are one row, and a row holds one image on this path (ADR 0009's one
+photograph per label, unchanged), so they are reported as ambiguous rather
+than checked. Name the files apart, or check that label on the single-label
+tab, which takes several photographs of one label.
 
 **Why a stream rather than a response body.** ADR 0006 rules out an
 asynchronous job model because D-9 forbids the persistence one needs, and rules
 out a single buffered response because 300 labels at about 5 seconds each is
 about 25 minutes in one request, which exceeds every idle timeout between the
 browser and the application and produces exactly the frozen page NFR-2 forbids.
-What is left is one request whose body arrives in pieces. The response stream is
-the only copy of the results; there is no job store, and nothing outlives the
-request: the parts the multipart parser spooled and the temporary file the OCR
-engine reads each image through are gone when it returns (NFR-6, and
-docs/06_SECURITY_AND_COMPLIANCE.md section 3.2 for where the bytes are while it
-runs).
+What is left is one request whose body arrives in pieces. The response stream
+is the only copy of the results; there is no job store, and nothing outlives
+the request: the parts the multipart parser spooled and the temporary file the
+OCR engine reads each image through are gone when it returns (NFR-6, and
+docs/06_SECURITY_AND_COMPLIANCE.md section 3.2 for where the bytes are while
+it runs).
 
 **What is deliberately not here.** No retry, no partial resubmission, and no
 resume. A dropped connection loses the batch, which ADR 0006 records as the
-direct cost of having no job store. One photograph per label, too: ADR 0007's
-several photographs of one label stay on the single-label path, because a stem
-that paired several images to one document would need a rule for a group only
-partly readable, and no source asks for one (ADR 0009).
+direct cost of having no job store.
 """
 
 from __future__ import annotations
@@ -46,42 +66,35 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from app import timing
-from app.application_form import UnreadableDocumentError, parse_application_document
+from app.check import check_sorted
+from app.classify import SubmittedFile, classify
 from app.config import settings
 from app.schemas import BatchLine, ErrorDetail, VerificationResult
-from app.verify import (
-    VerificationError,
-    check_document_media_type,
-    check_media_type,
-    check_size,
-    document_result,
-    resolve_application,
-    verify_image,
-)
+from app.verify import VerificationError, check_document_media_type, check_size
 
 logger = logging.getLogger(__name__)
 
 
 def pairing_stem(filename: str) -> str:
-    """The key both sides of a pair are matched on (ADR 0009).
+    """The key the files of one row share (ADR 0009, kept by ADR 0020).
 
     The filename with its final extension removed, folded to lower case. Case is
     folded because an agent's file manager and an agent's scanner disagree about
-    it routinely and a pairing that failed on `.PDF` against `.pdf` would be a
+    it routinely and a grouping that failed on `.PDF` against `.pdf` would be a
     puzzle rather than an error. Only the final extension is removed, so
     ``0001-stones-throw.front.png`` has the stem ``0001-stones-throw.front`` and
-    pairs with ``0001-stones-throw.front.pdf`` rather than with
+    groups with ``0001-stones-throw.front.pdf`` rather than with
     ``0001-stones-throw.pdf``.
 
     Any directory part a browser sends with a `webkitdirectory` selection is
-    dropped, because the pairing is on names rather than on paths.
+    dropped, because the grouping is on names rather than on paths.
     """
     name = filename.strip().rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     base, separator, _ = name.rpartition(".")
-    # `lower`, not `casefold`, since v1.3.0: the page previews the pairing with
+    # `lower`, not `casefold`, since v1.3.0: the page previews the grouping with
     # JavaScript's `toLowerCase`, and `casefold` also rewrites `ß` to `ss`, so
     # `Straße.png` paired with `STRASSE.pdf` here and not there (code review
     # finding 21). The two plain lower-case mappings agree, and the same vectors
@@ -90,67 +103,42 @@ def pairing_stem(filename: str) -> str:
 
 
 @dataclass(frozen=True)
-class SubmittedImage:
-    """One label image part, already read into memory.
+class BatchItem:
+    """One row of the batch: every submitted file that shares a stem.
 
-    ``content_type`` is kept alongside the bytes because the media type check
-    has to happen before anything is decoded (NFR-7), and by this point the
-    ``UploadFile`` it came from may already be closed.
+    ``position`` is the row's place in submission order, counted from 1 by the
+    first file of the row to arrive. Rows finish out of order, so it is what a
+    client uses to show them in the order the agent submitted them.
     """
 
-    filename: str
-    content_type: str | None
-    content: bytes
+    position: int
+    stem: str
+    files: tuple[SubmittedFile, ...]
+
+    @property
+    def filenames(self) -> list[str]:
+        return [file.filename for file in self.files]
 
 
-@dataclass(frozen=True)
-class SubmittedDocument:
-    """One COLA document part, already read into memory (FR-11, ADR 0009)."""
+def group(files: list[SubmittedFile]) -> list[BatchItem]:
+    """Group the submitted files into rows by stem, in order of first appearance.
 
-    filename: str
-    content_type: str | None
-    content: bytes
-
-
-@dataclass
-class DocumentTable:
-    """The submitted COLA documents, keyed by pairing stem, plus what was wrong.
-
-    ``duplicates`` is a set rather than a count because two documents on one
-    stem make that one pair ambiguous and leave every other pair usable. FR-8
-    asks for "a per-row or batch-level error that names the problem", and per
-    row is the more useful of the two here: one repeated stem should not cost an
-    agent the other 299 results.
+    Names only: nothing is read, decoded or classified here, which is what
+    lets the total be known before any work starts (NFR-2). The same grouping
+    is done on the page before the batch is sent, in
+    ``frontend/src/lib/pairing.ts``, so the page can lay out one pending row
+    per item and fill each in by ``position`` as its line arrives.
     """
-
-    documents: dict[str, SubmittedDocument] = field(default_factory=dict)
-    duplicates: set[str] = field(default_factory=set)
-
-
-def collect_documents(documents: list[SubmittedDocument]) -> DocumentTable:
-    """Key the submitted documents by pairing stem (ADR 0009).
-
-    Nothing is parsed here. Reading a document costs about what reading a label
-    photograph costs when it falls back to OCR, so it is done inside the worker
-    pool, per row, where it is both parallelized and attributable to the row it
-    belongs to.
-    """
-    table = DocumentTable()
-    for document in documents:
-        stem = pairing_stem(document.filename)
-        if not stem:
-            # A part with no usable name cannot be paired with anything and
-            # cannot be reported against a label either. It is counted in the
-            # completion log and otherwise ignored.
-            continue
-        if stem in table.documents:
-            table.duplicates.add(stem)
-            continue
-        table.documents[stem] = document
-    return table
+    rows: dict[str, list[SubmittedFile]] = {}
+    for file in files:
+        rows.setdefault(pairing_stem(file.filename), []).append(file)
+    return [
+        BatchItem(position=position, stem=stem, files=tuple(members))
+        for position, (stem, members) in enumerate(rows.items(), start=1)
+    ]
 
 
-def over_count_error(count: int, *, part: str = "images") -> ErrorDetail:
+def over_count_error(count: int, *, part: str = "labels") -> ErrorDetail:
     """The FR-8 refusal, which names the limit and happens before processing."""
     return ErrorDetail(
         code="batch_too_large",
@@ -163,137 +151,115 @@ def over_count_error(count: int, *, part: str = "images") -> ErrorDetail:
     )
 
 
-def plan(images: list[SubmittedImage], table: DocumentTable) -> tuple[list[str], int]:
-    """Reconcile the two sides and say how many lines will be emitted.
+@dataclass(frozen=True)
+class RowOutcome:
+    """What one row came back with: a result or an error, and the name to show."""
 
-    Returns the filenames of the documents that paired with no image, and the
-    total line count. The total is known before any OCR runs, which is what lets
-    the first line of the stream carry it and a client render "1 of 300"
-    immediately (NFR-2).
-
-    Every submitted image produces exactly one line, whether it verifies or
-    errors, and every unpaired document produces one more.
-    """
-    stems = {pairing_stem(image.filename) for image in images}
-    unpaired = [
-        document.filename for stem, document in table.documents.items() if stem not in stems
-    ]
-    return unpaired, len(images) + len(unpaired)
+    item: BatchItem
+    name: str
+    error: ErrorDetail | None = None
+    result: VerificationResult | None = None
 
 
-def _row_error(
-    image: SubmittedImage, table: DocumentTable, image_stems: dict[str, int]
-) -> ErrorDetail | None:
-    """The pairing failures that stop one image being verified (FR-8, ADR 0009)."""
-    stem = pairing_stem(image.filename)
-    if image_stems.get(stem, 0) > 1:
-        return ErrorDetail(
-            code="duplicate_label_stem",
-            message=(
-                f"More than one image in this batch is named {stem} before its "
-                "file extension, so which label the matching application "
-                "document belongs to is ambiguous. Nothing was compared for this "
-                "label. Give each label a name of its own."
-            ),
-        )
-    if stem in table.duplicates:
-        return ErrorDetail(
-            code="duplicate_application_document",
-            message=(
-                f"More than one application document in this batch is named "
-                f"{stem} before its file extension. Nothing was compared for "
-                "this label, because which document applies is ambiguous. Remove "
-                "the repeated document."
-            ),
-        )
-    if stem not in table.documents:
-        return ErrorDetail(
-            code="missing_application_document",
-            message=(
-                f"No application document in this batch is named {stem} before "
-                f"its file extension, so there is nothing to compare "
-                f"{image.filename} against. Attach a COLA document with that "
-                "name, or remove the image from the batch."
-            ),
-        )
-    return None
-
-
-def _verify_one(
-    image: SubmittedImage, table: DocumentTable, image_stems: dict[str, int]
-) -> tuple[str, ErrorDetail | None, VerificationResult | None]:
-    """Verify one label against its document, returning a result or an error, never raising.
+def check_item(item: BatchItem) -> RowOutcome:
+    """Run one row through the single-label check, returning a result or an error, never raising.
 
     A raised exception here would kill the stream and take the completed results
     with it, which is the failure NFR-2 names. Every failure becomes this row's
     error instead, which is FR-8's second criterion and FR-9 applied per row.
 
-    The document is read here rather than up front for two reasons. It is where
-    the cost is parallelized, and it is where a document that cannot be read
-    becomes one row's error rather than the batch's.
+    **One recording per row, not one per batch** (NFR-1). A batch line's
+    `elapsed_ms` is the time that row took; a share of the batch's wall clock
+    would be a different number that happened to have the same units. This is
+    also why the context variable in app/timing.py is deliberately not
+    propagated into worker threads: each worker opens its own here.
     """
-    reconciliation = _row_error(image, table, image_stems)
-    if reconciliation is not None:
-        return image.filename, reconciliation, None
-
-    document = table.documents[pairing_stem(image.filename)]
-    # **One recording per row, not one per batch** (NFR-1). A batch line's
-    # `elapsed_ms` is the time that row took; a share of the batch's wall clock
-    # would be a different number that happened to have the same units. This is
-    # also why the context variable in app/timing.py is deliberately not
-    # propagated into worker threads: each worker opens its own here.
     with timing.recording():
-        return _verify_one_row(image, document)
+        return _check_item(item)
 
 
-def _verify_one_row(
-    image: SubmittedImage, document: SubmittedDocument
-) -> tuple[str, ErrorDetail | None, VerificationResult | None]:
-    """One row's work, inside the recording opened above.
-
-    Split out so that the recording is a `with` block around the whole of it
-    rather than a try/finally around several return paths.
-    """
+def _check_item(item: BatchItem) -> RowOutcome:
+    """One row's work, inside the recording opened above."""
+    # The row is named after its first file until the sorting says which file
+    # is the label image; an agent finds a row by the name they gave it.
+    name = item.files[0].filename
     try:
-        # Both guards run before anything is decoded or parsed (NFR-7).
-        check_media_type(image.content_type)
-        check_size(image.content)
-        check_document_media_type(document.content_type)
-        check_size(document.content)
-        try:
-            parsed = parse_application_document(document.content, document.content_type)
-        except UnreadableDocumentError as exc:
-            # FR-9 applied to the document half of the pair. The message names
-            # the document rather than the label, because that is the file the
-            # agent has to do something about, and this row reports no field
-            # outcomes at all.
+        # Both guards run before anything is decoded (NFR-7), per file, with
+        # the list the single-label route uses: PDF plus the image types,
+        # because one part now takes both.
+        for file in item.files:
+            check_document_media_type(file.content_type)
+            check_size(file.content)
+
+        # Classification first (ADR 0011, ADR 0020). Which file is the
+        # application and which is the label is the file's own evidence, not
+        # its extension; each image is read exactly once and the read is handed
+        # on to the check.
+        sorted_files = classify(list(item.files))
+        documents = [entry for entry in sorted_files if entry.side == "application_document"]
+        labels = [entry for entry in sorted_files if entry.side == "label_image"]
+        if labels:
+            name = labels[0].filename
+
+        if len(documents) > 1:
             raise VerificationError(
-                code="unreadable_application_document",
-                message=f"{document.filename}: {exc}",
-                status_code=422,
-            ) from exc
+                code="duplicate_application_document",
+                message=(
+                    f"More than one file named {item.stem} before its file "
+                    "extension reads as a label application ("
+                    f"{', '.join(entry.filename for entry in documents)}), so "
+                    "which one applies to this label is ambiguous. Nothing was "
+                    "compared for it. Keep one application for each label."
+                ),
+            )
+        if len(labels) > 1:
+            # ADR 0009's one photograph per label, unchanged by ADR 0020. The
+            # single-label tab reads several photographs of one label and
+            # merges them; this path enumerates rows from names before it has
+            # read anything, and a row with several pictures in it would need
+            # a rule for a group only partly readable that no source asks for.
+            raise VerificationError(
+                code="duplicate_label_stem",
+                message=(
+                    f"More than one file named {item.stem} before its file "
+                    "extension reads as a label image ("
+                    f"{', '.join(entry.filename for entry in labels)}). This "
+                    "page checks one image for each label, so nothing was "
+                    "compared for it. Give each label a name of its own, or "
+                    "check a label with several photographs on the "
+                    "single-label tab."
+                ),
+            )
 
         # Nothing is typed on the batch path, so every value is either read off
-        # the document or absent, and the result says which per field (FR-11).
-        application, sources = resolve_application({}, parsed)
-        result = verify_image(
-            image.content,
-            application,
-            application_sources=sources,
-            application_document=document_result(parsed),
-        )
+        # the row's document or absent, and the result says which per field
+        # (FR-11). Everything from here is the single-label check, unchanged.
+        try:
+            checked = check_sorted(sorted_files, {})
+        except VerificationError as exc:
+            if exc.code == "unreadable_application_document" and documents:
+                # FR-8: the row names the document, because that is the file
+                # the agent has to do something about.
+                raise VerificationError(
+                    code=exc.code,
+                    message=f"{documents[0].filename}: {exc.message}",
+                    status_code=exc.status_code,
+                    limit=exc.limit,
+                ) from exc
+            raise
     except VerificationError as exc:
         detail = ErrorDetail(code=exc.code, message=exc.message, limit=exc.limit)
-        return image.filename, detail, None
+        return RowOutcome(item=item, name=name, error=detail)
     except Exception:  # noqa: BLE001
-        # Deliberately broad. An unforeseen failure in one image is still one
+        # Deliberately broad. An unforeseen failure in one row is still one
         # row's error, not the batch's, and the alternative is a truncated
         # stream with no explanation in it. The traceback goes to the log
         # without the filename or any field value (NFR-6).
         logger.exception("batch item failed unexpectedly")
-        return (
-            image.filename,
-            ErrorDetail(
+        return RowOutcome(
+            item=item,
+            name=name,
+            error=ErrorDetail(
                 code="verification_failed",
                 message=(
                     "This label could not be checked because of an unexpected "
@@ -301,69 +267,49 @@ def _verify_one_row(
                     "this label on its own."
                 ),
             ),
-            None,
         )
-    return image.filename, None, result
+    return RowOutcome(item=item, name=name, result=checked.result)
 
 
-def stream(images: list[SubmittedImage], table: DocumentTable) -> Iterator[str]:
-    """Yield one NDJSON line per item, as each finishes (ADR 0006).
+def stream(items: list[BatchItem]) -> Iterator[str]:
+    """Yield one NDJSON line per row, as each finishes (ADR 0006).
 
     Concurrency is bounded by ``settings.effective_batch_workers`` so that a
     300-file batch does not start 300 Tesseract processes at once. The bound is
-    the pool's, not the caller's: every image is submitted immediately and the
+    the pool's, not the caller's: every row is submitted immediately and the
     pool decides how many run.
 
     This is a synchronous generator on purpose. Starlette iterates one in a
     worker thread, so the pool's threads and the event loop stay separate, and
     OCR being CPU bound and in-process (ADR 0003) means there is nothing for an
-    async version to await.
+    async version to await. `GET /api/health` keeps answering while a batch
+    runs, which `tests/test_event_loop.py` asserts.
     """
-    unpaired, total = plan(images, table)
-    image_stems: dict[str, int] = {}
-    for image in images:
-        stem = pairing_stem(image.filename)
-        image_stems[stem] = image_stems.get(stem, 0) + 1
+    total = len(items)
     emitted = 0
-
-    # Unpaired documents need no work, so they go out first and the stream
-    # starts immediately rather than after the first image finishes.
-    for name in unpaired:
-        emitted += 1
-        yield _line(
-            BatchLine(
-                filename=name,
-                index=emitted,
-                total=total,
-                status="error",
-                error=ErrorDetail(
-                    code="unmatched_application_document",
-                    message=(
-                        f"{name} is an application document with no label image "
-                        "of the same name in this batch. Nothing was checked for "
-                        "it."
-                    ),
-                ),
-            )
-        )
-
     failures = 0
+    artwork_sided = 0
+
     with ThreadPoolExecutor(max_workers=settings.effective_batch_workers) as pool:
-        futures = [pool.submit(_verify_one, image, table, image_stems) for image in images]
+        futures = [pool.submit(check_item, item) for item in items]
         try:
             for future in as_completed(futures):
-                filename, error, result = future.result()
+                row = future.result()
                 emitted += 1
-                if error is not None:
+                if row.error is not None:
                     failures += 1
+                elif row.result is not None and row.result.label_source == "application_artwork":
+                    artwork_sided += 1
                 yield _line(
                     BatchLine(
-                        filename=filename,
+                        filename=row.name,
+                        filenames=row.item.filenames,
+                        position=row.item.position,
                         index=emitted,
                         total=total,
-                        status="error" if error is not None else "ok",
-                        result=result,
-                        error=error,
+                        status="error" if row.error is not None else "ok",
+                        result=row.result,
+                        error=row.error,
                     )
                 )
         finally:
@@ -378,11 +324,10 @@ def stream(images: list[SubmittedImage], table: DocumentTable) -> Iterator[str]:
     logger.info(
         "batch completed",
         extra={
-            "images": len(images),
-            "documents": len(table.documents),
-            "unpaired_documents": len(unpaired),
-            "duplicate_documents": len(table.duplicates),
-            "failures": failures + len(unpaired),
+            "rows": total,
+            "files": sum(len(item.files) for item in items),
+            "failures": failures,
+            "artwork_sided": artwork_sided,
             "workers": settings.effective_batch_workers,
         },
     )

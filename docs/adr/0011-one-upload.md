@@ -93,6 +93,14 @@ classifying 600 files before the stream could report a total, and NFR-2's
 progress display depends on that total being known first. It is recorded here so
 that the next person changing either one knows the other exists.
 
+> **Superseded on this point by [ADR 0020](0020-batch-items-are-derived.md),
+> 2026-09-02.** The batch path takes the same one `files` part. The total is
+> still known first, because rows are grouped by name before anything is read
+> and classified inside the pool, per row; the assumption above, that the
+> total could only be known by knowing which files were images, was the thing
+> that kept the two paths apart, and it was wrong. The two older part names
+> still work, exactly as `image` and `application_document` do here.
+
 ### What is refused, and how
 
 | Case | Response |

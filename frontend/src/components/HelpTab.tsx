@@ -75,16 +75,44 @@ export function HelpTab() {
         </Entry>
 
         <Entry question="What if I only have the application, or only a photo?">
-          <p>Either one on its own is a valid submission, and both work differently.</p>
+          <p>
+            Either one on its own is a valid submission, on both tabs, and the two work differently.
+          </p>
           <p>
             An application usually carries its own label artwork, affixed by the applicant. When it
-            does, that artwork is the label we check, and you do not have to add an image.
+            does, that artwork is the label we check, and you do not have to add an image. Twelve
+            filed applications dropped on the Check many labels tab are twelve checked labels.
           </p>
           <p>
             A photo on its own gives us the label and nothing to compare it against, so we check
             what the label carries on its own: the government warning, and whether the alcohol
-            content and net contents are printed on it. Type the application values in if you have
-            them and you get the full comparison.
+            content and net contents are printed on it. On the Check one label tab, type the
+            application values in if you have them and you get the full comparison; on the batch
+            tab, add the application under the same name.
+          </p>
+        </Entry>
+
+        <Entry question="How do I check many labels at once?">
+          <p>
+            The Check many labels tab takes one pile of files: applications, label images, or both,
+            as PDFs or images, chosen together. We work out what each one is, the same way we do for
+            one label, and show it beside the file.
+          </p>
+          <p>
+            Files that share a name before the file extension are one label. So{' '}
+            <code>0001-stones-throw.pdf</code> and <code>0001-stones-throw.png</code> are checked
+            together as one label; upper and lower case do not matter, and only the last extension
+            is ignored. A file with no partner is a label on its own, checked for what it can be
+            checked for. You do not have to name files to match; it is there for when you want an
+            image checked against a particular application.
+          </p>
+          <p>
+            One image for each label on this tab. If you have several photos of one bottle, check
+            that label on the Check one label tab, which reads up to three and merges them.
+          </p>
+          <p>
+            Results arrive one row per label, in the order you chose the files. Select a row to see
+            the same field-by-field detail the single-label tab shows.
           </p>
         </Entry>
 
