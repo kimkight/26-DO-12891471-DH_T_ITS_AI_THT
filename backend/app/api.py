@@ -21,8 +21,11 @@ is in ``app.verify``; the batch reconciliation, worker pool and stream are in
 ``app.batch``; the document parser is in ``app.application_form``. US-2 and
 FR-10 are presentation requirements and are not part of this module.
 
-The batch route takes label images and COLA documents, paired by filename stem
-(FR-8, [ADR 0009](../../docs/adr/0009-batch-cola-documents.md)). It took a CSV
+The batch route takes one pile of files, grouped into rows by filename stem
+and each row run through the same check the single-label route runs (FR-8,
+[ADR 0020](../../docs/adr/0020-batch-items-are-derived.md)); until v1.4.0 it
+took label images and COLA documents as two parts and required both
+([ADR 0009](../../docs/adr/0009-batch-cola-documents.md)), and before that a CSV
 of application data until ADR 0009 superseded assumption A-14; the parser the
 documents go through is the FR-11 one the single-label route uses.
 """
@@ -31,7 +34,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from typing import Annotated, TypeVar
 
 import anyio
@@ -44,28 +46,25 @@ from starlette.responses import Response
 
 from app import batch, timing
 from app.application_form import UnreadableDocumentError, parse_application_document
-from app.classify import ClassifiedFile, SubmittedFile, classify, describe
+from app.check import Checked as _Checked
+from app.check import check_one_label as _check_one_label
+from app.check import classification as _classification
+from app.classify import SubmittedFile, classify
 from app.config import settings
-from app.ocr import OcrResult
 from app.schemas import (
     ApplicationDocumentResult,
     ClassificationResult,
     ErrorDetail,
     ErrorResponse,
-    FileClassification,
     VerificationResult,
 )
 from app.verify import (
     NO_FILES_MESSAGE,
-    NO_LABEL_MESSAGE,
-    LabelSource,
     VerificationError,
     build_result,
     check_document_media_type,
     check_size,
     document_result,
-    resolve_application,
-    verify_photos,
 )
 
 __all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
@@ -428,122 +427,11 @@ async def _verify(
     return JSONResponse(status_code=200, content=result.model_dump())
 
 
-@dataclass(frozen=True)
-class _Checked:
-    """What `_check_one_label` hands back to the route, for the response and the log."""
-
-    result: VerificationResult
-    sorted_files: list[ClassifiedFile]
-    documents_classified: int
-    photos_read: int
-    document_bytes: int
-
-
-def _check_one_label(
-    submitted: list[SubmittedFile],
-    application_values: dict[str, str],
-    cleared_fields: frozenset[str] = frozenset(),
-) -> _Checked:
-    """Sort, read and compare, in a worker thread. Raises `VerificationError`.
-
-    This is the body of `POST /api/verify` from the moment the parts are in
-    memory. It is synchronous on purpose: everything in it is Tesseract and
-    PDFium work, and `_off_the_loop` is what keeps it off the event loop.
-    """
-    # Classification happens before anything is compared, and reads each image
-    # exactly once; the read is handed on to whichever side the file lands on
-    # (ADR 0011).
-    sorted_files = classify(submitted)
-    documents = [entry for entry in sorted_files if entry.side == "application_document"]
-    labels = [entry for entry in sorted_files if entry.side == "label_image"]
-
-    # Counted after sorting and before anything is compared, and named in the
-    # message (FR-9, NFR-7). The bodies are in memory by now because FastAPI
-    # parses the multipart form while resolving these parameters; the guarantee
-    # kept here is that no photograph is verified.
-    if len(labels) > settings.max_label_photos:
-        raise VerificationError(
-            code="too_many_photos",
-            message=(
-                f"{len(labels)} pictures of the label were submitted. Send at "
-                f"most {settings.max_label_photos} pictures of the same label, "
-                "or use the batch tab for many different labels."
-            ),
-            status_code=413,
-            limit=f"maximum photographs of one label: {settings.max_label_photos}",
-        )
-    if len(documents) > 1:
-        raise VerificationError(
-            code="too_many_application_documents",
-            message=(
-                f"{len(documents)} of the files you sent read as label "
-                "applications. Send one application for one label, plus any "
-                "photos of that label."
-            ),
-            status_code=413,
-            limit="maximum application documents for one label: 1",
-        )
-
-    document_bytes = 0
-    parsed_application = None
-    if documents:
-        document = documents[0]
-        document_bytes = len(document.file.content)
-        try:
-            parsed_application = parse_application_document(
-                document.file.content,
-                document.file.content_type,
-                pre_read=document.read,
-            )
-        except UnreadableDocumentError as exc:
-            # FR-9 applied to the application side: the message names the
-            # problem and the response carries no field outcomes at all. The
-            # typed path is still open, and the message says so.
-            raise VerificationError(
-                code="unreadable_application_document", message=str(exc)
-            ) from exc
-
-    contents = [entry.file.content for entry in labels]
-    pre_read: list[OcrResult | None] = [entry.read for entry in labels]
-
-    # The label side, decided before anything is compared. Pictures the
-    # agent supplied always win: a picture of the bottle in front of them is
-    # evidence about that bottle, and the artwork on file is not.
-    label_source: LabelSource = "uploaded_photographs"
-    if not contents:
-        artwork = parsed_application.label_artwork if parsed_application else None
-        if artwork is None:
-            raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
-        contents = [artwork.content]
-        # **The read comes with it, so this picture is read once** (NFR-1).
-        # `parse_application_document` has just put these exact bytes through
-        # this exact pipeline to fill the application values; running them
-        # through it again produced an identical result for a second full
-        # Tesseract pass, which measurement on 2026-08-30 showed was about
-        # half of this path's total time. This is the same reuse ADR 0011
-        # already does with the classifier's read.
-        pre_read = [parsed_application.label_artwork_read if parsed_application else None]
-        label_source = "application_artwork"
-
-    application, sources = resolve_application(
-        application_values, parsed_application, cleared_fields
-    )
-    result = verify_photos(
-        contents,
-        application,
-        application_sources=sources,
-        application_document=(document_result(parsed_application) if parsed_application else None),
-        label_source=label_source,
-        pre_read=pre_read,
-    )
-    result.files = [_classification(entry) for entry in sorted_files]
-    return _Checked(
-        result=result,
-        sorted_files=sorted_files,
-        documents_classified=len(documents),
-        photos_read=len(contents),
-        document_bytes=document_bytes,
-    )
+# `_Checked`, `_check_one_label` and `_classification` live in `app.check` since
+# v1.4.0, because the batch path runs the same check per row (ADR 0020). They
+# are imported under their old names so that the route body, and the test that
+# stubs the check to prove the event loop stays free, read as they did.
+__all__ = [*__all__, "_Checked"]
 
 
 @router.post(
@@ -631,17 +519,6 @@ async def _read_parts(
             )
         )
     return submitted
-
-
-def _classification(entry: ClassifiedFile, used: bool = True) -> FileClassification:
-    """One sorted file, as the response reports it (FR-12)."""
-    return FileClassification(
-        filename=entry.filename,
-        classified_as=entry.side,
-        basis=entry.basis,
-        reason=describe(entry),
-        used=used,
-    )
 
 
 @router.post(
@@ -774,118 +651,116 @@ def _oversize_response(limit: int | None = None) -> JSONResponse:
         200: {
             "content": {"application/x-ndjson": {}},
             "description": (
-                "One JSON object per line, one line per item, emitted as each "
-                "item finishes. See the BatchLine schema."
+                "One JSON object per line, one line per row, emitted as each "
+                "row finishes. See the BatchLine schema."
             ),
         },
         413: {"model": ErrorResponse},
         422: {"model": ErrorResponse},
     },
-    summary="Verify many labels against their COLA documents, paired by filename",
+    summary="Verify many labels from one pile of files, grouped by filename stem",
 )
 async def verify_batch(
-    images: Annotated[
+    files: Annotated[
         list[UploadFile],
-        # Defaulted rather than required so that a submission with no images at
-        # all reaches the route and gets the message below, which says what to
+        File(
+            description=(
+                "Everything in the batch, in one repeated part: label "
+                "applications as PDFs or images of them, photographs of "
+                "labels, or any mix. Files that share a name before the file "
+                "extension are one row; the server decides what each file is "
+                "from the file itself, and a filed application that carries "
+                "its own label artwork is a complete row on its own "
+                "(FR-12, ADR 0020)."
+            )
+        ),
+        # Defaulted rather than required so that a submission with nothing in
+        # it reaches the route and gets the message below, which says what to
         # do about it, instead of the generic missing-part rejection. The
         # default is never mutated; FastAPI reads it and builds a new list.
-        File(description="Label artwork, one part per image, repeated."),
+    ] = [],  # noqa: B006
+    images: Annotated[
+        list[UploadFile],
+        File(
+            description=(
+                "Label images, under the older name (ADR 0009). Still "
+                "accepted; a file sent here goes through the same classifier "
+                "as one sent in `files`."
+            )
+        ),
     ] = [],  # noqa: B006
     application_documents: Annotated[
         list[UploadFile],
         File(
             description=(
-                "The COLA documents, one part per document, repeated. Each pairs "
-                "with the image of the same name before its file extension "
-                "(ADR 0009)."
+                "COLA documents, under the older name (ADR 0009). Still "
+                "accepted, for the same reason `images` is."
             )
         ),
     ] = [],  # noqa: B006
 ) -> Response:
     """Verify a batch of labels and stream the results (FR-8, NFR-2, ADR 0006).
 
-    **A batch is label images plus COLA documents, paired by filename stem**
-    (ADR 0009). `0001-stones-throw.png` pairs with `0001-stones-throw.pdf`: the
-    stem is the filename with its final extension removed, compared without
-    regard to case. Each document is read by the FR-11 parser and what it says
-    is the application side for that label. There is no CSV: A-14 invented that
-    format and ADR 0009 supersedes it.
+    **One repeated `files` part is the contract** (ADR 0020), the same one
+    `POST /api/verify` takes. Files that share a stem, the filename with its
+    final extension removed compared without regard to case, are one row:
+    `0001-stones-throw.pdf` and `0001-stones-throw.png` are one label. Each row
+    is classified from its files and run through the single-label check, so a
+    filed application that carries its own artwork is checked on its own, a
+    photograph on its own is checked for what a label must carry, and a pair is
+    the ordinary comparison. `images` and `application_documents` are the older
+    names for the same pile and still work; whatever arrives in them goes
+    through the same classifier.
 
     The response is `application/x-ndjson`: one JSON object per line, each
-    naming the image it belongs to, emitted as each label finishes rather than
-    in submission order. Nothing is persisted; the stream is the only copy of
-    the results (D-9, NFR-6).
+    naming the row it belongs to and carrying the row's submission position,
+    emitted as each row finishes rather than in submission order. Nothing is
+    persisted; the stream is the only copy of the results (D-9, NFR-6).
 
-    Four rejections happen before any image is read, and each names what was
+    Three rejections happen before any file is read, and each names what was
     exceeded (FR-9, NFR-7):
 
-    * more images than `TTB_MAX_BATCH_FILES`, which is FR-8's third criterion,
+    * more rows than `TTB_MAX_BATCH_FILES`, which is FR-8's third criterion,
       "the request is rejected with a message naming the limit, before any file
       is processed";
-    * more documents than the same limit, for the same reason;
     * a request body over the batch envelope limit, caught in middleware from
       Content-Length before the body is read at all;
-    * a submission carrying no images, or no documents at all.
+    * a submission carrying no files at all.
 
     Everything else is a per-row error on its own line, which is what keeps one
-    bad image from costing an agent the other 299 results (FR-8, US-10).
+    bad file from costing an agent the other 299 results (FR-8, US-10).
     """
-    # FR-8, third criterion. Counted before anything is read, decoded or
-    # compared. The bodies are in memory by now, because FastAPI parses the
-    # multipart form while resolving these parameters; "before any file is
-    # processed" is the guarantee the requirement states and the one kept here.
-    #
-    # Both sides are counted against the same limit, because the limit is on
-    # labels and a batch carries one document per label (A-1, ADR 0009).
-    for count, part in ((len(images), "images"), (len(application_documents), "documents")):
-        if count > settings.max_batch_files:
-            detail = batch.over_count_error(count, part=part)
-            return _error(413, detail.code, detail.message, limit=detail.limit)
-
-    if not images:
+    parts = [*files, *images, *application_documents]
+    if not parts:
         return _error(
             422,
             "empty_batch",
-            "No images were submitted. Attach the label images and one COLA "
-            "document for each, named to match.",
+            "No files were submitted. Upload the label applications, the label "
+            "images, or both, and run the check again.",
         )
 
-    if not application_documents:
-        # Batch level rather than per row, for the reason the CSV refusal it
-        # replaces was batch level: with no documents at all there is nothing to
-        # compare any label against, and repeating one message 300 times down
-        # the stream would tell an agent nothing the first line did not.
-        return _error(
-            422,
-            "missing_application_documents",
-            "No application documents were submitted. Attach one COLA document "
-            "for each label image, named to match the image before its file "
-            "extension: 0001-stones-throw.png pairs with 0001-stones-throw.pdf.",
-        )
+    # FR-8, third criterion. Counted before anything is read, decoded or
+    # compared, on names alone: a row is every file that shares a stem, so the
+    # limit is on labels rather than on files, and a batch of 300 applications
+    # with their 300 images is 300 rows (A-1). The bodies are in memory by
+    # now, because FastAPI parses the multipart form while resolving these
+    # parameters; "before any file is processed" is the guarantee the
+    # requirement states and the one kept here.
+    names = _name_duplicates(
+        [part.filename or f"file-{position}" for position, part in enumerate(parts, start=1)]
+    )
+    rows = len({batch.pairing_stem(name) for name in names})
+    if rows > settings.max_batch_files:
+        detail = batch.over_count_error(rows)
+        return _error(413, detail.code, detail.message, limit=detail.limit)
 
     submitted = [
-        batch.SubmittedImage(
-            filename=image.filename or f"image-{position + 1}",
-            content_type=image.content_type,
-            content=await image.read(),
-        )
-        for position, image in enumerate(images)
+        SubmittedFile(filename=name, content_type=part.content_type, content=await part.read())
+        for name, part in zip(names, parts, strict=True)
     ]
-    submitted = _name_duplicates(submitted)
-    table = batch.collect_documents(
-        [
-            batch.SubmittedDocument(
-                filename=document.filename or f"document-{position + 1}",
-                content_type=document.content_type,
-                content=await document.read(),
-            )
-            for position, document in enumerate(application_documents)
-        ]
-    )
 
     return StreamingResponse(
-        batch.stream(submitted, table),
+        batch.stream(batch.group(submitted)),
         media_type="application/x-ndjson",
         headers={
             # Without this a proxy may buffer the whole response and hand it
@@ -899,29 +774,23 @@ async def verify_batch(
     )
 
 
-def _name_duplicates(images: list[batch.SubmittedImage]) -> list[batch.SubmittedImage]:
-    """Make every image part identifiable, which FR-8's fourth criterion needs.
+def _name_duplicates(names: list[str]) -> list[str]:
+    """Make every part identifiable, which FR-8's fourth criterion needs.
 
     Two parts submitted under one filename cannot both be reported against that
-    name without the results becoming ambiguous, and a part with no filename at
-    all cannot be reported against anything. Both are renamed to a positional
-    label here, so that every line in the stream identifies exactly one
-    submitted part. Renaming does not change the pairing stem, which is taken
-    before the parenthetical suffix, so two parts under one filename still share
-    a stem and are both reported as `duplicate_label_stem` (ADR 0009). That
-    names the real problem: the agent has to fix the filenames before the batch
-    can be checked.
+    name without the results becoming ambiguous. The second is renamed to a
+    positional label here, so that every line in the stream identifies exactly
+    one submitted part. Renaming does not change the stem, which is taken
+    before the parenthetical suffix, so two parts under one filename still
+    share a row and are reported as ambiguous if both read as the same side
+    (ADR 0020). That names the real problem: the agent has to fix the filenames
+    before the batch can be checked.
     """
     seen: set[str] = set()
-    named: list[batch.SubmittedImage] = []
-    for position, image in enumerate(images):
-        name = image.filename
+    named: list[str] = []
+    for position, name in enumerate(names, start=1):
         if name in seen:
-            name = f"{image.filename} (duplicate, part {position + 1})"
+            name = f"{name} (duplicate, part {position})"
         seen.add(name)
-        named.append(
-            batch.SubmittedImage(
-                filename=name, content_type=image.content_type, content=image.content
-            )
-        )
+        named.append(name)
     return named

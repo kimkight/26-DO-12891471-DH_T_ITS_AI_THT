@@ -152,14 +152,30 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
  * it.
  */
 export function summary(outcomes: Outcome[]): string {
-  const counts = tally(outcomes)
-  const derived = counts.artwork_derived
-  const passed = counts.match + counts.present
-  const checks = outcomes.length - derived
+  const { passed, checks, derived } = checksPassed(outcomes)
   const noun = checks === 1 ? 'check' : 'checks'
   const line = `${passed} of ${checks} ${noun} passed`
   if (derived === 0) return line
   return `${line}; ${derived} read from the artwork only`
+}
+
+/**
+ * The numbers behind the summary line, so the batch table's Checks column
+ * ("5 of 5") and the sentence under a result ("5 of 5 checks passed") are one
+ * count and cannot disagree (ADR 0020).
+ */
+export function checksPassed(outcomes: Outcome[]): {
+  passed: number
+  checks: number
+  derived: number
+} {
+  const counts = tally(outcomes)
+  const derived = counts.artwork_derived
+  return {
+    passed: counts.match + counts.present,
+    checks: outcomes.length - derived,
+    derived,
+  }
 }
 
 /**

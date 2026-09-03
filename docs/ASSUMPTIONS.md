@@ -269,8 +269,11 @@ section 2. Marks OQ-5 as closed by assumption A-13.
 
 ## A-14
 **Status: superseded on 2026-08-28 by
-[ADR 0009](adr/0009-batch-cola-documents.md).** A batch submission is label
-images plus COLA documents paired by filename stem. There is no CSV. The
+[ADR 0009](adr/0009-batch-cola-documents.md), and the pairing that replaced it
+was itself superseded on 2026-09-02 by
+[ADR 0020](adr/0020-batch-items-are-derived.md).** A batch submission is one
+pile of files, applications and label images, grouped into rows by filename
+stem, each row the single-label check. There is no CSV. The
 assumption is kept here in full, below the line, because the reason it existed
 is the reason the replacement is short, and deleting it would leave the batch
 contract looking like something that was always obvious.

@@ -36,21 +36,17 @@ export const MESSAGES: Record<string, string> = {
     "We couldn't read any of the photos of this label. Try clearer photos, in better light.",
   too_many_photos: 'That is more photos than we can read for one label. Remove one and try again.',
   batch_too_large: 'That is too many labels for one batch. Split it and send them in groups.',
-  empty_batch: 'No label images were attached. Choose the images, then a COLA document for each.',
+  empty_batch: 'Nothing was uploaded. Choose the label applications, the label images, or both.',
   invalid_submission: 'Something the check needs was missing from the form.',
   malformed_upload: 'The upload did not arrive in one piece. Try sending it again.',
-  // The batch pairing failures (ADR 0009). Each names the file the agent has to
-  // do something about, because a batch of 300 is not a place to go hunting.
-  missing_application_documents:
-    'No COLA documents were attached. Each label image needs one with the same name, so photo.png goes with photo.pdf.',
-  missing_application_document:
-    'No COLA document has the same name as this image, so there was nothing to compare it against.',
-  unmatched_application_document:
-    'This COLA document has no label image with the same name, so nothing was checked for it.',
+  // The two batch rows that cannot be checked (ADR 0020). Files that share a
+  // name before the extension are one label, and a label holds one application
+  // and one image; the unmatched and missing cases of ADR 0009 are gone,
+  // because a file on its own is a valid row now.
   duplicate_application_document:
-    'More than one COLA document has this name, so which one applies is unclear and nothing was compared.',
+    'More than one file with this name reads as a label application, so which one applies is unclear and nothing was compared.',
   duplicate_label_stem:
-    'More than one image has this name before its file extension, so which label the document belongs to is unclear.',
+    'More than one file with this name reads as a label image. This page checks one image for each label; check a label with several photos on the Check one label tab.',
   verification_failed: "We couldn't check this label. Try submitting it on its own.",
   unsupported_application_document:
     'That file is not one we can read as a label application. Send a PDF, or a photo or scan of the form.',

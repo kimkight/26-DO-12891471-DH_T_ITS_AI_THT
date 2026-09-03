@@ -73,7 +73,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.3.1","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.4.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -81,10 +81,13 @@ choose a label image, attach the applicant's COLA document, and select **Check
 this label**. The document is the normal way the application values arrive, and
 the boxes for typing them yourself are behind **Or type the application
 values**, which opens on its own when the document leaves a gap or cannot be
-read. The second tab checks many at once,
-taking the label images plus one COLA document for each, **paired by filename
-stem**: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`. The rule is
-stated on the page, and the page says how many pairs it found before you submit.
+read. The second tab checks many at once, through one control that takes filed
+applications, label images or both; files that share a name before the
+extension are one label, a filed application that carries its own artwork is a
+label on its own, and each label is the single-label check. The page says what
+each file was taken to be and how many labels it found before you submit, and
+the results are one table with a row per label that opens the same
+field-by-field detail.
 
 To try it without artwork of your own, generate the sample set first:
 
@@ -149,20 +152,23 @@ prefix is upper case. The reference text is quoted verbatim from 27 CFR 16.21,
 fetched from eCFR and cited in
 [docs/03_REQUIREMENTS.md](docs/03_REQUIREMENTS.md).
 
-**A batch is one streaming request, not a job queue.** Up to 300 label images
-and their 300 COLA documents go in a single submission; a bounded worker pool
-reads them and each result is written to the response as it finishes, so
-progress is visible while the batch runs and one unreadable image costs only its
-own row. There is no job store, because nothing is persisted. See
+**A batch is one streaming request, not a job queue.** Up to 300 labels go in
+a single submission, as one pile of files; a bounded worker pool reads them and
+each result is written to the response as it finishes, so progress is visible
+while the batch runs and one bad file costs only its own row. There is no job
+store, because nothing is persisted. See
 [ADR 0006](docs/adr/0006-batch-execution-model.md).
 
-**A batch takes what an importer actually files.** It used to take a CSV of
-application data, keyed by image filename, assumed rather than stated by any
-source. Nothing produces such a file: what an importer files with TTB is, per
-application, a COLA form plus label images. So a batch is now the images plus
-one COLA document each, paired by filename stem, read by the same parser the
-single-label view uses. The CSV is gone rather than kept alongside. See
-[ADR 0009](docs/adr/0009-batch-cola-documents.md).
+**A batch is the same check as one label, many times.** It used to take a CSV
+of application data, assumed rather than stated by any source, then two piles
+of files paired by name and inert until both were chosen. Now it takes what an
+importer actually files, in one control: filed applications, label images, or
+both. Files that share a name before the extension are one label; the server
+decides what each file is from the file, and runs each label through the
+single-label check. A filed application that carries its own label artwork is
+a complete label on its own, so twelve applications and no images are twelve
+checked labels. See [ADR 0020](docs/adr/0020-batch-items-are-derived.md), and
+[ADR 0009](docs/adr/0009-batch-cola-documents.md) for the stem rule it keeps.
 
 **The interface is one screen, and it starts from the document.** The primary
 task is on the landing page with nothing to navigate, every outcome is carried by
@@ -230,7 +236,7 @@ section 6.
 | [Open Questions](docs/OPEN_QUESTIONS.md) | 29 questions, each with its status, recorded rather than guessed |
 | [Assumptions](docs/ASSUMPTIONS.md) | 17 inferences, each with what would confirm or falsify it |
 | [Traceability Matrix](docs/TRACEABILITY_MATRIX.md) | Stakeholder statement to requirement to story to issue to test |
-| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, the government warning near miss, verification by search, and item 5's product type read off the rendered page |
+| [ADRs](docs/adr/) | Cloud platform, compute, extraction path, matching strategy, branching, batch execution model, more than one photograph of one label, the COLA document as application input, what a batch is made of, the label artwork embedded in that document, one upload sorted by the server, the government warning near miss, verification by search, item 5's product type read off the rendered page, and a batch row derived from its files with a filed application standing on its own |
 | [Contributing](CONTRIBUTING.md) | Branching, commits, local setup, review expectations |
 | [Security Policy](SECURITY.md) | Reporting, scope, data handling |
 | [Changelog](CHANGELOG.md) | Keep a Changelog format |
@@ -246,7 +252,7 @@ and the first figures measured on the deployed target are below.**
 | `GET /api/health` | Works |
 | `POST /api/verify` (one label against its application data) | Works: everything for one label goes in one repeated `files` part, and the server decides what each file is from the file rather than from the part it arrived in. The older `image` and `application_document` parts still work and go through the same classifier. See [ADR 0011](docs/adr/0011-one-upload.md). |
 | `POST /api/classify` (sort an upload, read the application side, compare nothing) | Works: what each uploaded file was taken to be and why, plus the application values, so the interface can show both before a check runs. |
-| `POST /api/verify-batch` (many labels, each paired with its COLA document by filename stem) | Works: a bounded worker pool, results streamed as newline-delimited JSON, no job store. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0009](docs/adr/0009-batch-cola-documents.md) for what a batch carries. |
+| `POST /api/verify-batch` (many labels from one pile of files, grouped by filename stem) | Works: one repeated `files` part, each group of same-named files run through the single-label check, a bounded worker pool, results streamed as newline-delimited JSON with each line's submission position, no job store. The older `images` and `application_documents` parts still work. See [ADR 0006](docs/adr/0006-batch-execution-model.md) for the stream and [ADR 0020](docs/adr/0020-batch-items-are-derived.md) for what a row is. |
 | `POST /api/read-application` (read one COLA document, compare nothing) | Works: reads an uploaded TTB F 5100.31 or Public COLA Registry printout locally, including the label artwork embedded in it ([ADR 0010](docs/adr/0010-embedded-label-artwork.md)), so an agent can attach the application instead of retyping it. Not COLA system integration: no API call, no credential, no lookup. See [ADR 0008](docs/adr/0008-cola-form-as-application-input.md) and the note under OOS-1 in [docs/02_PROJECT_SCOPE.md](docs/02_PROJECT_SCOPE.md). |
 | Verification by search: is the declared value on the label? | Works: `backend/app/search.py`. The label is searched for the value the application declares, rather than a value being extracted from the label and compared. The row says where on the sheet it was found and shows the label's own printing of it. A hit shows the value is on the label; it does not show it is there as the brand, in the required type size, or on the required panel (OOS-5). See [ADR 0015](docs/adr/0015-verify-by-search.md) |
 | Field extraction from label artwork, as the fallback | Works: `backend/app/ocr.py`, `backend/app/parse.py`. Runs where the application supplied no value to search for |
@@ -254,7 +260,7 @@ and the first figures measured on the deployed target are below.**
 | Government warning checks, text and capitalization | Works: `backend/app/warning.py`. The comparison is exact; a difference of one or two characters is routed to human review with the character-level difference shown rather than reported as a mismatch, and is never a pass ([ADR 0012](docs/adr/0012-warning-near-miss.md)). |
 | Verification interface, one label | Works: one screen, **one file picker** taking the label application, photographs of the label, or any mix, with the server deciding what each file is and saying so per file ([ADR 0011](docs/adr/0011-one-upload.md)); after an upload has been read, a line per value that was found and a field only for the ones that were not; five result cards, and no elapsed time on the panel: the phase figures stay in the API response, where the deployment runbook reads them, and the panel carries an asserted word budget (NFR-4) |
 | Verification interface, values that were read | Works: each is a read-only line with where it came from, typed or the application form or the label artwork inside it. If every value was read, no editable field is shown at all; one collapsed disclosure holds them. A gap takes focus and is announced |
-| Verification interface, batch | Works: a second tab taking label images and their COLA documents, the pairing rule stated on the page and the pair count announced, progress driven by the stream, a sortable results table, and a results CSV built in the browser. One photograph per label; see ADR 0007 and ADR 0009 |
+| Verification interface, batch | Works: a second tab with one file control taking applications and label images together, each file classified on arrival and shown with the same chip as the single-label tab, the labels counted and announced, progress driven by the stream, one table on the right with a row per label in submission order, each row opening the same field-by-field detail the single-label tab renders, and a results CSV built in the browser. One photograph per label; see ADR 0007, ADR 0009 and ADR 0020 |
 | Prototype disclosure | Works: a persistent banner on every view, an author attribution in the footer, and no seal, emblem, or officialdom claim anywhere. Enforced by `frontend/src/__tests__/branding.test.tsx` |
 | Accessibility, WCAG 2.1 AA target | Checked in CI by axe-core against the built page, plus a keyboard walk and a contrast check on the palette. See the limitation below on what a clean run does and does not claim. |
 | One bad image failing only its own row in a batch | Works; covered by tests |
@@ -440,11 +446,15 @@ throughout rather than arriving in one block at the end. The 83-of-300 reading
 at 109 seconds is the evidence that the load balancer did not buffer the stream,
 which was the specific risk ADR 0006 recorded and the reason the check exists.
 
-**Peak task memory for the batch window: memory utilization measurement
-pending.** The CloudWatch `MemoryUtilization` figure for that window is being
-retrieved and is not written here until it is in hand. It is the number that
-would replace the two estimates in `docs/09_DEPLOYMENT.md` section 4.3 with a
-measurement, and it is the one that says whether 8 GiB was the right size.
+**Peak task memory for the batch window: 1.7 percent of 8192 MiB, which is
+139.3 MiB.** Retrieved from CloudWatch on 2026-09-02 for 2026-08-28 UTC, the
+day of the 300-label run, at a 60-second period; the mean over the day was
+0.699 percent, 57.3 MiB, and CPU peaked at 99.8 percent of the one vCPU during
+OCR. 8 GiB was not the right size: the task is over-provisioned on memory by
+about 59 times and constrained by CPU, and the recommendation, 2048 MiB with
+the vCPU kept, is recorded as OQ-35 in `docs/OPEN_QUESTIONS.md` rather than
+applied. The record, with what the window did and did not exercise, is
+`docs/09_DEPLOYMENT.md` section 9.
 
 ### Accuracy
 
@@ -522,13 +532,14 @@ five fields did not come back at all.
   accuracy against real label artwork is unmeasured and is the largest open
   technical risk in the prototype (ADR 0003). No accuracy target is claimed
   either; no source states one (OQ-8).
-- **The latency and throughput figures are now from the deployed target, and
-  one number is still missing.** The checklist in
+- **The latency and throughput figures are from the deployed target, and the
+  last open box, task memory, is now filled.** The checklist in
   [docs/09_DEPLOYMENT.md](docs/09_DEPLOYMENT.md) section 9 was run on
   2026-08-28, including the question of whether the batch stream survives a load
-  balancer unbuffered, which it does. The one box still open is the CloudWatch
-  `MemoryUtilization` figure for the batch window, and the README says "memory
-  utilization measurement pending" rather than a number until it is in hand.
+  balancer unbuffered, which it does. The CloudWatch `MemoryUtilization` figure
+  for that window, the last box open, was retrieved on 2026-09-02: a 139 MiB
+  peak against 8192 MiB, recorded in section 9 with the sizing recommendation
+  it leads to in OQ-35.
 - **NFR-1 is met on both single-label paths and is still missed on the
   three-photograph case, and the miss is published rather than redefined.** One
   label image with its application document measures 1.5 seconds against

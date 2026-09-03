@@ -334,52 +334,65 @@ going to use it. We learned that the hard way." [Source: Sarah Chen interview]
 | --- | --- |
 | Epic | Batch verification |
 | Priority | Must |
-| Requirements | FR-8, FR-11 |
+| Requirements | FR-8, FR-11, FR-12 |
 | Points | |
-| Issue | #9, and [#70](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/70) for the change of contract |
-| Source | Sarah Chen interview; the author's question, 2026-08-28 |
+| Issue | #9, [#70](https://github.com/kimkight/26-DO-12891471-DH_T_ITS_AI_THT/issues/70) for the change of contract, and the v1.4.0 pull request for the one control |
+| Source | Sarah Chen interview; the author's question, 2026-08-28; the author's test of the deployed page, 2026-09-02 |
 
 **As a** compliance agent handling a bulk importer submission,
-**I want** to upload many labels together with the COLA document for each,
-**so that** I am not processing a 300-application drop one at a time, and I am
-not retyping 300 applications into a spreadsheet to do it.
+**I want** to drop what the importer filed, applications and label images
+together, into one place and get a checked label for each,
+**so that** I am not processing a 300-application drop one at a time, I am not
+retyping 300 applications into a spreadsheet to do it, and I am not rendering
+an image out of every application or naming files in pairs before the tool will
+start.
 
 **Acceptance criteria**
 
 ```
-Given label images and one COLA document for each, named to match
+Given filed COLA applications, label images, or both, chosen through one control
 When  I submit the batch
 Then  the response contains a result set for every label in the batch
 And   each result identifies which label it belongs to
-And   each result's application values are the ones its document carried
+And   files that share a name before the file extension are one label
+And   each label's application values are the ones its application carried
 ```
 
 ```
-Given an image whose name matches no document, or a document matching no image
+Given an application that carries its own label artwork and no image of the same name
 When  I submit the batch
-Then  that item reports an error on its own result line
-And   every other label still returns results
+Then  that label is checked against the artwork inside the application
+And   the result says the label came out of the application
 ```
 
 ```
-Given a document that cannot be read
+Given a label image with no application of the same name
 When  I submit the batch
-Then  that label reports an error naming the document
+Then  that label is checked for the elements a label must carry
+And   the comparison rows say there is nothing to compare against yet
+And   it is not an error
+```
+
+```
+Given a file that cannot be read, or two files of the same kind under one name
+When  I submit the batch
+Then  that label reports an error on its own result line, naming the file
 And   no field reports a match for it
 And   every other label still returns results
 ```
 
 ```
-Given a batch larger than the configured file limit
+Given a batch larger than the configured limit on labels
 When  I submit it
 Then  the request is rejected before any file is processed
 And   the message names the limit
 ```
 
 ```
-Given I am on the batch view
-When  I look at it before choosing anything
-Then  the naming rule that pairs an image with a document is stated on screen
+Given I have chosen files on the batch view
+When  I look at the list before submitting
+Then  each file shows what the tool took it to be, in the same words as the single-label view
+And   the check is available as soon as there is one file
 ```
 
 **What changed, and why.** This story asked for "many labels with their
@@ -388,8 +401,17 @@ was one CSV keyed on image filename, assumed as A-14 and stated by no source.
 The author asked where such a CSV would come from. Nothing an importer files
 produces one; what they file is, per application, a COLA form plus label images,
 and FR-11 reads that form. The CSV is removed, not kept alongside. See
-[ADR 0009](adr/0009-batch-cola-documents.md), which also records the pairing
-rule: `0001-stones-throw.png` goes with `0001-stones-throw.pdf`.
+[ADR 0009](adr/0009-batch-cola-documents.md), which also records the stem rule:
+`0001-stones-throw.png` goes with `0001-stones-throw.pdf`.
+
+**And changed again on 2026-09-02.** The author, having tested the deployed
+page: "It should also accept the COLA application, pdf or images (with a single
+choose file; not 2)." ADR 0009 had made the paired image a precondition, so an
+importer's filed applications, which carry their own artwork, could not be
+checked without rendering an image out of each one. [ADR 0020](adr/0020-batch-items-are-derived.md)
+makes the stem rule a convenience: one control, every file classified by the
+tool, an application on its own a complete label, and each label run through
+the single-label check. The naming rule moved from the screen to the Help tab.
 
 Sarah: "during peak season, we get these big importers who dump 200, 300 label
 applications on us at once. Right now we literally have to process them one at a
@@ -421,6 +443,12 @@ Then  that label reports an error
 And   every other label in the batch still returns results
 ```
 
+```
+Given a batch in which one file could not be classified, or one row's line never arrived
+When  I look at the results
+Then  that label is a visible row with a plain outcome, never an absence
+```
+
 ### US-11 See that a large batch is progressing
 
 | | |
@@ -449,6 +477,17 @@ Given a long-running batch
 When  processing completes
 Then  results are returned without a request timeout discarding completed work
 ```
+
+```
+Given a batch under way
+When  I look at the results table
+Then  every label has a row from the start, in the order I chose the files
+And   a row still being read shows as pending rather than as a gap
+And   each row fills in as its result arrives
+```
+
+**Since v1.4.0** the rows exist before the first result, because the page groups
+the files by the same rule the server does ([ADR 0020](adr/0020-batch-items-are-derived.md)).
 
 ---
 
@@ -483,9 +522,19 @@ When  I read the on-screen text
 Then  it uses no terminology beyond what label review already uses
 ```
 
+```
+Given the batch view and the single-label view
+When  I read a result on either
+Then  the outcome words, the five checks, the "5 of 5 checks passed" line and the
+      field-by-field detail are the same on both
+```
+
 Sarah's benchmark: "We need something my mother could figure out; she's 73 and
 just learned to video call her grandkids last year." And: "Clean, obvious, no
-hunting for buttons." [Source: Sarah Chen interview]
+hunting for buttons." [Source: Sarah Chen interview] The last criterion is the
+author's, 2026-09-02: "I need for the functionality of that page to mimic the
+check on label page." Where a behaviour exists on one view and not the other,
+that is a defect ([ADR 0020](adr/0020-batch-items-are-derived.md)).
 
 ### US-13 Use the tool with a keyboard and a screen reader
 

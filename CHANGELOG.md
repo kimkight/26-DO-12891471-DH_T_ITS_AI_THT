@@ -7,6 +7,150 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-03
+
+The bulk page becomes the same tool as the single-label page. The author,
+having tested the deployed v1.2.1: "I had not been focusing on the bulk upload.
+I just tested and it is missing features we discussed. I need for the
+functionality of that page to mimic the check on label page. It should also
+accept the COLA application, pdf or images (with a single choose file; not 2).
+The results should be to the right but in table format in a list."
+[ADR 0020](docs/adr/0020-batch-items-are-derived.md) records the decision and
+what the old two-input model assumed.
+
+### The batch is the single-label check, many times (ADR 0020)
+
+#### Changed
+
+- **One file control on the batch tab**, accepting PDFs and images together,
+  the union of the two lists the two inputs took. Every file is classified on
+  arrival with the same `POST /api/classify` call the single-label tab makes,
+  one request per file with two in flight, and the queue shows what each was
+  taken to be in the same chip. The check turns on as soon as there is one
+  file, and the disabled label is the single-label tab's: "Upload a file to
+  check."
+- **A batch row is derived, not demanded.** `POST /api/verify-batch` takes one
+  repeated `files` part, the part `POST /api/verify` takes; the older `images`
+  and `application_documents` parts still work and are folded in. Files that
+  share a filename stem are one row, exactly as ADR 0009 defined the stem and
+  with the plain lower-case fold v1.3.0 settled; the rule is a convenience now
+  and is documented on the Help tab rather than printed on the check screen.
+  Each row is classified from its files and run through the single-label
+  check, which moved out of `api.py` into `app/check.py` so that both routes
+  call one function. So **a filed application that carries its own artwork is
+  a complete row on its own**, checked against that artwork, and twelve
+  applications with no images are twelve checked labels; **an image with no
+  application is a valid row**, checked for what a label must carry with the
+  comparison rows saying there is nothing to compare against yet; and a scan
+  of the form and a photograph of the label pair by what they are, not by
+  their extensions. The three ADR 0009 codes for an unmatched or missing
+  partner, and the refusal of a batch with no images, are gone. Two label
+  images on one stem are still one ambiguous row, and the message now sends a
+  label with several photographs to the single-label tab.
+- **Nothing is silently dropped.** A file that cannot be classified or read is
+  a visible row with a plain error; a row whose line never arrives is shown as
+  not checked, on the page, rather than vanishing.
+- **The count limit bounds labels, not files.** 300 applications with their
+  300 images is 300 rows and is accepted.
+- **Every line carries its submission position and the names of its files**
+  (`position`, `filenames` on `BatchLine`), so a client can show rows in the
+  order submitted however they finish.
+- **The results are one table on the right**, in the layout and at the
+  breakpoint the single-label tab uses: one row per label in submission order,
+  columns Label, Brand, Class or type, Outcome and Checks, every row on the
+  table from the first line and filling in as its line arrives, a pending chip
+  while a row is being read. The outcome chip is `OutcomeBadge`, the Checks
+  tally is the same count as "5 of 5 checks passed", from one function, and
+  the per-row summary wording PR B settled is unchanged. **Selecting a row
+  opens the field-by-field detail** in `ResultDetail`, the block lifted out of
+  the single-label tab, so the two tabs render a result with one component;
+  the control is a `<button>` in the row header with `aria-expanded` and
+  `aria-controls`, the open row carries `aria-current`, and focus never moves.
+- **Sorting is dropped**, deliberately: submission order is an order, the
+  rows fill in place, and the seven-bucket tally is how an agent finds the
+  rows that need them. Recorded in ADR 0020 as a decision, with the follow-up
+  named.
+- **Reset** clears the queue, the rows and the detail, and aborts the stream
+  and every classification still in flight.
+- The `verify_image` docstring, the batch and route docstrings, and every
+  document that described the two-part contract: FR-8, FR-11 and FR-12 in
+  `docs/03_REQUIREMENTS.md`; US-9, US-10, US-11 and US-12 in
+  `docs/04_USER_STORIES.md`; section 4 and the module map of
+  `docs/05_ARCHITECTURE.md`; ADR 0009, amended, and ADR 0011, superseded on
+  the point it declined; the runbook's section 8 curl; `samples/README.md`;
+  the README; the traceability matrix; and the conformance rows 1.3.1, 1.4.1,
+  2.1.1, 2.4.3, 2.4.7, 3.2.2, 3.3.2, 4.1.2 and 4.1.3, which now describe the
+  table and the row detail.
+- **Help** gains "How do I check many labels at once?", which carries the
+  naming convention and the one-image-per-row rule, and the answer to "what if
+  I only have the application, or only a photo" now covers both tabs.
+
+#### Measured
+
+- **The batch path on filed applications alone**, on a session container with
+  one batch worker as the task definition sets it, in `docs/09_DEPLOYMENT.md`
+  section 9: 1, 5 and 20 filed applications took 1.32 s, 5.95 s and 24.64 s,
+  about 1.2 s per label; every row read its artwork once (`ocr_passes` 1,
+  `tesseract_reads` 2, or 4 where the 180-degree check ran) and returned
+  `label_source` `application_artwork`. `GET /api/health` answered in 4 ms at
+  worst during the 20-row batch, 98 probes, none over a second. Classifying a
+  twenty-file drop on arrival takes 0.46 s for filed PDFs and 23 s for label
+  PNGs, because an image's classification is an OCR pass and the check reads
+  the image again; said in section 9 and OQ-37 rather than designed around,
+  because the fix is a cache NFR-6 forbids.
+
+#### Added
+
+- `samples/applications/filed/*.pdf`, written by `samples/generate_samples.py`:
+  the Registry printout with the label artwork affixed, one per label, which
+  is what an importer files and a complete batch row on its own.
+  `scripts/measure.py --batch --filed` submits that set alone, and the batch
+  report now prints `total_ms`, `tesseract_reads` and `ocr_passes` per row.
+- `backend/tests/test_batch.py`, rewritten for the new contract:
+  `TestTheStemRule`, `TestRowsAreDerivedNotDemanded` (the application alone,
+  the application with no artwork as a visible row, the image alone, the scan
+  and the photograph pairing by classification, the two ambiguities, the older
+  part names), `TestTheBatchIsTheSameCheck` (a row's outcomes equal the
+  single-label route's for the same files, on three shapes), and the filed set
+  run over all twelve labels; `test_event_loop.py` gains the health probe
+  answered while a batch streams.
+- `frontend/src/__tests__/batchTable.test.tsx`, rewritten: the one control
+  and the chips, the grouping and its sentence, one `files` part, submission
+  order however lines arrive, the pending and never-arrived rows, the row
+  detail from the keyboard in the single-label component, the error detail,
+  reset and removal cancelling requests, and the naming convention kept off
+  the screen. `frontend/tests/a11y.spec.ts`: the batch picker and label
+  count by keyboard, and the results table opening a row from the keyboard,
+  axe-clean, with the ring read from the computed style.
+
+### Two records from the v1.3.0 apply
+
+Neither is a feature. Both were measured or noticed while the v1.3.0
+infrastructure was applied and would otherwise have been lost.
+
+- **The task is over-provisioned on memory by about 59 times.** CloudWatch
+  `MemoryUtilization` for `ttb-verifier` over 2026-08-28 UTC, the day of the
+  300-label run, at a 60-second period: peak 1.7 percent (139.3 MiB of 8192),
+  mean 0.699 percent (57.3 MiB); `CPUUtilization` peaked at 99.8 percent of
+  the one vCPU, which is `OMP_THREAD_LIMIT=1` working as designed. Recorded in
+  `docs/09_DEPLOYMENT.md` section 9, where the box had been open since
+  2026-08-28, and in the README, which no longer says the measurement is
+  pending. OQ-35 records the recommendation, 8192 MiB down to 2048 MiB with the
+  vCPU kept: 2048 is Fargate's floor at 1 vCPU, at which the peak becomes 6.8
+  percent, and CPU is the real constraint. The Terraform is deliberately not
+  changed; the sizing change is its own reviewed change and takes the
+  section 4 batch-cap arithmetic with it. The 1-minute datapoints expire
+  around 2026-09-12, so the percentages are the durable record.
+- **Three subjects in the deploy role's OIDC trust policy can never match.**
+  The applied `StringLike` list carries three patterns of the shape
+  `repo:kimkight@*/26-DO-12891471-DH_T_ITS_AI_THT@*:ref:...`, and GitHub's
+  `sub` claim contains no `@`. They admit nothing and are inert; the fix is
+  deleting the second prefix from `github_oidc_sub_prefixes` in
+  `infra/terraform/locals.tf` in the next infrastructure change, after
+  confirming from CloudTrail which pattern a successful deploy matched,
+  because the comment there records the opposite observation. OQ-36.
+
+## [1.3.0] - unreleased until tagged
 ## [1.3.1] - 2026-09-03
 
 A hotfix from `main`, carrying one permission and nothing else. Publishing

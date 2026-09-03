@@ -260,3 +260,21 @@ the author knows about it. An importer whose filings carry their own artwork
 could submit documents alone and skip half the files. It is the obvious next
 step for this path, it changes what a batch is, and it should be decided here
 rather than inherited from a change made for the single-label view.
+
+## Amendment, 2026-09-02: superseded on the pairing contract by ADR 0020
+
+**The question the previous amendment left on the table is decided, the other
+way, in [ADR 0020](0020-batch-items-are-derived.md).** A batch is one pile of
+files in one `files` part; a row is every file that shares a stem; each row is
+classified and run through the single-label check; and a filed application
+that carries its own artwork is a complete row on its own. The two required
+parts, the "image with no document" and "document with no image" errors, and
+the refusal of a batch with no images are gone.
+
+**What this ADR still decides.** The stem rule, exactly as written above, is
+what groups files into rows, and one row holds one label image. The reasoning
+for taking documents rather than a CSV, and the alternatives rejected, stand.
+The assumption the previous amendment rested on, that rows had to be
+enumerated from the images for the total to be known first, was wrong: rows
+are enumerated from names, which is cheaper and needs no image. ADR 0020
+records the assumption and why it is gone.
