@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - unreleased until tagged
+
+### Two records from the v1.3.0 apply
+
+Neither is a feature. Both were measured or noticed while the v1.3.0
+infrastructure was applied and would otherwise have been lost.
+
+- **The task is over-provisioned on memory by about 59 times.** CloudWatch
+  `MemoryUtilization` for `ttb-verifier` over 2026-08-28 UTC, the day of the
+  300-label run, at a 60-second period: peak 1.7 percent (139.3 MiB of 8192),
+  mean 0.699 percent (57.3 MiB); `CPUUtilization` peaked at 99.8 percent of
+  the one vCPU, which is `OMP_THREAD_LIMIT=1` working as designed. Recorded in
+  `docs/09_DEPLOYMENT.md` section 9, where the box had been open since
+  2026-08-28, and in the README, which no longer says the measurement is
+  pending. OQ-35 records the recommendation, 8192 MiB down to 2048 MiB with the
+  vCPU kept: 2048 is Fargate's floor at 1 vCPU, at which the peak becomes 6.8
+  percent, and CPU is the real constraint. The Terraform is deliberately not
+  changed; the sizing change is its own reviewed change and takes the
+  section 4 batch-cap arithmetic with it. The 1-minute datapoints expire
+  around 2026-09-12, so the percentages are the durable record.
+- **Three subjects in the deploy role's OIDC trust policy can never match.**
+  The applied `StringLike` list carries three patterns of the shape
+  `repo:kimkight@*/26-DO-12891471-DH_T_ITS_AI_THT@*:ref:...`, and GitHub's
+  `sub` claim contains no `@`. They admit nothing and are inert; the fix is
+  deleting the second prefix from `github_oidc_sub_prefixes` in
+  `infra/terraform/locals.tf` in the next infrastructure change, after
+  confirming from CloudTrail which pattern a successful deploy matched,
+  because the comment there records the opposite observation. OQ-36.
+
+## [1.3.0] - unreleased until tagged
 ## [1.3.1] - 2026-09-03
 
 A hotfix from `main`, carrying one permission and nothing else. Publishing

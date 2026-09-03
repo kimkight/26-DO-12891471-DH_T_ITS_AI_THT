@@ -698,15 +698,42 @@ This section is the record of the runs; the README is the summary of them.
       defects in the fixture set, so every seeded defect was caught and there
       were no false alarms. **NFR-2 is met**: the batch completed with no
       timeout and no lost work, and progress was visible throughout.
-- [ ] **Peak task memory from the CloudWatch `MemoryUtilization` metric for the
-      batch window.** Being retrieved; not recorded yet, and the README says
-      "memory utilization measurement pending" rather than a number. **This is
-      the number that matters**, because it is what replaces the two estimates
-      in section 4.3 with a measurement, and it is what tells you whether 8 GiB
-      was right. **It matters more than it did**: the envelope limit doubled
-      with ADR 0009, from 300 files to 600, and FastAPI parses the whole
-      envelope before the route runs. The batch above completed, which says
-      8 GiB was enough; it does not say by how much.
+- [x] **Peak task memory from the CloudWatch `MemoryUtilization` metric for the
+      batch window.** Retrieved 2026-09-02 during the v1.3.0 apply, from the
+      `AWS/ECS` namespace, cluster and service `ttb-verifier`, over
+      2026-08-28 00:00 to 2026-08-29 00:00 UTC at a 60-second period, using
+      `TIME_SERIES(MAX(m1))` for the peak and `TIME_SERIES(AVG(m1))` for the
+      mean. That window holds the 300-label batch above and every single-label
+      run of the same day. The task was 1 vCPU and 8192 MiB.
+
+      | Measure | Percent | Of 8192 MiB |
+      | --- | --- | --- |
+      | `MemoryUtilization` peak | 1.7 % | 139.3 MiB |
+      | `MemoryUtilization` mean | 0.699 % | 57.3 MiB |
+      | `CPUUtilization` peak | 99.8 % | one vCPU saturated |
+
+      **The task is over-provisioned on memory by about 59 times**, 8192
+      against a 139 MiB peak, and it is not over-provisioned on CPU at all:
+      99.8 percent of one core during OCR is `OMP_THREAD_LIMIT=1` doing what
+      section 4.4 says it does, so CPU is the real constraint on this task and
+      memory is not. The two estimates in section 4.3 that this figure was
+      going to replace, the 400 MiB per-image working set and the 150 MiB
+      stack, are together larger than the whole measured peak; the batch
+      payload row was never exercised by this window, because the 300-label
+      run carried the twelve-label synthetic set copied 25 times and its
+      envelope was a few tens of megabytes, not the 3 000 MiB cap. The
+      recommendation that follows, 8192 MiB down to 2048 MiB with the vCPU
+      kept, and why 2048 rather than less, is [OQ-35](OPEN_QUESTIONS.md#oq-35).
+      **The Terraform is not changed in this release**: the infrastructure was
+      applied for v1.3.0 and a sizing change is its own reviewed change, with
+      the section 4 arithmetic redone as part of it.
+
+      **The percentages above are the durable record.** CloudWatch keeps
+      1-minute datapoints for fifteen days, so the datapoints behind these
+      figures expire around 2026-09-12; after that only the 5-minute and
+      coarser aggregates of the same metric remain, and a re-query would not
+      reproduce the 60-second peak. Anyone repeating the measurement after that
+      date measures a different window.
 - [ ] **The document parse is inside the per-label cost now.** The sample
       documents are digitally generated PDFs, so their text layer is read in
       milliseconds, and the 1.3 s per label above is a text-layer figure. A

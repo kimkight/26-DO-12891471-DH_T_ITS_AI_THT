@@ -44,6 +44,8 @@ updates every artifact the answer affects.
 | [OQ-32](#oq-32) | Open, #123; measured on synthetic documents in v1.3.0, floor not moved | Nothing; where the margin falls short the agent chooses |
 | [OQ-33](#oq-33) | Open, #128; found in v1.3.0, the test corrected, the panel not changed | Nothing; the result is complete and readable, it scrolls |
 | [OQ-34](#oq-34) | Decided and closed 2026-09-02: the registry stays mutable, the release-tag guard is in the workflow | Nothing; a re-run of the deploy on the same commit works |
+| [OQ-35](#oq-35) | Open; measured 2026-09-02, recommendation recorded, Terraform unchanged | Nothing; the task runs. It costs about 59 times the memory it uses |
+| [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 
 ---
 
@@ -1834,3 +1836,120 @@ collision between immutability and a re-run:
 until then the decision above stands.
 **Blocks:** nothing. Re-running the deploy on the same commit works, and a
 release-shaped dispatch tag is refused before a build.
+
+---
+
+## OQ-35
+
+**Should the task come down from 8192 MiB to 2048 MiB, keeping 1 vCPU?**
+
+**Status: Open. Measured 2026-09-02; the recommendation is recorded here and
+the Terraform is deliberately unchanged in v1.4.0.**
+
+**What was measured.** Section 9 of [09_DEPLOYMENT.md](09_DEPLOYMENT.md)
+records the CloudWatch figures for `AWS/ECS`, cluster and service
+`ttb-verifier`, over 2026-08-28 00:00 to 2026-08-29 00:00 UTC at a 60-second
+period, the day the 300-label batch and every single-label gate of that
+release were run:
+
+| Measure | Percent | Of 8192 MiB |
+| --- | --- | --- |
+| `MemoryUtilization` peak (`TIME_SERIES(MAX(m1))`) | 1.7 % | 139.3 MiB |
+| `MemoryUtilization` mean (`TIME_SERIES(AVG(m1))`) | 0.699 % | 57.3 MiB |
+| `CPUUtilization` peak | 99.8 % | one vCPU saturated |
+
+The task is over-provisioned on memory by about 59 times. The 1-minute
+datapoints behind those figures expire around 2026-09-12, so the percentages
+are the durable record; a query after that date sees only coarser aggregates.
+
+**The recommendation: `task_memory = 2048`, `task_cpu = 1024` unchanged.**
+
+*Why 2048 and not less.* Fargate accepts only 2 GB through 8 GB of memory at
+1 vCPU, so 2048 MiB is the platform floor at this CPU size, not a number
+chosen to fit the peak. At 2048 MiB the observed peak becomes 6.8 percent, which
+is still generous: the two estimates in section 4.3 that were waiting on this
+measurement, 400 MiB for the per-image working set and 150 MiB for the stack,
+are together larger than the whole measured peak.
+
+*Why the vCPU stays.* 99.8 percent of one core during OCR is
+`OMP_THREAD_LIMIT=1` working as designed (section 4.4): Tesseract runs on one
+thread and uses all of it. CPU is the real constraint on this task, and cutting
+it, which Fargate only allows by going to 0.5 or 0.25 vCPU, would slow every
+check and put NFR-1's five seconds, already at the line on the document path
+(OQ-26), out of reach. The saving is on memory alone.
+
+**Why it is not applied here.** The infrastructure was applied for v1.3.0 and
+is what the deployed prototype runs on; a sizing change belongs in its own
+reviewed change, for two reasons beyond process. First, section 4's arithmetic
+has to be redone with it: the memory budget in 4.3 puts the batch payload at
+3 000 MiB because `TTB_MAX_BATCH_BYTES` is set to that, and a 2048 MiB task
+cannot hold it, so the cap comes down with the task, to what 2048 MiB holds
+after the stack and the working set, and section 4.4 and the task definition
+change together (ADR 0019: apply then deploy). Second, the window measured did
+not exercise that payload row at all: the 300-label run carried the
+twelve-label synthetic set copied 25 times, an envelope of tens of megabytes,
+so the 139 MiB peak is evidence about the stack and the per-image working set
+and not about a batch at the byte cap. Both belong in the change that moves
+the number.
+
+**Who can answer:** the author, in the next infrastructure change.
+**Blocks:** nothing. The task runs; at section 5's list price for Fargate memory
+the six unused gigabytes cost about $0.027 an hour, about $19 a month if the
+stack were left running.
+
+---
+
+## OQ-36
+
+**Three subjects in the deploy role's OIDC trust policy can never match. What
+are they, and what is the fix?**
+
+**Status: Open. Found 2026-09-02 during the v1.3.0 apply; inert rather than
+dangerous; the fix is one deletion in the next infrastructure change.**
+
+**What they are.** `local.github_oidc_subjects` in
+`infra/terraform/locals.tf` is built from two prefixes, and the applied
+`aws_iam_role.deploy` trust policy (`iam.tf`, the `StringLike` condition on
+`token.actions.githubusercontent.com:sub`) therefore carries six patterns.
+Three are the classic form and match the deploy workflow's two triggers:
+
+```
+repo:kimkight/26-DO-12891471-DH_T_ITS_AI_THT:ref:refs/heads/develop
+repo:kimkight/26-DO-12891471-DH_T_ITS_AI_THT:ref:refs/heads/main
+repo:kimkight/26-DO-12891471-DH_T_ITS_AI_THT:ref:refs/tags/v*
+```
+
+Three are of the shape
+
+```
+repo:kimkight@*/26-DO-12891471-DH_T_ITS_AI_THT@*:ref:...
+```
+
+**Why they cannot match.** GitHub's OIDC `sub` claim contains no `@`. The
+claim is `repo:<owner>/<repo>:<context>`, where the context is a ref, an
+environment, or `pull_request`; the owner and repository IDs GitHub also
+issues travel in their own claims (`repository_id`, `repository_owner_id`)
+and never inside `sub`. A `StringLike` pattern with `@` in it is compared
+against a string that never contains one, so the three patterns match
+nothing. They admit no extra caller, which is why this is inert: the three
+classic entries are the ones every successful deploy has assumed the role
+through.
+
+**What the repository says about them, which has to be corrected in the same
+change.** The comment above `github_oidc_sub_prefixes` in `locals.tf` records
+the second prefix as the fix for a first deploy that STS denied, and quotes a
+CloudTrail subject in the `@` form as the reason. That account and the
+observation above cannot both be right: either the recorded subject was
+misread, or the denial had another cause and was resolved by something else
+in the same change. Before the deletion, read the CloudTrail
+`AssumeRoleWithWebIdentity` record for one successful deploy and confirm which
+of the six patterns it matched; the expectation is one of the three classic
+ones. Then delete the second prefix from `github_oidc_sub_prefixes`, which
+removes all three dead patterns from the `StringLike` list, and rewrite the
+comment to say what was actually observed. Dead conditions in a trust policy
+invite exactly the question a reviewer asked here, and a comment that explains
+them wrongly is worse than none.
+
+**Who can answer:** the author, with the CloudTrail record, in the next
+infrastructure change alongside OQ-35.
+**Blocks:** nothing. The deploy works through the three live subjects.
