@@ -37,6 +37,74 @@ infrastructure was applied and would otherwise have been lost.
   because the comment there records the opposite observation. OQ-36.
 
 ## [1.3.0] - unreleased until tagged
+## [1.3.1] - 2026-09-03
+
+A hotfix from `main`, carrying one permission and nothing else. Publishing
+v1.3.0 built and pushed the release image (tag `v1.3.0`, digest
+`sha256:bcb157451ec27e8037636f9f2d8b5a787afb596edccf0e1a84cfff3cbdadec03`)
+and then failed in the same job, before the `deploy to ECS` job ran, so the
+release is published, its image is in the registry, and `/api/health` on the
+deployed URL still reports 1.2.1.
+
+### Fixed
+
+- **The SBOM step of a release deploy failed for want of `actions: read`**
+  (deploy run 20). Two changes from pull request C of v1.3.0, each correct on
+  its own, collided. Finding 13 (#112) moved the SBOM to the deploy workflow,
+  where it is generated from the registry by the pushed digest, which put
+  `anchore/sbom-action` on a `release` event for the first time. Findings 11
+  and 12 (#110, #111) cut every job's permissions to its minimum, so the job
+  held `contents: read` and `id-token: write`. On a `release` event the
+  action's own release-asset step is on by default: it lists the run's
+  artifacts, finds none because the workflow uploads its own, and then lists
+  the workflow runs on the release's target branch to look for one. That call
+  is `GET /repos/{owner}/{repo}/actions/runs`, which needs `actions: read`,
+  and no job granted it: `Resource not accessible by integration`. Neither
+  review step caught that the action needed a permission the tightening had
+  just taken away, because neither pull request exercised the release
+  trigger: a manual dispatch is not a release, and on a dispatch the action
+  makes no such call. `actions: read` is added to the `build and push image`
+  job and to no other, and nothing else is widened: the workflow default
+  stays `contents: read`, `id-token: write` stays on the two AWS jobs, and
+  `contents: write` stays on the one job that attaches the SBOM. The action
+  still attaches nothing itself, because the artifact is named by digest
+  rather than by the action's default name; the `attach the SBOM to the
+  release` job is what attaches it, as before. `continue-on-error` was not
+  used: a green deploy that silently produced no SBOM would be a claim the
+  evidence does not support, and if the SBOM cannot be produced the deploy
+  should fail.
+- **Every other action's permissions were checked at the same time**, since
+  the tightening touched every job. Thirteen distinct actions across the two
+  workflows, each read at its pinned commit. `actions/checkout` needs
+  `contents: read`, granted everywhere. `aws-actions/configure-aws-credentials`
+  needs `id-token: write`, granted on both jobs that call it and proved by
+  run 20 itself, which pushed the image. `actions/upload-artifact`, the Docker
+  build cache and build record, and the pip and npm caches use the runner's
+  own token and need no `permissions:` entry, which every green CI run under
+  `contents: read` has proved. `actions/download-artifact` needs `actions:
+  read` only for a different run or repository; the attaching job reads its
+  own run. `gh release upload` needs `contents: write`, which that job holds.
+  The three `aws-actions` ECR and ECS actions and the two `docker` actions
+  call no GitHub API. `hashicorp/setup-terraform`, `actions/setup-python` and
+  `actions/setup-node` call none that a job token gates. On CI's
+  `pull_request` and `push` events `anchore/sbom-action` skips its release
+  step and, with `compare-pulls` and `dependency-snapshot` at their defaults,
+  makes no API call. This was the only place a minimum-permission block was
+  one scope short.
+
+### Changed
+
+- **The 1.3.0 section below carries its tag date**, 2026-09-02, per step 2 of
+  the release procedure in `docs/08_SDLC_PROCESS.md` section 7.
+- **`docs/09_DEPLOYMENT.md` section 7 says which tag shape each trigger
+  produces**: a release pushes the image under its own tag, a dispatch under
+  `sha-<short sha>` or the tag given. The v1.3.1 release therefore pushes a
+  new `v1.3.1` tag beside `v1.3.0` rather than re-pointing anything, and a
+  re-run of that deploy pushes the same tag again, which the `MUTABLE`
+  registry accepts (OQ-34). `docs/06` section 2's control row for the
+  workflow tokens names the added scope.
+
+## [1.3.0] - 2026-09-02
 
 The rest of the v1.2.0 code review (`docs/CODE_REVIEW_2026-09.md`; the
 author's decisions on it are `docs/CODE_REVIEW_DECISIONS_2026-09.md`), in

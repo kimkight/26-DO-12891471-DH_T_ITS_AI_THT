@@ -323,7 +323,13 @@ service. The service's circuit breaker rolls the deployment back.
 
 For a release, the normal path: cut `release/*`, merge to `main`, publish a
 `vX.Y.Z` release. The workflow runs on publication and tags the image with the
-release tag. The role's trust policy accepts `workflow_dispatch` from `develop`
+release tag. **Each trigger produces one tag shape:** a release pushes the
+image under its own tag, `v1.3.1`; a dispatch pushes it under
+`sha-<short sha>`, or under the tag given in the input if one was. A hotfix
+release therefore pushes a new `vX.Y.Z` tag beside the last one rather than
+re-pointing it, and a re-run of the same release deploy pushes the same tag
+again, which the `MUTABLE` registry accepts ([OQ-34](OPEN_QUESTIONS.md#oq-34)).
+The role's trust policy accepts `workflow_dispatch` from `develop`
 and `main` and a published release at a `v*` tag, and nothing else; no job
 declares a GitHub environment, and [docs/06](06_SECURITY_AND_COMPLIANCE.md)
 section 2 says why the ref and not the environment is the control (#110).
