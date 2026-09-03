@@ -2081,10 +2081,12 @@ to `POST /api/classify`. It is shown with the chip "Label image, sorted when
 checked" and a line saying why, the batch runs on it exactly as before, and
 the batch line, which carries what the server took each file in the row to
 be, replaces the chip with the server's sorting. A PDF is still sorted on
-arrival, because that costs under fifty milliseconds and reads no picture. So
-twenty label photographs cost nothing before the batch starts, where they cost
-23 s; a photographed form is still sorted correctly, a moment later than it
-was; and the check reads every image once, as it always did. The single-label
+arrival, because that costs about fifty milliseconds and reads no picture
+(0.57 s for twenty on the same container, 56 ms a call). So twenty label
+photographs cost nothing before the batch starts, where they cost 23 s on the
+2026-09-02 container and 36.55 s on the 2026-09-03 one; a photographed form is
+still sorted correctly, a moment later than it was; and the check reads every
+image once, as it always did. The single-label
 tab is unchanged: one image's arrival read is what fills the five boxes from a
 photographed form, and one read was never the problem. Metadata alone was not
 taken because it is the same provisional answer with the word "provisional"

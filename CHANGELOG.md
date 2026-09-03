@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The artwork floor rejected real label panels. A second real filed COLA, a
+bourbon, returned one of five on the deployed v1.4.0, and the reason was in
+the response: six embedded pictures, five rejected on `short_edge` before any
+was read, and the aspect-ratio rule would have taken four of them next. The
+reader never saw the label. [ADR 0010](docs/adr/0010-embedded-label-artwork.md)
+is amended rather than rewritten, and #121 closes with this.
+
+### The label panels are read (ADR 0010 as amended, FR-11, #121)
+
+#### Changed
+
+- **The floor is an area alone.** `TTB_MIN_ARTWORK_EDGE_PX` (400) and
+  `TTB_MAX_ARTWORK_ASPECT_RATIO` (3.0) are removed as rejection rules, and the
+  rejection reasons `short_edge` and `aspect_ratio` are no longer produced.
+  Both were set from one document whose artwork is a single flat 1750 by 1150
+  sheet, and the comment on the ratio said it "sits above the widest
+  wrap-around label any source describes"; no source had described one. The
+  bourbon's panels are 1350 by 300, 1103 by 340, 1050 by 309 and 187 by 1697,
+  ratios of 4.50, 3.24, 3.40 and 9.07 and short edges of 300 to 187, and every
+  one failed both rules. The signature on the author's other filing is 687 by
+  195: a ratio of 3.52 and a short edge of 195, which no ceiling and no edge
+  floor can place on the other side of those panels. Area can, with margin:
+  the signature is 133,965 pixels and the smallest panel 317,339, and
+  `TTB_MIN_ARTWORK_PIXELS` stays at 250,000 with both numbers beside it in the
+  setting's comment. Setting either removed variable now has no effect, and
+  `.env.example` and `docs/05_ARCHITECTURE.md` say so.
+- **Every panel that clears the floor is read, largest first, up to
+  `TTB_MAX_ARTWORK_IMAGES`, and there is no early exit.** Reading used to stop
+  once all four artwork values were in hand; with panels, the panel left
+  unread may be the one carrying the government warning. A panel past the
+  bound is reported as accepted and not read rather than dropped.
+- **The label side is every panel that read, pooled** the way ADR 0007 pools
+  three photographs of one bottle. The brand and the class or type are
+  searched for across all of them, the alcohol content and the net contents
+  are merged per field, the warning is taken from the panel that shows the
+  most of it, and every value's `source_photo` names the panel, whose page
+  and pixel size are on `photos[].artwork_panel`. The application-side values
+  the artwork supplies are taken per field from the panel that read that
+  field most confidently, and `application_document.fields[].artwork_panel`
+  names it.
+- **The response carries the table, not only the rejections.**
+  `application_document.artwork_images_accepted` lists every picture that
+  cleared the floor, largest first, with its page, size, what happened to it
+  (`read`, `no_text`, `not_read`, `undecodable`) and the read's mean word
+  confidence, beside the `artwork_images_rejected` list that already existed.
+  The next person debugging a filing has the same table the author had to
+  instrument the deployed build to get. The picture itself still never
+  travels (NFR-6).
+- **The interface names each panel** by its page and size in the list under
+  the result, and says under it what was set aside as too small and what
+  cleared the floor unread, with the sizes.
+- **A large signature is read, and that is the accepted trade.** A strip
+  scanned above 250,000 pixels is no longer excluded by its shape. On the
+  synthetic strip it yields nothing at 2000 by 580 and three letters at a
+  confidence of 34 at 1442 by 433; the per-field rule takes every value from
+  the panel that read it best, so a real panel beside it wins every field,
+  and the strip is listed as read with its confidence. No real filing the
+  author has measured carries a signature above the floor.
+
+#### Added
+
+- **`backend/tests/test_artwork_panels.py`, the regression fixture OQ-24 asked
+  for**: a filing in the bourbon's shape with synthetic text, a 1350 by 300
+  front panel carrying the brand and class, a 1050 by 309 back panel carrying
+  the alcohol content, net contents and government warning, a 187 by 1697
+  side band, and a 687 by 195 signature. On v1.4.0 it returned `422
+  no_label_to_check`; now all five checks pass, each attributed to the panel
+  it is on, three panels are read, and the signature is the only rejection,
+  on `area`. The floor arithmetic is asserted over all eighteen measured
+  pictures across the three real documents, and the v1.4.0 verdicts are held
+  as a guard against a shape rule coming back. Neither of the author's
+  documents, nor any excerpt, enters the repository; only the dimensions do.
+- `samples/labelmaker.py` renders a label panel at a stated pixel size, flat
+  or turned, for fixtures shaped like real panels.
+
+#### Measured
+
+- On a session container with one worker, a three-panel filing costs about
+  1.35 times a one-panel filing per label (2.69 s against 2.00 s over twenty
+  rows), not three times: `tesseract_reads` is two per panel on either, and a
+  Tesseract pass costs by the text it reads rather than by the picture it is
+  handed. That is a property of the fixture's text density, not a law; the
+  per-panel cost is in the response and `TTB_MAX_ARTWORK_IMAGES` is the
+  lever. `GET /api/health` answered in a median of 3 ms and never over 69 ms
+  while a twenty-row batch ran. The tables are in
+  [docs/09](docs/09_DEPLOYMENT.md) section 9.
+
+### The batch tab sorts an image when it checks it (OQ-37)
+
+#### Changed
+
+- **An image dropped on the batch tab is no longer sent to
+  `POST /api/classify` on arrival.** Sorting a picture is a full OCR pass, the
+  same pass the check makes a moment later in another request, and twenty
+  label photographs cost 23 s of "Reading..." on the 2026-09-02 container and
+  36.55 s on the 2026-09-03 one before the batch had started. A cache of that
+  read is what NFR-6 forbids. A downscaled read was measured before being
+  chosen against: at every scale down to 600 pixels it cost 70 to 85 percent
+  of a full read, because a low-confidence first arm sends the pipeline into
+  its other arms, and at 400 pixels, the one scale that saved anything, it
+  sorted both synthetic photographed forms as labels. So the chip reads
+  "Label image, sorted when checked" with a line saying why, and the batch
+  line, which carries the server's sorting of every file in the row, replaces
+  it. A PDF is still sorted on arrival in the 56 ms it costs; a photographed
+  form is still sorted correctly, when checked; the single-label tab is
+  unchanged. OQ-37 closes.
+
+### Documents
+
+- ADR 0010 amended with the measurement and what replaced the floor; FR-11's
+  artwork criteria rewritten; the traceability matrix gains source row 42 and
+  the FR-11 evidence; OQ-24 narrowed to the distribution across editions;
+  OQ-37 closed; A-17, the README status table and the test data policy in
+  docs/07 updated.
+
+
 ## [1.4.0] - 2026-09-03
 
 The bulk page becomes the same tool as the single-label page. The author,
