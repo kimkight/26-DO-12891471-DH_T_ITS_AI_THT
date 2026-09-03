@@ -13,7 +13,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BatchTab } from '../components/BatchTab'
+import { BatchTab, PROVISIONAL_REASON, PROVISIONAL_SIDE } from '../components/BatchTab'
 import { BatchTable } from '../components/BatchTable'
 import type { BatchRow } from '../components/BatchTable'
 import { resultsToCsv } from '../lib/csv'
@@ -283,11 +283,48 @@ describe('the batch tab', () => {
 
     await user.upload(picker(), [pdf('0001-stones-throw.pdf'), png('0002-hollow-creek.png')])
 
-    // The same chips the single-label tab puts beside a file (FR-12).
+    // The same chip the single-label tab puts beside an application (FR-12),
+    // from the same classification, which for a PDF costs milliseconds.
     await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
-    await waitFor(() => expect(screen.getByText('Label image')).toBeInTheDocument())
     expect(
       screen.getByText('This is a PDF, so we read it as the label application.'),
+    ).toBeInTheDocument()
+    // An image is not sent for sorting on arrival (OQ-37): sorting it is a
+    // full OCR pass the check makes again a moment later. The chip says it is
+    // provisional rather than pretending the server decided.
+    expect(screen.getByText(PROVISIONAL_SIDE)).toBeInTheDocument()
+    expect(screen.getByText(PROVISIONAL_REASON)).toBeInTheDocument()
+  })
+
+  it('sends no image for sorting on arrival, and lets the batch line sort it (OQ-37)', async () => {
+    const sortedByTheCheck: BatchLine = {
+      ...batchLine('form-photo.png', 1, 1, ['match', 'match', 'match', 'match', 'match']),
+    }
+    sortedByTheCheck.result!.files = [
+      fileClassification('form-photo.png', 'application_document', {
+        basis: 'form_markers',
+        reason: 'This picture carries the wording of a COLA application.',
+      }),
+    ]
+    const fetch = api([sortedByTheCheck])
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<BatchTab />)
+
+    await user.upload(picker(), [png('form-photo.png')])
+    expect(screen.getByText(PROVISIONAL_SIDE)).toBeInTheDocument()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/classify')).toHaveLength(0)
+    // Provisionally an image, so the batch has one label to check.
+    expect(screen.getByRole('button', { name: 'Check 1 label' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: /^Check/ }))
+
+    // The server read it as a photographed application, and the chip says so
+    // now that the server has actually looked.
+    await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
+    expect(screen.queryByText(PROVISIONAL_SIDE)).not.toBeInTheDocument()
+    expect(
+      screen.getByText('This picture carries the wording of a COLA application.'),
     ).toBeInTheDocument()
   })
 

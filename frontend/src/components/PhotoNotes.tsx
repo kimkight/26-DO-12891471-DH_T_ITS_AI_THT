@@ -13,18 +13,31 @@
  * every check is noise, and NFR-4's benchmark is an agent who should not have
  * to read past anything.
  */
-import { hasPhotoNotes, photoItemLabel, photoListHeading, photoNote } from '../lib/photos'
-import type { PhotoResult } from '../types'
+import {
+  artworkNote,
+  hasPhotoNotes,
+  photoItemLabel,
+  photoListHeading,
+  photoNote,
+} from '../lib/photos'
+import type { ApplicationDocumentResult, PhotoResult } from '../types'
 
 export function PhotoNotes({
   photos,
+  document,
   idPrefix = 'card',
 }: {
   photos: PhotoResult[]
+  /**
+   * The application block, for the pictures in it that were not the label
+   * side: set aside, or cleared the floor and not read (ADR 0010 as amended).
+   */
+  document?: ApplicationDocumentResult | null
   /** See `ResultCard`: two results on one page must not share heading ids. */
   idPrefix?: string
 }) {
-  if (!hasPhotoNotes(photos)) return null
+  const aside = artworkNote(document)
+  if (!hasPhotoNotes(photos) && !aside) return null
 
   return (
     <section className="photo-notes" aria-labelledby={`${idPrefix}-photo-notes-heading`}>
@@ -42,6 +55,7 @@ export function PhotoNotes({
           )
         })}
       </ul>
+      {aside ? <p className="photo-notes__aside">{aside}</p> : null}
     </section>
   )
 }

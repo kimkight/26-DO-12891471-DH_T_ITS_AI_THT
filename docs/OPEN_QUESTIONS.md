@@ -1210,9 +1210,10 @@ being wrong is that agents rename files they should not have had to.
 **Which COLA form editions embed the label artwork in the filed PDF, and which
 file it separately? And how big are those embedded images in practice?**
 
-**Status: Open, 2026-08-29. The first real answer arrived 2026-09-01, and it is
-the highest-value finding the secondary test produced: see the last paragraph,
-and #121.**
+**Status: Narrowed 2026-09-03. The size question is answered for two real
+filings and the floor is rebuilt on the answer; what stays open is the
+distribution across editions and submission routes, which two documents cannot
+give. See the last paragraph, ADR 0010 as amended, and #121.**
 
 [ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
 image from an uploaded COLA document, discards the ones below a size floor, and
@@ -1289,6 +1290,47 @@ submission that is already defensible (SC-5), so it is recorded here and in
 #121 rather than half-built. **What would change the answer:** the fixture,
 and the numbers from a second real Registry page. The printout itself never
 enters the repository.
+
+**The second filing answered it, and the floor is rebuilt (2026-09-03,
+v1.5.0).** The author put a real filed bourbon COLA through the deployed
+v1.4.0 build. One of five checks passed, and the response said why: six
+embedded pictures, five rejected on `short_edge`, and the aspect-ratio rule
+would have taken four of them next. Their sizes, which are the measurement
+this question asked for:
+
+| Picture | Area | Ratio | What it is |
+| --- | --- | --- | --- |
+| 1103 x 340 | 375,020 | 3.24 | a label panel |
+| 772 x 194 | 149,768 | 3.98 | small enough to be a neck band |
+| 1050 x 309 | 324,450 | 3.40 | a label panel |
+| 187 x 1697 | 317,339 | 9.07 | a vertical side band |
+| 1350 x 300 | 405,000 | 4.50 | a label panel, a wrap-around |
+| 687 x 195, the author's other filing | 133,965 | 3.52 | the applicant's signature |
+
+Against the Registry printout's seven (the largest 1442 by 433, then 754 by
+379, 800 by 226, 519 by 327, 190 by 190, 355 by 93, 238 by 62), that is three
+real documents and eighteen embedded pictures, which is a distribution of
+three rather than one. What it shows: the two shape rules reject real label
+panels wholesale and no value of either admits the panels while excluding the
+signature; the area floor at 250,000 admits every panel that carries a value
+on both filings and excludes the signature with margin on each side. So the
+shape rules are gone, the area floor is the whole of the floor, every panel
+that clears it is read and pooled, and the response lists what was read as
+well as what was set aside. [ADR 0010](adr/0010-embedded-label-artwork.md)
+as amended on 2026-09-03 records the reasoning; `backend/tests/test_artwork_panels.py`
+is the synthetic fixture in the bourbon's shape this entry asked for, and it
+fails on the v1.4.0 rules and passes on the new one. The 772 by 194 picture is
+still set aside, reported with its size and the reason, which is the right
+outcome for a neck band and would be the wrong one for a small back label;
+whether such a picture ever carries one of the five values is the part of this
+question the two filings do not answer.
+
+**What stays open.** Which form editions and submission routes embed the
+artwork at all, and the range of sizes across many filings rather than three.
+Two documents cannot answer that; a redacted or synthetic set from TTB still
+would. Nothing in the prototype blocks on it: the floor now has two real
+documents on either side of it rather than one on one side, and every picture
+is reported either way.
 
 
 
@@ -1962,8 +2004,10 @@ infrastructure change alongside OQ-35.
 **Classifying an image on arrival is an OCR pass, and the check makes it
 again. Should the batch tab pay it twice?**
 
-**Status: Open. Measured 2026-09-02 (section 9 of
-[09_DEPLOYMENT.md](09_DEPLOYMENT.md)); recorded rather than designed around.**
+**Status: Closed 2026-09-03, v1.5.0. The batch tab no longer sorts an image on
+arrival; it labels it provisionally and the batch line sorts it. The option
+was chosen by measurement, below, and the numbers are in section 9 of
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md).**
 
 **What was measured.** The batch tab classifies every file on arrival with the
 single-label tab's `POST /api/classify`, one request per file, two in flight
@@ -2003,3 +2047,48 @@ two files at a time.
 drops are applications, option 4 costs nothing; if they are photographs,
 option 1 is the one to measure.
 **Blocks:** nothing.
+
+**Measured and decided, 2026-09-03.** Three ways to make the arrival sort
+cheaper were on the table, since a cache is not: read a heavily downscaled
+copy, decide from metadata alone, or defer the decision to the check and say
+so in the chip. The first was measured before it was chosen against. On a
+session container, the twelve sample labels and two synthetic photographed
+forms (the paper form and a Registry printout rendered as PNGs by
+`samples/formmaker.py`) were each read once at five scales, and the read's
+verdict compared with what the file is:
+
+| Long edge | Label read, median | Twenty labels | Labels sorted right | Form read, median | Forms sorted right |
+| --- | --- | --- | --- | --- | --- |
+| 1600 px (the default) | 1784 ms | 21.2 s | 12 of 12 | 1860 ms | 2 of 2 |
+| 1000 px | 1247 ms | 15.0 s | 12 of 12 | 2103 ms | 1 of 2 |
+| 800 px | 1551 ms | 18.5 s | 12 of 12 | 1634 ms | 2 of 2 |
+| 600 px | 1335 ms | 15.7 s | 12 of 12 | 1110 ms | 1 of 2 |
+| 400 px | 550 ms | 7.3 s | 12 of 12 | 427 ms | 0 of 2 |
+
+Downscaling does not buy a proportional saving, and the reason is in the
+pipeline rather than in the engine: a read whose first arm comes back under
+the short-circuit confidence runs the other arms too, so a smaller image is
+read more times, and the cost lands between 70 and 85 percent of a full read
+until the scale is low enough that the form's own markers stop being
+recognized. At 400 pixels the read is a third of the cost and sorts both
+photographed forms as labels, which is the wrong side, silently, on the chip.
+The point of sorting on arrival was that the chip is the file's own evidence
+(ADR 0011); a chip that is right for labels and wrong for forms is a guess
+that looks like evidence.
+
+**The decision is to defer.** An image dropped on the batch tab is not sent
+to `POST /api/classify`. It is shown with the chip "Label image, sorted when
+checked" and a line saying why, the batch runs on it exactly as before, and
+the batch line, which carries what the server took each file in the row to
+be, replaces the chip with the server's sorting. A PDF is still sorted on
+arrival, because that costs under fifty milliseconds and reads no picture. So
+twenty label photographs cost nothing before the batch starts, where they cost
+23 s; a photographed form is still sorted correctly, a moment later than it
+was; and the check reads every image once, as it always did. The single-label
+tab is unchanged: one image's arrival read is what fills the five boxes from a
+photographed form, and one read was never the problem. Metadata alone was not
+taken because it is the same provisional answer with the word "provisional"
+left off. `frontend/src/__tests__/batchTable.test.tsx` asserts that no
+classify call is made for an image and that the line's sorting replaces the
+chip, including the case of a photographed form the server sorts to the other
+side.

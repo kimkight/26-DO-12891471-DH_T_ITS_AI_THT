@@ -720,7 +720,12 @@ the last three defect sessions rather than a one-off.
 What is now assumed rather than read is which filings embed their artwork at
 all, and how large those images typically are. One document establishes that the
 practice exists and that the form's item 15 speaks of "THE LABELS AFFIXED
-BELOW". It does not establish the distribution. Tracked as
+BELOW". A second, measured 2026-09-03, establishes that the artwork is not
+always one flat sheet: a bourbon filing embeds its labels as separate panels,
+front, back, wrap-around and side band, at ratios up to nine to one, and the
+size floor set from the first document rejected every one of them. The floor
+is now an area alone, set against both (ADR 0010 as amended). Two documents
+still do not establish the distribution. Tracked as
 [OQ-24](OPEN_QUESTIONS.md#oq-24).
 
 **Confirmed or falsified by:** running the parser against a real filed

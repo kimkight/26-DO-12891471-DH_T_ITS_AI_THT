@@ -240,20 +240,27 @@ class TestThePictureIsReadOnce:
         assert body["photos"][0]["origin"] == "application_artwork"
         assert body["photos"][0]["text_found"] is True
 
-    def test_reading_stops_once_every_value_has_been_found(self, artwork, second_artwork):
-        """A second picture that cannot add anything is not read.
+    def test_every_panel_is_read_and_the_response_lists_each(self, artwork, second_artwork):
+        """A second picture is read even when the first answered everything.
 
-        The values are taken in size order and never overwritten, so once all
-        four are in hand a further pass cannot change one thing in the response.
-        Before this it cost a full second on this runner and about three on the
-        deployed target.
+        Until v1.5.0 reading stopped once all four artwork values were in hand,
+        on the argument that a further pass could not change the response. It
+        could: the label side is now every panel pooled, and a panel left
+        unread cannot carry the government warning or the brand name into the
+        check. So every surviving panel up to the bound is read, and the cost
+        is reported per panel rather than hidden (ADR 0010 as amended).
         """
         body, _ = verify(document([artwork, second_artwork]))
         document_block = body["application_document"]
 
         assert document_block["artwork_images_found"] == 2
-        assert document_block["artwork_images_read"] == 1
-        assert body["timings"]["ocr_passes"] == 1
+        assert document_block["artwork_images_read"] == 2
+        assert body["timings"]["ocr_passes"] == 2
+        assert [image["status"] for image in document_block["artwork_images_accepted"]] == [
+            "read",
+            "read",
+        ]
+        assert len(body["photos"]) == 2
 
     def test_a_picture_that_answers_only_part_is_still_followed_by_the_next(
         self, artwork, second_artwork
