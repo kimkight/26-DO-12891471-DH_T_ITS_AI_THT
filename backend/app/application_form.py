@@ -72,7 +72,7 @@ import io
 import logging
 import re
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from functools import cached_property
@@ -83,9 +83,10 @@ import pypdfium2.raw as pdfium_raw
 from PIL import Image
 
 from app import timing
+from app.compare import Outcome
 from app.config import settings
 from app.ocr import OcrLine, OcrResult, UndecodableImageError, extract_text
-from app.parse import parse_fields
+from app.parse import ParsedFields, parse_fields
 from app.product_type import (
     CAPTION_TEXT,
     CaptionBox,
@@ -94,6 +95,7 @@ from app.product_type import (
     read_product_type,
     word_boxes_from_ocr,
 )
+from app.search import LabelUnit, label_units, verify_presence
 
 # The values a COLA document can supply. Four of them are compared against the
 # label (FR-2); the beverage type is carried for the interface, which asks for
@@ -419,8 +421,17 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # and the pictures are counted rather than read (ADR 0017). That is the
     # single most expensive thing this module does, and on the prefill pass it
     # was being paid for a second time by the check that followed it.
+    #
+    # The text side's values go in so the stopping rule can ask the question
+    # the check will ask: whether the declared brand and class or type appear
+    # on the panels read so far. On a scan there is no text side yet, and the
+    # rule falls back to the panels' own reading of those two.
     artwork = (
-        _read_artwork(contents.artwork, contents.artwork_rejected)
+        _read_artwork(
+            contents.artwork,
+            contents.artwork_rejected,
+            declared=None if contents.text_side is None else contents.text_side.values,
+        )
         if read_artwork
         else _unread_artwork(contents.artwork, contents.artwork_rejected)
     )
@@ -761,11 +772,16 @@ RejectionReason = Literal["area", "unreadable"]
 
 # What happened to one picture that cleared the floor. ``read`` means Tesseract
 # ran and text came back; ``no_text`` means it ran and nothing did;
-# ``undecodable`` means the picture would not decode for it; ``not_read``
-# means it was never put through the engine, either because the prefill pass
-# deliberately reads nothing (ADR 0017) or because it fell past
-# ``max_artwork_images``.
-AcceptedStatus = Literal["read", "no_text", "not_read", "undecodable"]
+# ``undecodable`` means the picture would not decode for it; ``not_needed``
+# means the panels read before it already carried all five values, so reading
+# stopped (ADR 0010 as amended a second time); ``not_read`` means it was never
+# put through the engine for a reason that is not the stopping rule, either
+# because the prefill pass deliberately reads nothing (ADR 0017) or because it
+# fell past ``max_artwork_images``. The two are kept apart because they mean
+# opposite things to the next person reading a response: ``not_needed`` says
+# the values were found without this picture, ``not_read`` says nothing about
+# whether they are on it.
+AcceptedStatus = Literal["read", "no_text", "not_needed", "not_read", "undecodable"]
 
 
 def _rejection(width: int, height: int) -> RejectionReason | None:
@@ -853,9 +869,12 @@ def _unread_artwork(
 
 
 def _read_artwork(
-    images: list[EmbeddedArtwork], rejected: list[RejectedImage] | None = None
+    images: list[EmbeddedArtwork],
+    rejected: list[RejectedImage] | None = None,
+    *,
+    declared: Mapping[str, str | None] | None = None,
 ) -> _ArtworkReading:
-    """Read every surviving embedded picture through the label OCR pipeline.
+    """Read the surviving embedded pictures, largest first, until the values are in hand.
 
     **The pipeline is the one label artwork goes through, unchanged.**
     ``extract_text`` is called with its defaults, so the v1.0.1 orientation
@@ -863,23 +882,34 @@ def _read_artwork(
     they do to a photograph. The artwork is flat, which is the input that
     pipeline handles well; that is the whole reason this is worth doing.
 
-    **Every panel up to ``max_artwork_images`` is read, largest first, and all
-    of them are handed on as the label side** (ADR 0010 as amended). A filing
-    that embeds its labels as separate panels puts the brand on the front, the
-    alcohol content and the net contents on the back, and the class or type
-    wherever the designer put it; a reading that stopped at the first panel to
-    answer anything reported the rest as absent. So there is no early exit any
-    more: reading stops when the panels run out or the bound is reached, and a
-    panel past the bound is reported as accepted and not read rather than
-    silently dropped. The cost is one label read per panel, and the response
-    carries it per panel.
+    **Panels are read in rank order, and reading stops when the panels read
+    so far carry all five values** (ADR 0010 as amended a second time). After
+    each panel ``_satisfied`` asks whether the pool now holds the declared
+    brand and class or type, the alcohol content, the net contents and the
+    government warning; the first time it does, the rest are listed as
+    ``not_needed`` and never read. A one-sheet filing is one read. A filing
+    that spreads its values over five panels is five reads, because the
+    fifth is where the last value was. A filing missing a value altogether
+    reads every panel up to ``max_artwork_images``, which is the one case the
+    sweep is doing real work, and the response says which panels were read
+    and how well.
+
+    **Why the stop is keyed to the check's question and not to "did this
+    panel yield a value".** The rule this replaces stopped once the four
+    application values were in hand, and on a filing whose government
+    warning sat on a further panel it reported the warning absent. The rule
+    before that read every panel to a fixed count, and on a filing with five
+    panels it never looked at the fifth. Both decided correctness with a
+    number that had nothing to do with where the values were. This one stops
+    only when nothing the check needs is still unread, and ``max_artwork_images``
+    is left as a ceiling on the worst case.
 
     Values are taken per field from the panel that read that field most
-    confidently, which is the rule ADR 0007 uses to merge two photographs of
-    one label and the rule that keeps a large picture read badly from
-    overriding a smaller one read well. The panel each value came from is
-    recorded, so a value that was misread can be traced to the picture it was
-    read off.
+    confidently among the panels read, which is the rule ADR 0007 uses to
+    merge two photographs of one label and the rule that keeps a large
+    picture read badly from overriding a smaller one read well. The panel each
+    value came from is recorded, so a value that was misread can be traced to
+    the picture it was read off.
 
     ``label_panels`` is every picture that read with text, the ones that yielded
     a label value first and then the rest, each group largest first. Preferring
@@ -896,11 +926,13 @@ def _read_artwork(
     accepted: list[AcceptedImage] = []
     with_values: list[LabelPanel] = []
     without_values: list[LabelPanel] = []
+    readings: list[ParsedFields] = []
+    units: list[LabelUnit] = []
 
     bound = settings.max_artwork_images
     accepted.extend(_accepted(image, "not_read") for image in images[bound:])
 
-    for image in images[:bound]:
+    for position, image in enumerate(images[:bound]):
         try:
             with timing.phase("artwork_ocr"):
                 result = extract_text(image.content)
@@ -931,6 +963,12 @@ def _read_artwork(
         panel = LabelPanel(artwork=image, read=result)
         (with_values if found else without_values).append(panel)
 
+        readings.append(parsed)
+        units.extend(label_units(result.lines))
+        if _satisfied(readings, units, declared or {}):
+            accepted.extend(_accepted(rest, "not_needed") for rest in images[position + 1 : bound])
+            break
+
     accepted.sort(key=lambda image: (-(image.width * image.height), image.page))
     panels = with_values + without_values
     return _ArtworkReading(
@@ -942,6 +980,55 @@ def _read_artwork(
         images_read=len(panels),
         label_panels=panels,
     )
+
+
+# The five things the check needs from the label side, and how each is known
+# to be in hand. The first two are the check's own search (ADR 0015); the
+# other three are located by pattern and by the statement's prefix.
+_SEARCHED_FOR_STOP = (("brand_name", False), ("class_type", True))
+_PATTERN_FOR_STOP = ("alcohol_content", "net_contents")
+
+
+def _satisfied(
+    readings: list[ParsedFields], units: list[LabelUnit], declared: Mapping[str, str | None]
+) -> bool:
+    """Whether the panels read so far carry everything the check will look for.
+
+    Five questions, one per value, and every one has to be yes.
+
+    **The brand name and the class or type are asked the way the check asks
+    them.** The check does not take a panel's largest text as the brand; it
+    searches the pooled label text for the value the application declares
+    (FR-1, ADR 0015). So where the document's text side declares one, this
+    searches the panels read so far for it with the same function and stops
+    only on a hit at the match threshold. A hit in the review band is not
+    enough to stop on: a later panel may print the value cleanly, and stopping
+    on the near miss would turn a match into a review for the sake of one
+    read. Where nothing is declared, a scan with no text layer say, the
+    panels' own reading of the field stands in, which is what the check falls
+    back to as well.
+
+    **The alcohol content, the net contents and the government warning are
+    located by pattern**, so a panel either shows them or does not, and the
+    first panel to show one settles it. The warning counts as found when its
+    prefix was located, whatever the body says: a defective statement is still
+    the statement, and no other panel prints a second one.
+
+    ``declared`` is the text side's values, or empty on a scan.
+    """
+    for name, strip_code in _SEARCHED_FOR_STOP:
+        stated = (declared.get(name) or "").strip()
+        if not stated:
+            if not any(getattr(parsed, name) is not None for parsed in readings):
+                return False
+            continue
+        comparison, _ = verify_presence(name, stated, units, strip_trailing_code=strip_code)
+        if comparison.outcome is not Outcome.MATCH:
+            return False
+    for name in _PATTERN_FOR_STOP:
+        if not any(getattr(parsed, name) is not None for parsed in readings):
+            return False
+    return any(parsed.warning.found for parsed in readings)
 
 
 def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> ParsedApplication:

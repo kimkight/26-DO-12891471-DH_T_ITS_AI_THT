@@ -179,10 +179,12 @@ export interface AcceptedImageDetail {
   height: number
   /**
    * `read` means text came back; `no_text` means the read found none;
-   * `not_read` means it was never put through OCR, on the prefill pass or
-   * past the bound on how many pictures are read; `undecodable` speaks for itself.
+   * `not_needed` means the pictures read before it already carried all five
+   * values, so reading stopped; `not_read` means it was never put through OCR
+   * for another reason, on the prefill pass or past the ceiling on how many
+   * pictures are read; `undecodable` speaks for itself.
    */
-  status: 'read' | 'no_text' | 'not_read' | 'undecodable'
+  status: 'read' | 'no_text' | 'not_needed' | 'not_read' | 'undecodable'
   ocr_confidence: number | null
 }
 

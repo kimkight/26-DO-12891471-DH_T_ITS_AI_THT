@@ -218,6 +218,23 @@ describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)'
         '687 by 195 on page 5. One picture cleared the size floor and was not read as label ' +
         'artwork: 187 by 1697 on page 4 (past the limit on how many pictures are read).',
     )
+    // A picture the stopping rule left unread says so, and says why: the
+    // pictures before it had already carried every value.
+    expect(
+      artworkNote(
+        applicationDocument({
+          artwork_images_found: 2,
+          artwork_images_read: 1,
+          artwork_images_accepted: [
+            { page: 2, width: 1750, height: 1150, status: 'read', ocr_confidence: 89.6 },
+            { page: 3, width: 1050, height: 309, status: 'not_needed', ocr_confidence: null },
+          ],
+        }),
+      ),
+    ).toBe(
+      'One picture cleared the size floor and was not read as label artwork: 1050 by 309 on ' +
+        'page 3 (the pictures read before it already carried every value).',
+    )
     // Nothing to say is the ordinary case, and it says nothing.
     expect(artworkNote(applicationDocument())).toBeNull()
     expect(artworkNote(null)).toBeNull()
