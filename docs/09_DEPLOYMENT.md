@@ -1000,6 +1000,85 @@ This section is the record of the runs; the README is the summary of them.
       checked, and the check reads each image once as it always did. The
       single-label tab is unchanged.
 
+- [x] **The stopping rule, and what it recovered per shape** (#121, OQ-24;
+      [ADR 0010](adr/0010-embedded-label-artwork.md) as amended 2026-09-04).
+      **The second measurement on the deployed target first**, from the
+      author's browser on 2026-09-04 against the v1.5.0 build with the
+      rebuilt floor, same bourbon filing as the 2026-09-03 row:
+
+      | Page | Panel | Status | OCR confidence |
+      | --- | --- | --- | --- |
+      | 2 | 1950 x 862 | read | 45.3 |
+      | 4 | 1350 x 300 | read | 89.9 |
+      | 2 | 1103 x 340 | read | 29.0 |
+      | 3 | 1050 x 309 | read | 86.8 |
+      | 3 | 187 x 1697 | not read | |
+      | 2 | 772 x 194 | rejected, area | |
+
+      Brand name and class or type matched; document OCR confidence 62.8
+      against 45.3 on v1.4.0; alcohol content, net contents and government
+      warning still not found; `elapsed_ms` 7325 and `tesseract_reads` 16
+      against 2600 and 4 on v1.4.0. The two panels the shape rules had
+      rejected read better than the sheet they kept. The fifth panel was
+      never read because `TTB_MAX_ARTWORK_IMAGES` was four.
+
+      **Before and after the stopping rule, on a session container**, not
+      production hardware: a local uvicorn with `TTB_BATCH_WORKERS=1` and
+      `OMP_THREAD_LIMIT=1` as the task definition sets them, one warm-up
+      request discarded, then three `POST /api/verify` requests per fixture
+      with the document alone. "Before" is the #140 merge (`2565f5e`, count
+      of four, no early exit) and "after" is this change, served from the
+      same container minutes apart. Three synthetic fixtures, none the
+      author's document: the one-sheet filing is
+      `samples/applications/filed/01-spirits-clean.pdf`; the five-panel
+      filing is `backend/tests/test_artwork_panels.py`'s bourbon-shaped
+      document, whose last three values are on the 187 by 1697 strip that
+      ranks fifth; the sheet-plus-two is the 1000 by 1500 sample label ahead
+      of two prose panels, the shape a stopping rule is for.
+
+      | Fixture | `elapsed_ms` before, median (min, max) | `tesseract_reads` before | panels read before | outcome before | `elapsed_ms` after, median (min, max) | `tesseract_reads` after | panels read after | outcome after |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | one-sheet filing | 1072 (1022, 1090) | 2 | 1 | 5 of 5 | 1021 (1021, 1053) | 2 | 1 | 5 of 5 |
+      | five-panel filing, values on the fifth | 1745 (1723, 1792) | 8 | 4 of 5 | 2 of 5 | 2566 (2534, 2598) | 13 | 5 of 5 | 5 of 5 |
+      | sheet plus two prose panels | 1845 (1794, 1853) | 6 | 3 | 4 of 4 compared | 1141 (1076, 1160) | 2 | 1 | 4 of 4 compared |
+
+      `ocr_passes` equals panels read on every row and `label_ocr_ms` is zero
+      on every row: each panel is read once and that read is the label side
+      (ADR 0017). The sheet-plus-two row compares four fields because its
+      paper form declares no class or type. The five-panel row's 13 reads for
+      5 passes against 8 for 4 is the strip: turned 90 degrees, it costs the
+      orientation call, the 180-degree second opinion and the arms.
+
+      **What the table says, plainly.** On the one-sheet filing nothing
+      changes: one pass either way. On the sheet-plus-two the rule reads one
+      panel where the count read three, and that is the whole of what it
+      recovers: reads that were never needed. On the five-panel filing it
+      recovers nothing, because the values the check needs are on the last
+      panel and the rule reads until it has them; what changes there is the
+      outcome, two of five to five of five, at the cost of one more panel
+      than the count allowed. **So the stopping rule does not recover most
+      of the bourbon's 4.7 seconds, and this is said rather than implied.**
+      If the author's three missing values are on the strip, the bourbon's
+      cost is five panels' worth of reads, about what four cost plus one
+      strip, and the correct answer. If they are on the panel that read at
+      29.0, the count was never the problem and a low-contrast preprocessing
+      change is the next fix. Which it is, the next request settles.
+
+- [ ] **The bourbon on the deployed build, once this is deployed.** The
+      manual step that settles which panel each of the three values is on.
+      Submit the bourbon filing alone on the single-label tab and read
+      `application_document.artwork_images_accepted`: the 187 by 1697 strip
+      should now be `read` with a confidence beside it, and
+      `fields[].source_photo` with `photos[].artwork_panel` names the panel
+      each check's value was found on. Record here: the panel for each of
+      the five values, the strip's confidence, `elapsed_ms` and
+      `tesseract_reads`. If the strip reads and the three values are on it,
+      OQ-24's size question is closed for this filing and the cost is the
+      cost of five panels. If the strip reads and the three values are still
+      absent, the 1103 by 340 panel at 29.0 is the next suspect and the fix
+      is preprocessing, not counting. Nothing about the document enters the
+      repository; the numbers do.
+
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
 section have been updated from this run.

@@ -2,10 +2,138 @@
 
 | | |
 | --- | --- |
-| Status | Accepted; the size floor and the one-image label side amended 2026-09-03 |
+| Status | Accepted; the size floor and the one-image label side amended 2026-09-03; the fixed read count replaced by a stopping rule 2026-09-04 |
 | Date | 2026-08-29 |
 | Author | Kimberly D. Kight |
 | Decision reference | Extends FR-11 and [ADR 0008](0008-cola-form-as-application-input.md); amends assumption A-17; supplies the label side the one-upload change that follows it depends on; leaves [ADR 0009](0009-batch-cola-documents.md) intact |
+
+## Amendment, 2026-09-04: shape was the wrong discriminator, and a count was silently deciding correctness
+
+**What this amends.** Point 2 of the amendment below. Every picture above the
+floor is no longer read to a fixed count with no early exit; pictures are read
+largest first and reading stops as soon as the panels read so far carry all
+five values. `TTB_MAX_ARTWORK_IMAGES` stays, as a ceiling on the worst case,
+and its default rises from four to eight. Everything else in both amendments
+stands.
+
+**What the second measurement showed.** The amendment below was deployed and
+the bourbon filing was put through it again on 2026-09-04. It worked, and the
+evidence was better than expected:
+
+| Page | Panel | Status | OCR confidence |
+| --- | --- | --- | --- |
+| 2 | 1950 x 862 | read | 45.3 |
+| 4 | 1350 x 300 | read | 89.9 |
+| 2 | 1103 x 340 | read | 29.0 |
+| 3 | 1050 x 309 | read | 86.8 |
+| 3 | 187 x 1697 | not read | |
+| 2 | 772 x 194 | rejected, area | |
+
+The brand name and the class or type now match. The document's OCR
+confidence went from 45.3 to 62.8. The two strips the old shape rules threw
+away read at 86.8 and 89.9, better than the 45.3 of the wide sheet the rules
+had kept, which is the clearest possible refutation of the shape heuristic:
+neither size nor shape says which panel carries a value, or how well it will
+read.
+
+**But it was two of five, not five of five.** The alcohol content, the net
+contents and the government warning were still not found, and the cost went
+from 2,600 ms and 4 Tesseract reads to 7,325 ms and 16. Two explanations were
+possible and they call for different fixes. The unread panel: the count was
+four, the 187 by 1697 side strip is the smallest of the five and was the one
+dropped, and a tall narrow strip is exactly where a spirits label carries its
+warning, alcohol statement and net contents. The badly read panel: the 1103 by
+340 panel read at 29.0, and if the values sat on it the problem would be the
+read, not the count, and raising the count would change nothing. **The count
+was deciding correctness on the one real five-panel filing measured**, and it
+was doing so by a number chosen as a latency bound.
+
+Which explanation is right is settled by reading all five panels once and
+reading the response, which since the amendment below names the panel each
+value was found on with its confidence. This amendment makes the fifth panel
+readable on the deployed build; the measurement itself is the author's next
+request against it, recorded in `docs/09_DEPLOYMENT.md` section 9. The
+synthetic fixture in the bourbon's shape puts the three values on the strip
+and reproduces the two-of-five outcome exactly at a count of four.
+
+**Reading every panel every time was the wrong shape.** Whatever the answer,
+reading four or five panels on every document to find five values is what
+took this filing from 2.6 to 7.3 seconds, and a one-sheet filing needs one
+read. The rule that replaces the count reads panels in rank order and, after
+each one, asks whether all five values are now in hand; it stops the first
+time they are. On the one-sheet filing that is one read and no change. On a
+filing whose values are spread across panels it is however many reads it
+takes, and no more. A document whose values genuinely are not present still
+costs the full sweep, which is correct, because that is the case where the
+sweep is doing real work; the response lists every panel read with its
+confidence so the absence can be traced to the pictures that were looked at.
+
+**"In hand" is the check's question, not the panel's.** The rule this
+replaced in v1.5.0 stopped once the four application values had been read off
+any panel, and a panel carrying only the government warning was left unread.
+The mistake was not the stopping; it was what the stop was keyed to. A label
+panel's largest text is only a candidate for the brand, and a back label
+prints the distiller's name large above the alcohol content, the net contents
+and the warning. A rule that took that candidate as the brand would stop on
+the back and never read the front, and the check that followed, which
+searches the pooled text for the brand the application declares (ADR 0015),
+would report the brand not found. So the stopping rule asks exactly what the
+check asks: the declared brand and class or type found on the panels read so
+far by the check's own search, at the match threshold and not in the review
+band; the alcohol content and the net contents located by pattern; the
+government warning located by its prefix. Where the document declares nothing,
+a scan with no text layer, the panels' own reading of the two stands in, as
+it does for the check.
+
+**The decision, amended.**
+
+1. **Panels are read largest first and reading stops when the panels read so
+   far carry all five values.** The rest are reported as accepted and
+   `not_needed`, a status distinct from `not_read`, because the two mean
+   opposite things to the next person reading a response: `not_needed` says
+   the values were found without this picture; `not_read` says nothing about
+   whether they are on it.
+2. **`TTB_MAX_ARTWORK_IMAGES` is a ceiling on the worst case and nothing
+   else.** Its default is eight, twice the most any measured filing carries
+   above the floor, so that on every filing measured it is never what decides
+   whether a value is found. An operator on slower hardware can lower it, and
+   the panels it cuts are listed as `not_read`.
+3. **The response still carries the table**, with per-panel confidence. It is
+   what made the second measurement diagnosable in one request, and it stays.
+
+**What is given up, and accepted.** Two per-field rules now see fewer panels.
+The value for a field is taken from the panel that read it most confidently
+*among the panels read*, and the warning from the panel that showed the most
+of it *among the panels read*; a later panel that would have read either
+better is not consulted once the five are in hand. On a filed panel, as
+against a photograph, a value is printed once and the whole panel is in the
+picture, so the trade is a cleaner reading of a value already found against a
+full Tesseract pass per panel. The residual, a large panel read badly ahead
+of a small one read well, is visible in the response as the confidence beside
+each panel and the panel beside each value.
+
+**What it costs, measured.** The before-and-after table is in
+`docs/09_DEPLOYMENT.md` section 9. In short: the one-sheet filing is one read
+either way; a sheet ahead of two prose panels drops from three reads to one;
+and the five-panel fixture in the bourbon's shape, whose last value is on its
+last panel, reads all five, which is one more read than the count allowed and
+is the read that finds the three values. On that shape the stopping rule
+recovers nothing, and it is said here rather than implied: what the rule buys
+is that no document pays for panels it does not need, not that the bourbon
+gets cheaper. If the author's next measurement shows the bourbon's three
+values on the strip, its cost is the cost of five panels; if it shows them on
+the panel that read at 29.0, the fix is preprocessing for a low-contrast
+strip and it is a different change.
+
+**Evidence.** `backend/tests/test_artwork_panels.py`, rebuilt as the bourbon's
+five pictures above the floor with the alcohol content, the net contents and
+the government warning on the 187 by 1697 strip that ranks last by area. On
+the v1.5.0 rule at a count of four it returns two of five with the strip
+listed as not read; with this amendment all five checks pass, each
+attributed to its panel. `TestTheStoppingRule` holds the rule's own answers
+on readings built from text, including the back-label case above and the
+near miss it must not stop on; `TestReadingStopsWhenTheValuesAreInHand` holds
+the one-read case, the back-then-front case and the full sweep on real reads.
 
 ## Amendment, 2026-09-03: the floor was set from one document, and the second one showed it wrong
 
@@ -72,7 +200,9 @@ be square-ish, and they were rejecting the thing the form is about.
    once all four artwork values were in hand; with panels, the panel that
    carries the government warning may be the one that would not have been
    read. A picture past the bound is reported as accepted and not read rather
-   than dropped.
+   than dropped. *Superseded on 2026-09-04 by the amendment above: the count
+   of four dropped the fifth panel on the one real five-panel filing, and a
+   stopping rule keyed to the check's question replaced it.*
 3. **The label side is every panel that read, pooled**, the way
    [ADR 0007](0007-multi-photo-single-label.md) pools three photographs of one
    bottle: the brand is searched for across all of them, the pattern fields are
@@ -102,7 +232,9 @@ be reported at a confidence no agent would trust.
 **What it costs.** Reading four panels is four label reads, and there is no
 heuristic that reads fewer without saying so. The measured cost per label, one
 panel against three, is in `docs/09_DEPLOYMENT.md` section 9, and the lever is
-`TTB_MAX_ARTWORK_IMAGES`, which now reports what it cut.
+`TTB_MAX_ARTWORK_IMAGES`, which now reports what it cut. *The second
+measurement, above, showed that on the real filing this was four reads that
+still missed three values, and the stopping rule replaced the count.*
 
 **Evidence.** `backend/tests/test_artwork_panels.py` is a synthetic filing in
 the bourbon's shape, built from the dimensions above and carrying no real
@@ -291,9 +423,10 @@ the file they had already uploaded.
 
 **Negative**
 
-- Reading pictures costs OCR time. A document with four surviving images pays
-  about four label reads, on top of parsing. `TTB_MAX_ARTWORK_IMAGES` bounds it
-  and the response reports how many were read.
+- Reading pictures costs OCR time. A document pays one label read per panel
+  it takes to find the five values, on top of parsing, and a document missing
+  a value pays for every panel up to `TTB_MAX_ARTWORK_IMAGES`; the response
+  reports how many were read and what happened to each.
 - The size floor is a judgement, not a measurement. A filing that embeds a large
   photograph of something that is not a label can have it read and, if it
   yielded no label value while a smaller real label did, still lose to the real

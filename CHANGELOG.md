@@ -14,6 +14,104 @@ was read, and the aspect-ratio rule would have taken four of them next. The
 reader never saw the label. [ADR 0010](docs/adr/0010-embedded-label-artwork.md)
 is amended rather than rewritten, and #121 closes with this.
 
+### Reading stops when the values are in hand (ADR 0010 as amended 2026-09-04, FR-11, #121)
+
+The rebuilt floor was deployed and the bourbon was put through it again. It
+worked, and the evidence was better than expected: every panel cleared the
+floor, the brand and the class or type matched, and the two panels the shape
+rules had thrown away read at 86.8 and 89.9, better than the 45.3 of the
+wide sheet the rules had kept. It was also two of five, not five of five. The
+alcohol content, the net contents and the government warning were still not
+found, and the cost had gone from 2,600 ms and 4 Tesseract reads to 7,325 ms
+and 16. `TTB_MAX_ARTWORK_IMAGES` was four, the filing carries five pictures
+above the floor, and the 187 by 1697 side strip, the smallest, was listed as
+`not_read`. A tall narrow strip is exactly where a spirits label carries
+those three values. The count chosen as a latency bound was deciding
+correctness, and reading every panel to that count on every document was the
+wrong shape either way.
+
+#### Changed
+
+- **Panels are read largest first, and reading stops as soon as the panels
+  read so far carry all five values.** After each panel the reader asks the
+  question the check will ask: the declared brand and class or type found on
+  the pooled text by the check's own search (ADR 0015), at the match
+  threshold and not in the review band; the alcohol content and the net
+  contents located by pattern; the government warning located by its prefix.
+  A one-sheet filing is one read, as before. A sheet ahead of two prose
+  panels is one read where it was three. A filing whose last value is on its
+  last panel reads every panel, which is the read that finds the value. A
+  filing missing a value reads every panel up to the ceiling, and the
+  response lists each with its confidence so the absence is traceable. The
+  rule is keyed to the check's question and not to "did this panel yield a
+  value" because a back label prints the distiller's name large above the
+  three pattern fields, and a rule that took that as the brand would stop
+  there and never read the front.
+- **`TTB_MAX_ARTWORK_IMAGES` is a ceiling on the worst case, and its default
+  is eight, up from four.** Twice the most any measured filing carries above
+  the floor, so that on every filing measured it is never what decides
+  whether a value is found. The setting's comment says what it is now for.
+  The panels it cuts are still listed as `not_read`.
+- **A panel the stopping rule left unread is `not_needed`**, a new value of
+  `application_document.artwork_images_accepted[].status`, distinct from
+  `not_read`: the first says the values were found without this picture,
+  the second says nothing about whether they are on it. The interface's
+  note under the artwork list says which. Per-panel confidence stays in the
+  response; it is what made the second measurement diagnosable in one
+  request.
+
+#### Added
+
+- **`backend/tests/test_artwork_panels.py` rebuilt as the bourbon's five
+  pictures above the floor**, a 1950 by 862 sheet, a 1350 by 300 front, a
+  1103 by 340 wrap-around, a 1050 by 309 back, a 187 by 1697 side strip
+  carrying the alcohol content, the net contents and the government warning,
+  and the 687 by 195 signature. At a count of four with no stopping rule it
+  returns two of five with the strip listed as not read, exactly the
+  deployed outcome; with this change all five pass, each attributed to its
+  panel, and the two-of-five outcome is held under a forced count of four as
+  a guard. The stopping rule's own answers are held on readings built from
+  text, including the back-label case and the near miss it must not stop on,
+  and on real reads: one read when the sheet answers everything, back then
+  front when the back's largest text is not the brand, and the full sweep
+  when a value is missing. Neither of the author's documents, nor any
+  excerpt, enters the repository; only the dimensions and the measured
+  confidences do.
+
+#### Measured
+
+- On a session container with one worker, before the change (the #140
+  merge) and after, three `POST /api/verify` requests per fixture with the
+  document alone, medians of `elapsed_ms` and `tesseract_reads`:
+
+  | Fixture | Before | After |
+  | --- | --- | --- |
+  | one-sheet filing | 1072 ms, 2 reads, 5 of 5 | 1021 ms, 2 reads, 5 of 5 |
+  | five-panel filing, values on the fifth | 1745 ms, 8 reads, 4 panels, **2 of 5** | 2566 ms, 13 reads, 5 panels, **5 of 5** |
+  | sheet plus two prose panels | 1845 ms, 6 reads, 3 panels | 1141 ms, 2 reads, 1 panel |
+
+  The one-sheet filing is unchanged. The sheet-plus-two, the shape a
+  stopping rule is for, drops from three panels to one. The five-panel
+  filing costs more, not less, because its last value is on its last panel
+  and the rule reads until it has it; **the stopping rule does not recover
+  most of the bourbon's 4.7 seconds on that shape, and this is said rather
+  than implied.** What it buys is that no document pays for panels it does
+  not need. The full tables are in [docs/09](docs/09_DEPLOYMENT.md) section
+  9, with the manual step against the deployed build that settles which
+  panel the bourbon's three values are on.
+
+### Documents
+
+- ADR 0010 amended a second time with the second measurement, why shape was
+  the wrong discriminator, and why a stopping rule keyed to the check's
+  question replaced a count that was deciding correctness; FR-11's panel
+  criteria amended; the traceability matrix gains source row 43; OQ-24
+  narrowed to the editions and routes question alone, with no code decision
+  resting on it; the README status row, `docs/05` settings table and
+  `.env.example` updated for the ceiling and its purpose; `docs/09` section 9
+  gains the before-and-after table and the manual step against the deployed
+  build.
+
 ### The label panels are read (ADR 0010 as amended, FR-11, #121)
 
 #### Changed

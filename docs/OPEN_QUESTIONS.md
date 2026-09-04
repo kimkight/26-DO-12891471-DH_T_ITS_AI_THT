@@ -33,7 +33,7 @@ updates every artifact the answer affects.
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
 | [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
-| [OQ-24](#oq-24) | Open; a real answer arrived 2026-09-01 (#121) and is tracked, not fixed, in v1.3.0 | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010), and the floor is now known to reject a real Registry printout's artwork wholesale |
+| [OQ-24](#oq-24) | Narrowed 2026-09-03 and again 2026-09-04: the size question is answered for three real documents and no code decision now rests on it; what stays open is which editions and routes embed the artwork at all | Nothing in the prototype; it bounds the coverage claim for the embedded artwork path (ADR 0010) and nothing else |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
 | [OQ-26](#oq-26) | Answered 2026-08-30: met at 5.0 s, at the line | Nothing; re-measured against deploy #12, and the 1.4 s the orientation check costs is what took the margin |
 | [OQ-27](#oq-27) | Open | Nothing; it would buy back part of the NFR-1 margin the orientation check consumed (OQ-26) |
@@ -1210,10 +1210,14 @@ being wrong is that agents rename files they should not have had to.
 **Which COLA form editions embed the label artwork in the filed PDF, and which
 file it separately? And how big are those embedded images in practice?**
 
-**Status: Narrowed 2026-09-03. The size question is answered for two real
-filings and the floor is rebuilt on the answer; what stays open is the
-distribution across editions and submission routes, which two documents cannot
-give. See the last paragraph, ADR 0010 as amended, and #121.**
+**Status: Narrowed 2026-09-03, and again 2026-09-04. The size question is
+answered for three real documents and the floor is rebuilt on the answer; the
+second measurement of the bourbon then showed that neither size nor shape
+says which panel carries a value, and the fixed read count that still rested
+on size is gone. No code decision now depends on the distribution this entry
+asks for. What stays open is which editions and submission routes embed the
+artwork at all, which bounds the coverage claim and nothing else. See the last
+two paragraphs, ADR 0010 as amended twice, and #121.**
 
 [ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
 image from an uploaded COLA document, discards the ones below a size floor, and
@@ -1325,12 +1329,30 @@ outcome for a neck band and would be the wrong one for a small back label;
 whether such a picture ever carries one of the five values is the part of this
 question the two filings do not answer.
 
+**The second measurement of the bourbon, and what it took off this question
+(2026-09-04).** The rebuilt floor was deployed and the bourbon was put through
+it again. Every panel cleared the floor; the two panels the shape rules had
+thrown away read at 86.8 and 89.9, better than the 45.3 of the wide sheet the
+rules had kept; the brand and the class or type matched. And the alcohol
+content, the net contents and the government warning were still not found,
+because `TTB_MAX_ARTWORK_IMAGES` was four, the filing carries five pictures
+above the floor, and the 187 by 1697 side strip ranked last by area and was
+never read. The size question this entry asked had been answered well enough
+to set the floor; it was still being asked, silently, by a count. Reading now
+stops when the panels read so far carry all five values and the count is a
+ceiling on the worst case, at eight (ADR 0010 as amended 2026-09-04). So the
+sizes of embedded pictures no longer decide anything in the code except which
+of them is the applicant's signature, and that decision has three real
+documents on the right side of it. Which of the bourbon's panels carries the
+three missing values is the author's next request against the deployed build,
+and the response now says; the synthetic fixture puts them on the strip.
+
 **What stays open.** Which form editions and submission routes embed the
-artwork at all, and the range of sizes across many filings rather than three.
-Two documents cannot answer that; a redacted or synthetic set from TTB still
-would. Nothing in the prototype blocks on it: the floor now has two real
-documents on either side of it rather than one on one side, and every picture
-is reported either way.
+artwork at all. Three documents cannot answer that; a redacted or synthetic
+set from TTB still would. It bounds the claim that the artwork path works
+across filings, and it is the reason no such claim is made. Nothing in the
+prototype blocks on it: every picture above the floor is read until the values
+are in hand, and every picture is reported either way.
 
 
 
