@@ -240,27 +240,32 @@ class TestThePictureIsReadOnce:
         assert body["photos"][0]["origin"] == "application_artwork"
         assert body["photos"][0]["text_found"] is True
 
-    def test_every_panel_is_read_and_the_response_lists_each(self, artwork, second_artwork):
-        """A second picture is read even when the first answered everything.
+    def test_a_picture_that_answers_everything_is_the_last_one_read(self, artwork, second_artwork):
+        """A second picture is not read when the first carried all five values.
 
-        Until v1.5.0 reading stopped once all four artwork values were in hand,
-        on the argument that a further pass could not change the response. It
-        could: the label side is now every panel pooled, and a panel left
-        unread cannot carry the government warning or the brand name into the
-        check. So every surviving panel up to the bound is read, and the cost
-        is reported per panel rather than hidden (ADR 0010 as amended).
+        Two rules preceded this one and both were wrong in opposite directions.
+        Until v1.5.0 reading stopped once the four application values were in
+        hand, and a panel carrying only the government warning was left
+        unread. v1.5.0 as first merged read every panel to a fixed count with
+        no early exit, and on a real five-panel filing the count was four, so
+        the fifth panel was never looked at while the four that were cost 7.3
+        seconds. Now reading stops when the panels read so far carry
+        everything the check will look for, the declared brand and class by
+        the check's own search and the other three by pattern, and the rest
+        are listed as not needed rather than read or dropped (ADR 0010 as
+        amended a second time).
         """
         body, _ = verify(document([artwork, second_artwork]))
         document_block = body["application_document"]
 
         assert document_block["artwork_images_found"] == 2
-        assert document_block["artwork_images_read"] == 2
-        assert body["timings"]["ocr_passes"] == 2
+        assert document_block["artwork_images_read"] == 1
+        assert body["timings"]["ocr_passes"] == 1
         assert [image["status"] for image in document_block["artwork_images_accepted"]] == [
             "read",
-            "read",
+            "not_needed",
         ]
-        assert len(body["photos"]) == 2
+        assert len(body["photos"]) == 1
 
     def test_a_picture_that_answers_only_part_is_still_followed_by_the_next(
         self, artwork, second_artwork
@@ -268,8 +273,8 @@ class TestThePictureIsReadOnce:
         """The front-and-back case ADR 0010 reads several pictures for.
 
         The largest picture carries no net contents, so the reading must go on
-        to the next one. This is the case the early exit must not break, and it
-        is asserted rather than argued.
+        to the next one. This is the case the stopping rule must not break, and
+        it is asserted rather than argued.
         """
         from dataclasses import replace
 

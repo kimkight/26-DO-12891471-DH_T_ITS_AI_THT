@@ -102,18 +102,33 @@ class Settings(BaseSettings):
     # like, now made against two filings rather than one (NFR-11, OQ-24).
     min_artwork_pixels: int = 250_000
 
-    # How many surviving embedded images are read. Each one costs about what
-    # reading a label photograph costs, so this is a latency bound in the same
-    # sense max_document_pages is. Four, because a filing with front, back,
-    # wrap-around and side band panels is the most any source describes, and it
-    # is exactly what the bourbon filing measured on 2026-09-03 carries above
-    # the floor. Every surviving panel up to this many is read, largest first,
-    # and the text of all of them is pooled for the check: the brand may be on
-    # the front and the alcohol content on the back, and a check that read one
-    # panel and reported the others' contents as absent was the failure this
-    # setting used to hide. The cost is the panel count times one label read,
-    # and it is reported per panel in the response; see docs/09 section 9.
-    max_artwork_images: int = 4
+    # The ceiling on how many surviving embedded images are read on one
+    # document. It is a ceiling on the worst case, and nothing else: it no
+    # longer decides whether a value is found.
+    #
+    # Panels are read largest first, and reading stops as soon as the panels
+    # read so far carry all five values the check needs (the declared brand and
+    # class or type found by the check's own search, the alcohol content and
+    # the net contents by pattern, the government warning by its prefix). A
+    # one-sheet filing therefore costs one read whatever this number is, and a
+    # filing whose values are spread across panels costs as many reads as it
+    # takes to find them, and no more. The only document that reads this many
+    # is one whose values genuinely are not all present, and that is the case
+    # where the sweep is doing real work: the response reports each panel as
+    # read, with its confidence, so an absent value can be traced to the
+    # pictures that were looked at (docs/09 section 9, ADR 0010 as amended).
+    #
+    # Eight, because the bourbon filing measured on 2026-09-03 carries five
+    # pictures above the floor and the setting used to be four, which left the
+    # fifth, a 187 by 1697 side strip, listed as not read and never looked at.
+    # The two smaller panels it did read came back at 86.8 and 89.9 against
+    # the 45.3 of the largest, so neither size nor shape says which panel
+    # carries a value, and a ceiling that sits inside the count a real filing
+    # carries is a ceiling that decides correctness. Twice the most any
+    # measured filing embeds keeps it out of that position; an operator with
+    # slower hardware can lower it, and the panels it cuts are listed as
+    # not_read rather than dropped.
+    max_artwork_images: int = 8
 
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95

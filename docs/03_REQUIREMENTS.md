@@ -664,16 +664,21 @@ apply to a label image. The note under OOS-1 in
   and the two shape rules that sat beside it until v1.5.0 rejected five of the
   six pictures on one of them.
 - Given a document whose labels are embedded as separate panels, a front, a
-  back, a wrap-around, a side band, then every panel that clears the floor is
-  read and the text of all of them is pooled for the check: a value on any
-  panel counts as found, and the response says which panel it was found on
-  with its page and pixel size. A check that reads one panel and reports the
-  others' contents as absent does not meet this requirement.
+  back, a wrap-around, a side band, then the panels that clear the floor are
+  read largest first until the panels read carry all five values, and the
+  text of all of them is pooled for the check: a value on any panel counts as
+  found, and the response says which panel it was found on with its page and
+  pixel size. A check that reads one panel and reports the others' contents
+  as absent does not meet this requirement, and neither does one that stops
+  at a fixed count with a value still unread (ADR 0010, amended 2026-09-04):
+  the configured ceiling bounds the document missing a value, not the one
+  whose values are on its last panel.
 - Given any embedded picture, then the response lists it: the ones that
   cleared the floor with what happened to each (read, read with no text, not
-  read, undecodable) and the ones that did not with the reason, so that the
-  table an agent needs to see why a value is absent is in the response rather
-  than in an instrumented build.
+  needed because the panels before it carried every value, not read,
+  undecodable) and the ones that did not with the reason, so that the table
+  an agent needs to see why a value is absent is in the response rather than
+  in an instrumented build.
 - Given a value present in both the text layer and the embedded artwork, then
   the text-layer value is used. The precedence, end to end, is: typed by the
   agent, then the document's text layer or form fields, then the embedded

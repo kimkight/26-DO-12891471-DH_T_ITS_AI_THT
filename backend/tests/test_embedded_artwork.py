@@ -354,8 +354,11 @@ class TestTheArtworkIsChosenOverTheSignature:
     happened to each of those.
 
     The signature here is the large hypothetical one, 2000 by 580, which the
-    area floor admits. It is the harder case: the artwork has to be chosen
-    over a picture that was read, not over one that was set aside.
+    area floor admits. Since the stopping rule (ADR 0010 as amended a second
+    time) it is not even read: the label sheet is larger, it is read first,
+    it carries all five values, and the strip is listed as not needed. The
+    cases below hold that, and hold what the per-field rule does on the one
+    ordering where the strip is read first.
     """
 
     def test_the_artwork_is_read_and_the_signature_yields_nothing(self, label_artwork):
@@ -374,8 +377,33 @@ class TestTheArtworkIsChosenOverTheSignature:
         assert parsed.artwork_images_rejected == []
         assert [(image.page, image.status) for image in parsed.artwork_images_accepted] == [
             (3, "read"),
-            (2, "no_text"),
+            (2, "not_needed"),
         ]
+
+    def test_a_signature_read_first_yields_nothing_and_the_reading_goes_on(self):
+        """The ordering where the strip is read: larger than the label sheet.
+
+        A 2000 by 580 strip outranks the label sheet at half size, 500 by
+        750, so it is read first, yields no text, and the reading goes on to
+        the sheet, which answers. The strip is listed as no text.
+        """
+        image = Image.open(io.BytesIO(render_png_bytes(SAMPLE_LABEL)))
+        buffer = io.BytesIO()
+        image.resize((image.width // 2, image.height // 2)).save(buffer, format="PNG")
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(2000, 580), buffer.getvalue()],
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert [(image.page, image.status) for image in parsed.artwork_images_accepted] == [
+            (2, "no_text"),
+            (3, "read"),
+        ]
+        assert parsed.label_artwork is not None
+        assert parsed.label_artwork.page == 3
+        assert parsed.values["alcohol_content"] == "45% Alc./Vol. (90 Proof)"
 
     def test_the_values_come_off_the_artwork_and_not_off_the_signature(self, label_artwork):
         """The failure this prevents, stated as the values it would corrupt.
@@ -399,11 +427,14 @@ class TestTheArtworkIsChosenOverTheSignature:
     def test_a_signature_that_reads_as_letters_still_fills_nothing(self, label_artwork):
         """A strip that OCR turns into a word, next to a real label.
 
-        At 1442 by 433 the synthetic strip clears the floor and reads as three
-        letters at a mean word confidence in the thirties. The values are taken
-        per field from the panel that read them most confidently, so the label
-        wins every field, the strip is listed as read with its confidence, and
-        the label is the first panel offered as the label side.
+        At 1442 by 433 the synthetic strip clears the floor and, read on its
+        own, comes back as three letters at a mean word confidence in the
+        thirties. It ranks below the label sheet, the sheet answers everything,
+        and the strip is listed as not needed; had it been read, the per-field
+        rule takes every value from the panel that read it most confidently,
+        so the label would still win every field. Either way the label is the
+        first panel offered as the label side and nothing off the strip is
+        reported.
         """
         pdf = as_pdf_bytes(
             paper_form_lines(ApplicationSpec()),
@@ -419,10 +450,8 @@ class TestTheArtworkIsChosenOverTheSignature:
         assert parsed.label_artwork is not None
         assert parsed.label_artwork.page == 3
         strip = next(image for image in parsed.artwork_images_accepted if image.page == 2)
-        assert strip.status in ("read", "no_text")
-        if strip.status == "read":
-            assert strip.ocr_confidence is not None
-            assert strip.ocr_confidence < settings.review_threshold
+        assert strip.status == "not_needed"
+        assert strip.ocr_confidence is None
 
     def test_the_response_says_which_page_the_label_came_from(self, label_artwork):
         """An agent reading a poor result has to know which picture was read."""
@@ -437,7 +466,7 @@ class TestTheArtworkIsChosenOverTheSignature:
         assert document.artwork_images_rejected == []
         assert [(image.page, image.status) for image in document.artwork_images_accepted] == [
             (3, "read"),
-            (2, "no_text"),
+            (2, "not_needed"),
         ]
         assert [(image.width, image.height) for image in document.artwork_images_accepted] == [
             (1000, 1500),

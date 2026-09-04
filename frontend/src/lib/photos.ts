@@ -113,8 +113,12 @@ export function artworkNote(document: ApplicationDocumentResult | null | undefin
   return parts.length ? parts.join(' ') : null
 }
 
-const UNREAD_REASONS: Record<'no_text' | 'not_read' | 'undecodable' | 'read', string> = {
+const UNREAD_REASONS: Record<
+  'no_text' | 'not_needed' | 'not_read' | 'undecodable' | 'read',
+  string
+> = {
   no_text: 'no text was found on it',
+  not_needed: 'the pictures read before it already carried every value',
   not_read: 'past the limit on how many pictures are read',
   undecodable: 'it could not be decoded',
   read: 'read',

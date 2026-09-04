@@ -474,14 +474,17 @@ class AcceptedImageDetail(BaseModel):
     page: int = Field(description="The page the image sat on, numbered from 1.")
     width: int = Field(description="Its width in pixels, as the file stores it.")
     height: int = Field(description="Its height in pixels, as the file stores it.")
-    status: Literal["read", "no_text", "not_read", "undecodable"] = Field(
+    status: Literal["read", "no_text", "not_needed", "not_read", "undecodable"] = Field(
         description=(
             "What happened to it. 'read' means it went through OCR and text came "
             "back; 'no_text' means it went through and nothing did; "
-            "'undecodable' means it would not decode; 'not_read' means it was "
-            "never put through the engine, either because this was the prefill "
-            "pass that reads no picture (ADR 0017) or because it fell past "
-            "the bound on how many pictures are read (TTB_MAX_ARTWORK_IMAGES)."
+            "'undecodable' means it would not decode; 'not_needed' means the "
+            "pictures read before it, largest first, already carried all five "
+            "values, so reading stopped there (ADR 0010 as amended); 'not_read' "
+            "means it was never put through the engine for some other reason, "
+            "either because this was the prefill pass that reads no picture "
+            "(ADR 0017) or because it fell past the ceiling on how many "
+            "pictures are read (TTB_MAX_ARTWORK_IMAGES)."
         )
     )
     ocr_confidence: float | None = Field(
