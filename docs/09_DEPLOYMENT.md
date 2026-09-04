@@ -920,6 +920,86 @@ This section is the record of the runs; the README is the summary of them.
       like. The follow-up, and why it is not done here, is
       [OQ-37](OPEN_QUESTIONS.md#oq-37).
 
+- [x] **The cost of reading every panel, and the arrival sort on the batch
+      tab** (v1.5.0, #121, OQ-24, OQ-37; [ADR 0010](adr/0010-embedded-label-artwork.md)
+      as amended). **Measured 2026-09-03 on a session container**, not
+      production hardware, against a local uvicorn with `TTB_BATCH_WORKERS=1`
+      and `OMP_THREAD_LIMIT=1` as the task definition sets them, one warm-up
+      batch run first and discarded. This container is slower than the one
+      the 2026-09-02 rows above were taken on (a one-panel filing took 1.32 s
+      there and 1.98 s here), so the figures below compare with each other and
+      not with the rows above. Two fixture shapes, both synthetic and neither
+      the author's document: the one-panel filing is
+      `samples/applications/filed/*.pdf`, the Registry printout with the
+      rendered 1000 by 1500 label sheet affixed; the three-panel filing is
+      `backend/tests/test_artwork_panels.py`'s bourbon-shaped document, a
+      1350 by 300 front panel, a 1050 by 309 back panel, a 187 by 1697 side
+      band and a 687 by 195 signature, of which the floor admits the first
+      three. No image was sent, so every row's label side is the artwork
+      inside its application.
+
+      | Batch | Wall clock | Per label | `ocr_passes` per row | `tesseract_reads` per row, median (max) | row `total_ms`, median | `artwork_ocr_ms`, median | panels read |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | 1 one-panel filing | 1.98 s | 1.98 s | 1 | 2 (2) | 1973 | 1944 | 1 |
+      | 5 one-panel filings | 9.02 s | 1.80 s | 1 | 2 (4) | 1893 | 1874 | 1 |
+      | 20 one-panel filings | 40.04 s | 2.00 s | 1 | 2 (4) | 2084 | 2066 | 1 |
+      | 1 three-panel filing | 2.86 s | 2.86 s | 3 | 6 (6) | 2856 | 2841 | 3 |
+      | 5 three-panel filings | 13.39 s | 2.68 s | 3 | 6 (6) | 2731 | 2713 | 3 |
+      | 20 three-panel filings | 53.75 s | 2.69 s | 3 | 6 (6) | 2677 | 2661 | 3 |
+
+      Every row returned `ok` with `label_source` `application_artwork`, all
+      five checks passing on the three-panel filing and `label_ocr_ms` zero on
+      every row: each panel is read once, to fill the application values, and
+      that read is the label side (ADR 0017). **Three panels cost about 1.35
+      times one flat sheet, not three times.** The phase timings say where the
+      time goes: `artwork_ocr_ms` is the whole of the row on both shapes, and
+      `tesseract_reads` is two per panel (the orientation call and the read)
+      on either. A Tesseract pass costs by the text it has to read rather than
+      by the picture it is handed, and a 1350 by 300 panel carrying two lines,
+      scaled to the same 1600 pixel long edge, is about 0.9 s against about
+      1.9 s for a full sheet carrying the whole label including the
+      government warning. So four panels is not four times the work on
+      artwork shaped like this filing's; it is roughly the cost of the text
+      on them, however it is divided. **That is a property of this fixture's
+      text density and not a law**: the author's real bourbon panels carry
+      whatever they carry, and the honest per-label figure on the deployed
+      target is the next thing to measure with that document. The per-panel
+      cost is visible in the response either way, and the lever if it is too
+      high is `TTB_MAX_ARTWORK_IMAGES`, which now lists what it cut as
+      `not_read` rather than dropping it.
+
+      **The capacity limiter holds.** During the 20-row batches `GET
+      /api/health` was polled every 250 ms from a second thread: 159 probes
+      during the one-panel batch, median 3 ms, maximum 5 ms; 212 probes
+      during the three-panel batch, median 3 ms, maximum 69 ms. None was
+      near a second.
+
+      **Classify on arrival, for a twenty-file drop**, one `POST /api/classify`
+      per file with two in flight, on the same server, before the change:
+
+      | Twenty files | Wall clock | Per call, median |
+      | --- | --- | --- |
+      | filed PDFs | 0.57 s | 56 ms |
+      | label PNGs | 36.55 s | 3 734 ms |
+
+      The same shape as the 2026-09-02 row, on a slower container. Three
+      cheaper sorts were on the table, since NFR-6 rules out keeping the read
+      for the check: a heavily downscaled read, metadata alone, or deferring
+      the decision to the check with a provisional chip. The downscaled read
+      was measured before being chosen against, and the table is in
+      [OQ-37](OPEN_QUESTIONS.md#oq-37): at every scale down to 600 pixels it
+      cost 70 to 85 percent of a full read, because a lower-confidence first
+      arm sends the pipeline into its other arms, and at 400 pixels, the one
+      scale that saved anything, it sorted both synthetic photographed forms
+      as labels. **The batch tab now defers.** An image is not sent on
+      arrival; its chip reads "Label image, sorted when checked" with a line
+      saying why, and the batch line, which carries the server's sorting of
+      every file in the row, replaces it. So the twenty-PNG figure above is
+      now 0 s before the batch starts, a PDF is still sorted on arrival in
+      the 56 ms it costs, a photographed form is still sorted correctly when
+      checked, and the check reads each image once as it always did. The
+      single-label tab is unchanged.
+
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
 section have been updated from this run.

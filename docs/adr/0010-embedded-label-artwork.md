@@ -2,10 +2,113 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; the size floor and the one-image label side amended 2026-09-03 |
 | Date | 2026-08-29 |
 | Author | Kimberly D. Kight |
 | Decision reference | Extends FR-11 and [ADR 0008](0008-cola-form-as-application-input.md); amends assumption A-17; supplies the label side the one-upload change that follows it depends on; leaves [ADR 0009](0009-batch-cola-documents.md) intact |
+
+## Amendment, 2026-09-03: the floor was set from one document, and the second one showed it wrong
+
+**What this amends.** Two parts of the decision below: the size floor, which
+is now an area alone, and the label side, which is now every panel that read
+rather than the largest one. The rest stands: extract rather than render, the
+label pipeline unchanged, artwork never overrides text, and the
+self-consistency limitation stated everywhere it applies.
+
+**How the floor was set.** The floor in the section below was chosen against
+one example, the author's own filing, whose label artwork is a single flat
+sheet at 1750 by 1150 pixels and whose signature is a strip at 687 by 195. Two
+absolute sizes were stated as a judgement, a 400 pixel shortest edge and a
+250,000 pixel area, and v1.1.0 added a 3.0 long-to-short edge ratio so that the
+same signature scanned at a higher resolution would still be excluded by its
+shape. The comment on the ratio said it "sits above the widest wrap-around
+label any source describes". No source had described one; the artwork in hand
+was 1.52 to one.
+
+**What the second document showed.** On 2026-09-03 the author put a second real
+filed COLA, a bourbon, through the deployed v1.4.0 build, and one of five
+checks passed. The reader never saw the label. The document embeds its labels
+as six separate pictures, and five were rejected before any was read, every one
+of them on `short_edge`:
+
+| Picture | Short edge | Area | Ratio | Edge floor | Area floor | Ratio ceiling |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1103 x 340 | 340 | 375,020 | 3.24 | fails | passes | fails |
+| 772 x 194 | 194 | 149,768 | 3.98 | fails | fails | fails |
+| 1050 x 309 | 309 | 324,450 | 3.40 | fails | passes | fails |
+| 187 x 1697 | 187 | 317,339 | 9.07 | fails | passes | fails |
+| 1350 x 300 | 300 | 405,000 | 4.50 | fails | passes | fails |
+| 687 x 195, the signature on the other filing | 195 | 133,965 | 3.52 | fails | fails | fails |
+
+Those are a front label, a back label, a wrap-around and a vertical side band;
+the 772 by 194 picture is small enough to be a neck band. The one picture that
+survived yielded the class or type and nothing else, so the brand name came
+back "not found on the label" and the alcohol content and the net contents
+came back absent, with an artwork OCR confidence of 45.3 against 62.7 on the
+filing that passes. The Registry printout tracked in #121 is the same finding
+at a different size: seven pictures, the largest 1442 by 433, all seven
+rejected, the largest on the ratio.
+
+**What the table says.** Area alone puts the signature on one side and four of
+the five panels on the other, with a margin: 133,965 below the floor, 317,339
+above it. The short edge and the ratio put every panel on the signature's
+side, and no value of either could be chosen that admits the panels and
+excludes the strip: the widest panel is 9.07 to one against the signature's
+3.52, and the narrowest panel's short edge is 187 against the signature's 195.
+A wrap-around spirits label at four and a half to one is ordinary. The shape
+rules were a guess about what labels look like, made from one that happened to
+be square-ish, and they were rejecting the thing the form is about.
+
+**The decision, amended.**
+
+1. **The floor is `TTB_MIN_ARTWORK_PIXELS` alone**, 250,000 by default, and its
+   stated purpose is to exclude the applicant's signature. The setting's
+   comment carries the two measured numbers on either side of it.
+   `TTB_MIN_ARTWORK_EDGE_PX` and `TTB_MAX_ARTWORK_ASPECT_RATIO` are removed;
+   setting either has no effect, and the rejection reasons `short_edge` and
+   `aspect_ratio` are no longer produced.
+2. **Every picture that clears the floor is read, largest first, up to
+   `TTB_MAX_ARTWORK_IMAGES`, with no early exit.** Until v1.5.0 reading stopped
+   once all four artwork values were in hand; with panels, the panel that
+   carries the government warning may be the one that would not have been
+   read. A picture past the bound is reported as accepted and not read rather
+   than dropped.
+3. **The label side is every panel that read, pooled**, the way
+   [ADR 0007](0007-multi-photo-single-label.md) pools three photographs of one
+   bottle: the brand is searched for across all of them, the pattern fields are
+   merged per field, the warning is taken from the panel that shows the most of
+   it, and each value says which panel it was found on, with its page and
+   pixel size. The application-side values the artwork supplies are taken per
+   field from the panel that read that field most confidently, and the panel
+   is recorded beside the value.
+4. **The response carries the table.** `artwork_images_accepted` lists every
+   picture that cleared the floor with its page, size and what happened to it
+   (read, no text, not read, undecodable) and the read's confidence, beside
+   the `artwork_images_rejected` list that already existed. The interface
+   names each panel by its page and size and says what was set aside and why.
+
+**What is given up, and accepted.** A signature scanned large enough to clear
+250,000 pixels is now read. On the synthetic strip in
+`tests/test_embedded_artwork.py` that read yields nothing at 2000 by 580 and
+three letters at a mean word confidence of 34 at 1442 by 433; the per-field
+rule takes every value from the panel that read it best, so a real panel beside
+it wins every field, and the strip is listed as read with its confidence where
+an agent can see it. No real filing the author has measured carries a signature
+above the floor. The residual is a filing whose *only* readable picture is a
+large signature, which would be offered as the label side and would read as
+garbage; the response says which picture it was, and the fields it fills would
+be reported at a confidence no agent would trust.
+
+**What it costs.** Reading four panels is four label reads, and there is no
+heuristic that reads fewer without saying so. The measured cost per label, one
+panel against three, is in `docs/09_DEPLOYMENT.md` section 9, and the lever is
+`TTB_MAX_ARTWORK_IMAGES`, which now reports what it cut.
+
+**Evidence.** `backend/tests/test_artwork_panels.py` is a synthetic filing in
+the bourbon's shape, built from the dimensions above and carrying no real
+data: before this amendment it returned `no_label_to_check`; after it, all five
+checks pass and the signature is still excluded. It is the fixture OQ-24 asked
+for. Neither of the author's documents is in the repository.
 
 ## Context
 
@@ -69,6 +172,10 @@ application block. The interface shows it, and shows the caveat on the artwork
 case specifically, because that is the one that can be misread.
 
 ### The size floor
+
+**Amended 2026-09-03: only the area half remains; see the amendment above.**
+The text that follows is the original decision, kept as the record of how the
+floor was first set.
 
 An image survives only if **both** halves are met:
 

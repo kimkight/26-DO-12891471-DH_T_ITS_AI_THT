@@ -30,6 +30,7 @@ from app import timing
 from app.application_form import (
     APPLICATION_FIELDS,
     SELF_CONSISTENCY_NOTE,
+    EmbeddedArtwork,
     ParsedApplication,
 )
 from app.compare import Comparison, Outcome, compare_abv, compare_net_contents, compare_text
@@ -46,8 +47,10 @@ from app.ocr import (
 from app.parse import ParsedFields, TextRegion, parse_fields
 from app.schemas import (
     FIELD_LABELS,
+    AcceptedImageDetail,
     ApplicationDocumentResult,
     ApplicationSource,
+    ArtworkPanelDetail,
     ErrorDetail,
     FieldResult,
     OrientationCheckDetail,
@@ -267,6 +270,7 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
                 value=parsed.values.get(name),
                 found_on_document=parsed.values.get(name) is not None,
                 source=parsed.value_sources.get(name, "absent"),
+                artwork_panel=_panel_detail(parsed.artwork_value_panels.get(name)),
             )
             for name in APPLICATION_FIELDS
         ],
@@ -285,9 +289,26 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
             )
             for image in parsed.artwork_images_rejected
         ],
+        artwork_images_accepted=[
+            AcceptedImageDetail(
+                page=image.page,
+                width=image.width,
+                height=image.height,
+                status=image.status,
+                ocr_confidence=image.ocr_confidence,
+            )
+            for image in parsed.artwork_images_accepted
+        ],
         label_artwork_page=None if parsed.label_artwork is None else parsed.label_artwork.page,
         label_artwork_available=parsed.label_artwork is not None,
     )
+
+
+def _panel_detail(panel: EmbeddedArtwork | None) -> ArtworkPanelDetail | None:
+    """Which embedded picture, by page and size. Never the picture (NFR-6)."""
+    if panel is None:
+        return None
+    return ArtworkPanelDetail(page=panel.page, width=panel.width, height=panel.height)
 
 
 def check_size(content: bytes) -> None:
@@ -381,8 +402,16 @@ def verify_photos(
     application_document: ApplicationDocumentResult | None = None,
     label_source: LabelSource = "uploaded_photographs",
     pre_read: list[OcrResult | None] | None = None,
+    panels: list[EmbeddedArtwork] | None = None,
 ) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
+
+    ``panels`` names the embedded picture each entry in ``contents`` is, where
+    the label side is the artwork inside the application document (ADR 0010 as
+    amended): one filing can embed its labels as several panels, and the
+    response says which panel each value was found on the same way it says
+    which photograph. It is aligned with ``contents`` and ignored for a
+    photograph the agent uploaded.
 
     Each photograph is decoded, turned upright and read on its own, and the
     fields found across all of them are merged: a field counts as found if any
@@ -415,13 +444,19 @@ def verify_photos(
 
     merged, sources = _merge(usable)
     elapsed_ms = (time.perf_counter() - started) * 1000
+    named = panels or []
     return build_result(
         merged,
         application,
         round(sum(read.confidence for read in usable) / len(usable), 1),
         ocr_ms=round(sum(read.ocr_ms for read in reads), 1),
         elapsed_ms=elapsed_ms,
-        photos=[_photo_result(read, label_source) for read in reads],
+        photos=[
+            _photo_result(
+                read, label_source, named[read.index - 1] if read.index <= len(named) else None
+            )
+            for read in reads
+        ],
         sources=sources,
         application_sources=application_sources,
         application_document=application_document,
@@ -655,10 +690,15 @@ def _orientation_check(check: OrientationCheck | None) -> OrientationCheckDetail
     )
 
 
-def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs") -> PhotoResult:
+def _photo_result(
+    read: _Read,
+    label_source: LabelSource = "uploaded_photographs",
+    panel: EmbeddedArtwork | None = None,
+) -> PhotoResult:
     return PhotoResult(
         index=read.index,
         origin="application_artwork" if label_source == "application_artwork" else "uploaded",
+        artwork_panel=_panel_detail(panel) if label_source == "application_artwork" else None,
         orientation=OrientationDetail(
             exif_orientation=read.orientation.exif_orientation,
             exif_transposed=read.orientation.exif_transposed,

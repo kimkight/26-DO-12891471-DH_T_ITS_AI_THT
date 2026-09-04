@@ -31,7 +31,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.application_form import UnreadableDocumentError, parse_application_document
+from app.application_form import (
+    EmbeddedArtwork,
+    UnreadableDocumentError,
+    parse_application_document,
+)
 from app.classify import ClassifiedFile, SubmittedFile, classify, describe
 from app.config import settings
 from app.ocr import OcrResult
@@ -152,19 +156,26 @@ def check_sorted(
     # agent supplied always win: a picture of the bottle in front of them is
     # evidence about that bottle, and the artwork on file is not.
     label_source: LabelSource = "uploaded_photographs"
+    panels: list[EmbeddedArtwork] | None = None
     if not contents:
-        artwork = parsed_application.label_artwork if parsed_application else None
-        if artwork is None:
+        label_panels = parsed_application.label_panels if parsed_application else []
+        if not label_panels:
             raise VerificationError(code="no_label_to_check", message=NO_LABEL_MESSAGE)
-        contents = [artwork.content]
-        # **The read comes with it, so this picture is read once** (NFR-1).
+        # **Every panel that read is the label side, pooled** (ADR 0010 as
+        # amended, #121). A filing that embeds its labels as separate panels
+        # puts the brand on the front and the alcohol content on the back; the
+        # check takes all of them the way ADR 0007 takes three photographs of
+        # one bottle, and each value says which panel it was found on.
+        contents = [panel.artwork.content for panel in label_panels]
+        panels = [panel.artwork for panel in label_panels]
+        # **The reads come with them, so no picture is read twice** (NFR-1).
         # `parse_application_document` has just put these exact bytes through
         # this exact pipeline to fill the application values; running them
         # through it again produced an identical result for a second full
         # Tesseract pass, which measurement on 2026-08-30 showed was about
         # half of this path's total time. This is the same reuse ADR 0011
         # already does with the classifier's read.
-        pre_read = [parsed_application.label_artwork_read if parsed_application else None]
+        pre_read = [panel.read for panel in label_panels]
         label_source = "application_artwork"
 
     application, sources = resolve_application(
@@ -177,6 +188,7 @@ def check_sorted(
         application_document=(document_result(parsed_application) if parsed_application else None),
         label_source=label_source,
         pre_read=pre_read,
+        panels=panels,
     )
     result.files = [classification(entry) for entry in sorted_files]
     return Checked(

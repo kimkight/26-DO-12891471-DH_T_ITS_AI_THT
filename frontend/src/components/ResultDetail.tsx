@@ -51,7 +51,11 @@ export function ResultDetail({
       {result.label_source === 'application_artwork' ? (
         <p className="footnote footnote--artwork">{ARTWORK_LABEL_LINE}</p>
       ) : null}
-      <PhotoNotes photos={result.photos} idPrefix={idPrefix} />
+      <PhotoNotes
+        photos={result.photos}
+        document={result.application_document}
+        idPrefix={idPrefix}
+      />
       <div className="cards">
         {result.fields.map((field) => (
           <ResultCard

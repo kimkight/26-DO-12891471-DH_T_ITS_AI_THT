@@ -19,7 +19,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ResultCard } from '../components/ResultCard'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import { ARTWORK_LABEL_LINE, sourceChipLabel } from '../lib/applicationSources'
-import { photoItemLabel, photoListHeading } from '../lib/photos'
+import { artworkNote, photoItemLabel, photoListHeading } from '../lib/photos'
+import { PhotoNotes } from '../components/PhotoNotes'
 import {
   applicationDocument,
   classification,
@@ -176,5 +177,63 @@ describe('a result checked against the application’s own artwork', () => {
     expect(photoItemLabel(artwork[0])).toBe('Label artwork from the application')
     expect(photoListHeading([photo()])).toBe('Your photo')
     expect(photoItemLabel(photo(2))).toBe('Photo 2')
+  })
+})
+
+describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)', () => {
+  const panels = [
+    photo(1, {
+      origin: 'application_artwork',
+      artwork_panel: { page: 2, width: 1350, height: 300 },
+    }),
+    photo(2, {
+      origin: 'application_artwork',
+      artwork_panel: { page: 3, width: 1050, height: 309 },
+    }),
+  ]
+
+  it('names each panel by its page and size, so three pieces of artwork are not three of the same line', () => {
+    expect(photoListHeading(panels)).toBe('The 2 pieces of label artwork from the application')
+    expect(photoItemLabel(panels[0])).toBe(
+      'Label artwork on page 2 of the application, 1350 by 300 pixels',
+    )
+    expect(photoItemLabel(panels[1])).toBe(
+      'Label artwork on page 3 of the application, 1050 by 309 pixels',
+    )
+  })
+
+  it('says what was set aside and why, with the sizes, and what cleared the floor unread', () => {
+    const document = applicationDocument({
+      artwork_images_found: 3,
+      artwork_images_read: 2,
+      artwork_images_rejected: [{ page: 5, width: 687, height: 195, reason: 'area' }],
+      artwork_images_accepted: [
+        { page: 2, width: 1350, height: 300, status: 'read', ocr_confidence: 95.5 },
+        { page: 3, width: 1050, height: 309, status: 'read', ocr_confidence: 95.6 },
+        { page: 4, width: 187, height: 1697, status: 'not_read', ocr_confidence: null },
+      ],
+    })
+    expect(artworkNote(document)).toBe(
+      'One picture in the application was set aside as too small to be label artwork: ' +
+        '687 by 195 on page 5. One picture cleared the size floor and was not read as label ' +
+        'artwork: 187 by 1697 on page 4 (past the limit on how many pictures are read).',
+    )
+    // Nothing to say is the ordinary case, and it says nothing.
+    expect(artworkNote(applicationDocument())).toBeNull()
+    expect(artworkNote(null)).toBeNull()
+  })
+
+  it('renders the table under the artwork list, where the agent reads which panel was which', () => {
+    const document = applicationDocument({
+      artwork_images_rejected: [{ page: 5, width: 687, height: 195, reason: 'area' }],
+      artwork_images_accepted: [
+        { page: 2, width: 1350, height: 300, status: 'read', ocr_confidence: 95.5 },
+      ],
+    })
+    render(<PhotoNotes photos={panels} document={document} />)
+    expect(screen.getByText(/page 2 of the application, 1350 by 300 pixels/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/set aside as too small to be label artwork: 687 by 195 on page 5/),
+    ).toBeInTheDocument()
   })
 })

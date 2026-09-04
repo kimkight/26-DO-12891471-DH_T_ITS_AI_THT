@@ -1024,6 +1024,18 @@ main {
   color: var(--mismatch);
 }
 
+/*
+ * What else was in the application and was not the label side: pictures set
+ * aside as too small, and pictures that cleared the floor and were not read.
+ * A sentence under the list rather than a list of its own, because it is
+ * context for the entries above it and not a set of entries an agent acts on.
+ */
+.photo-notes__aside {
+  margin: 0.625rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--ink-soft, inherit);
+}
+
 /* --------------------------------------------------------------- drop zone */
 
 .dropzone {

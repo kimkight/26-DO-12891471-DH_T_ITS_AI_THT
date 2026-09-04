@@ -291,6 +291,28 @@ class ParsedApplicationField(BaseModel):
             "text: it fills what the text left empty."
         ),
     )
+    artwork_panel: ArtworkPanelDetail | None = Field(
+        default=None,
+        description=(
+            "Where source is 'embedded_artwork', the embedded picture the value "
+            "was read from: its page and its pixel size. A filing that embeds "
+            "its labels as separate panels answers different fields from "
+            "different pictures, and a misread value has to be traceable to "
+            "the picture it came off (ADR 0010 as amended)."
+        ),
+    )
+
+
+class ArtworkPanelDetail(BaseModel):
+    """One embedded picture, named by where it sat and how big it is.
+
+    Enough to find it in the artwork tables on the application block and
+    nothing else: never the picture, never anything read out of it (NFR-6).
+    """
+
+    page: int = Field(description="The page the picture sat on, numbered from 1.")
+    width: int = Field(description="Its width in pixels, as the file stores it.")
+    height: int = Field(description="Its height in pixels, as the file stores it.")
 
 
 class ApplicationDocumentResult(BaseModel):
@@ -347,10 +369,11 @@ class ApplicationDocumentResult(BaseModel):
     artwork_images_found: int = Field(
         default=0,
         description=(
-            "How many raster images embedded in the document cleared the size "
+            "How many raster images embedded in the document cleared the area "
             "floor and were treated as candidate label artwork (ADR 0010). "
             "Images below the floor, which is where agency seals, barcodes and "
-            "signature blocks sit, are not counted."
+            "signature blocks sit, are not counted. Each one is listed in "
+            "artwork_images_accepted with what happened to it."
         ),
     )
     artwork_images_read: int = Field(
@@ -384,13 +407,26 @@ class ApplicationDocumentResult(BaseModel):
             "picture itself never appears here, or in a log, or on disk."
         ),
     )
+    artwork_images_accepted: list[AcceptedImageDetail] = Field(
+        default_factory=list,
+        description=(
+            "Every embedded raster image that did clear the floor, largest "
+            "first, with what happened to it: read, read with no text found, "
+            "not read, or undecodable. The other half of "
+            "artwork_images_rejected, and reported for the same reason. A "
+            "filing that embeds its labels as separate panels lists each panel "
+            "here with its size, which is the table the author had to "
+            "instrument the deployed build to get (ADR 0010 as amended, #121)."
+        ),
+    )
     label_artwork_page: int | None = Field(
         default=None,
         description=(
-            "The page the chosen label artwork was lifted from, or null when no "
-            "image was chosen. Stated because a document carries several "
-            "pictures and an agent reading a poor result is entitled to know "
-            "which one was read."
+            "The page the first label panel was lifted from, or null when no "
+            "picture was read. Since v1.5.0 every panel that read is the label "
+            "side, not one; this names the first, which is the largest panel "
+            "that yielded a label value, and photos[] names the rest with "
+            "their page and size."
         ),
     )
     label_artwork_available: bool = Field(
@@ -415,14 +451,42 @@ class RejectedImageDetail(BaseModel):
     page: int = Field(description="The page the image sat on, numbered from 1.")
     width: int = Field(description="Its width in pixels, as the file stores it.")
     height: int = Field(description="Its height in pixels, as the file stores it.")
-    reason: Literal["short_edge", "area", "aspect_ratio", "unreadable"] = Field(
+    reason: Literal["area", "unreadable"] = Field(
         description=(
-            "Why it was not treated as label artwork. 'short_edge' and 'area' "
-            "are the absolute size floors. 'aspect_ratio' is the shape test, "
-            "which is the one a higher-resolution scan cannot defeat: a "
-            "signature strip is wide and short at any resolution. 'unreadable' "
-            "means it cleared the floor and could not be decoded."
+            "Why it was not treated as label artwork. 'area' is the pixel "
+            "floor, which is what separates a signature strip from a label "
+            "panel on both real filings the author has measured. 'unreadable' "
+            "means it cleared the floor and could not be decoded. Until v1.5.0 "
+            "there were two more, 'short_edge' and 'aspect_ratio'; the rules "
+            "behind them rejected five of the six pictures on a real filing "
+            "and are gone (ADR 0010 as amended)."
         )
+    )
+
+
+class AcceptedImageDetail(BaseModel):
+    """One embedded image that cleared the floor, and what happened to it.
+
+    The page, the size, the outcome and the read's confidence. Not the picture
+    and not a word of what it showed (NFR-6).
+    """
+
+    page: int = Field(description="The page the image sat on, numbered from 1.")
+    width: int = Field(description="Its width in pixels, as the file stores it.")
+    height: int = Field(description="Its height in pixels, as the file stores it.")
+    status: Literal["read", "no_text", "not_read", "undecodable"] = Field(
+        description=(
+            "What happened to it. 'read' means it went through OCR and text came "
+            "back; 'no_text' means it went through and nothing did; "
+            "'undecodable' means it would not decode; 'not_read' means it was "
+            "never put through the engine, either because this was the prefill "
+            "pass that reads no picture (ADR 0017) or because it fell past "
+            "the bound on how many pictures are read (TTB_MAX_ARTWORK_IMAGES)."
+        )
+    )
+    ocr_confidence: float | None = Field(
+        default=None,
+        description="Mean Tesseract word confidence of the read, or null where none ran.",
     )
 
 
@@ -705,6 +769,15 @@ class PhotoResult(BaseModel):
             "lifted out of the uploaded application document (ADR 0010). The "
             "second is a self-consistency check rather than a check of a "
             "physical bottle; see VerificationResult.self_consistency_note."
+        ),
+    )
+    artwork_panel: ArtworkPanelDetail | None = Field(
+        default=None,
+        description=(
+            "When origin is 'application_artwork', which embedded picture this "
+            "is: its page and its pixel size, matching an entry in "
+            "application_document.artwork_images_accepted. Null for a "
+            "photograph the agent uploaded."
         ),
     )
     orientation: OrientationDetail = Field(

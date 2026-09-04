@@ -458,3 +458,106 @@ def render_busy_png_bytes(spec: BusyLabelSpec) -> bytes:
     buffer = io.BytesIO()
     render_busy(spec).save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+# --------------------------------------------------------------------------
+# Label panels at a stated pixel size (v1.5.0, #121, OQ-24).
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class PanelSpec:
+    """One label panel as a filed application embeds it: a picture of one panel.
+
+    A filed COLA does not always carry one flat sheet of the whole label. The
+    second real document the author measured (2026-09-03, a bourbon) carried
+    six pictures: a front panel, a back panel, a wrap-around, a vertical side
+    band, a small neck band and a signature. Each is its own embedded image at
+    its own size, and the sizes are the point of this fixture: ``width`` and
+    ``height`` are the exact pixel dimensions the picture will have, so a test
+    can put a 1350 by 300 front panel through the artwork floor and know what
+    it is asserting about.
+
+    ``lines`` are printed top to bottom, the first in the largest type and the
+    rest at half that size, which is the relationship ``app.parse`` locates the
+    brand name by and the one a label designer sets between a brand and the
+    class or type designation under it.
+    ``vertical`` turns the whole panel 90 degrees after drawing, which is what
+    a side band is: text running along the long edge of a tall thin picture.
+    """
+
+    width: int
+    height: int
+    lines: tuple[str, ...]
+    vertical: bool = False
+
+
+def render_panel(spec: PanelSpec) -> Image.Image:
+    """Draw one panel, black on white, sized exactly as the spec says.
+
+    The type size is chosen to fit the lines into the panel rather than fixed,
+    because the panels this exists for are wide and short: a 1350 by 300 front
+    panel has room for two lines of large type and no more, and a 187 by 1697
+    side band has room for one line along its length.
+    """
+    fonts = available_fonts()
+    if fonts is None:
+        raise RuntimeError("No usable TrueType font was found on this machine.")
+    bold_path, regular_path = fonts
+
+    # Drawn flat, then turned for a vertical band: Pillow draws text along the
+    # x axis and nowhere else.
+    canvas = (spec.height, spec.width) if spec.vertical else (spec.width, spec.height)
+    image = Image.new("RGB", canvas, (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    margin = max(8, canvas[0] // 40)
+    usable_width = canvas[0] - 2 * margin
+    usable_height = canvas[1] - 2 * margin
+
+    # The largest size at which every line fits the width and the lines
+    # together fit the height, with each line after the first one step
+    # smaller, so the brand stays the largest text on the panel.
+    def layout(size: int) -> list[tuple[ImageFont.FreeTypeFont, list[str]]] | None:
+        rows: list[tuple[ImageFont.FreeTypeFont, list[str]]] = []
+        total = 0
+        for index, text in enumerate(spec.lines):
+            path = bold_path if index == 0 else regular_path
+            font = ImageFont.truetype(path, max(12, size if index == 0 else size // 2))
+            wrapped = _wrap(draw, text, font, usable_width)
+            if any(draw.textlength(row, font=font) > usable_width for row in wrapped):
+                return None
+            step = int(font.size * 1.3)
+            total += step * len(wrapped) + step // 2
+            rows.append((font, wrapped))
+        return rows if total <= usable_height else None
+
+    size = 12
+    best = layout(size)
+    while size < 200 and (candidate := layout(size + 4)) is not None:
+        size += 4
+        best = candidate
+    if best is None:
+        raise ValueError(f"{spec.lines!r} does not fit a {spec.width} by {spec.height} panel")
+
+    y = margin
+    for font, wrapped in best:
+        step = int(font.size * 1.3)
+        for row in wrapped:
+            draw.text((margin, y), row, font=font, fill=(0, 0, 0))
+            y += step
+        y += step // 2
+
+    if spec.vertical:
+        image = image.rotate(90, expand=True, fillcolor=(255, 255, 255))
+    if image.size != (spec.width, spec.height):
+        raise ValueError(f"rendered {image.size}, wanted {(spec.width, spec.height)}")
+    return image
+
+
+def render_panel_png_bytes(spec: PanelSpec) -> bytes:
+    """Render one panel to PNG bytes, so no image reaches the disk."""
+    import io
+
+    buffer = io.BytesIO()
+    render_panel(spec).save(buffer, format="PNG")
+    return buffer.getvalue()

@@ -654,10 +654,26 @@ apply to a label image. The note under OOS-1 in
   anything is decoded, with the accepted types named (NFR-7).
 - No outbound network call is made to read the document (NFR-3), and nothing
   about it is persisted or logged beyond a byte count and the path used (NFR-6).
-- Given a document carrying embedded raster images at or above the size floor,
+- Given a document carrying embedded raster images at or above the area floor,
   then each is read through the same local OCR pipeline label artwork is read
-  through, and what it says fills any application value the document's text
-  layer left empty (ADR 0010).
+  through, largest first and up to the configured bound, and what it says
+  fills any application value the document's text layer left empty, with the
+  picture each value came off named beside it (ADR 0010, amended 2026-09-03).
+  The floor is an area and nothing else: it is what separates the applicant's
+  signature from a label panel on both real filings the author has measured,
+  and the two shape rules that sat beside it until v1.5.0 rejected five of the
+  six pictures on one of them.
+- Given a document whose labels are embedded as separate panels, a front, a
+  back, a wrap-around, a side band, then every panel that clears the floor is
+  read and the text of all of them is pooled for the check: a value on any
+  panel counts as found, and the response says which panel it was found on
+  with its page and pixel size. A check that reads one panel and reports the
+  others' contents as absent does not meet this requirement.
+- Given any embedded picture, then the response lists it: the ones that
+  cleared the floor with what happened to each (read, read with no text, not
+  read, undecodable) and the ones that did not with the reason, so that the
+  table an agent needs to see why a value is absent is in the response rather
+  than in an instrumented build.
 - Given a value present in both the text layer and the embedded artwork, then
   the text-layer value is used. The precedence, end to end, is: typed by the
   agent, then the document's text layer or form fields, then the embedded
@@ -667,8 +683,9 @@ apply to a label image. The note under OOS-1 in
   then it behaves exactly as it did before: the values the text layer does not
   carry are reported as not found, with the reason.
 - Given an agent who uploaded the application and no photograph, and a document
-  whose embedded artwork could be read, then the largest such image is the label
-  side of the check, and the response says so.
+  whose embedded artwork could be read, then every picture that read is the
+  label side of the check, pooled as several photographs of one bottle are
+  pooled (ADR 0007), and the response says so and names each.
 - Given the same submission with no readable artwork in the document, then the
   verification does not run, the response names the missing piece and offers the
   photograph upload, and no field reports an outcome. This is an FR-9 message

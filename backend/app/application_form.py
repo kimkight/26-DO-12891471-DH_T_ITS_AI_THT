@@ -202,6 +202,37 @@ class RejectedImage:
 
 
 @dataclass(frozen=True)
+class AcceptedImage:
+    """One embedded image that cleared the floor, and what happened to it.
+
+    The other half of ``RejectedImage``, and reported for the same reason: an
+    agent looking at a value the artwork did not supply needs the table of what
+    was read, at what size, with what confidence, as much as the table of what
+    was set aside. The picture itself never travels (NFR-6).
+    """
+
+    page: int
+    width: int
+    height: int
+    status: AcceptedStatus
+    # Mean word confidence of the read, where one ran.
+    ocr_confidence: float | None = None
+
+
+@dataclass(frozen=True)
+class LabelPanel:
+    """One embedded picture that was read, with what it was read to say.
+
+    Carried together so that the label side never reads the same picture a
+    second time (NFR-1, ADR 0017): the check takes every panel here, with its
+    reading, and pools them the way ADR 0007 pools photographs.
+    """
+
+    artwork: EmbeddedArtwork
+    read: OcrResult
+
+
+@dataclass(frozen=True)
 class ParsedApplication:
     """What an uploaded COLA document said, and how it was read.
 
@@ -230,6 +261,16 @@ class ParsedApplication:
     # Every embedded image that did not clear the floor, with the reason. See
     # RejectedImage: the picture itself never travels.
     artwork_images_rejected: list[RejectedImage] = field(default_factory=list)
+    # Every embedded image that did clear it, with what happened to it, largest
+    # first. Reported so that the next person debugging a filing has the same
+    # table of sizes the author had to instrument the deployed build to get.
+    artwork_images_accepted: list[AcceptedImage] = field(default_factory=list)
+    # For each value taken off the artwork, the panel it was read from.
+    artwork_value_panels: dict[str, EmbeddedArtwork] = field(default_factory=dict)
+    # Every panel that read with text, in the order the label side takes them
+    # (ADR 0010 as amended). The check pools all of them: the brand may be on
+    # the front and the alcohol content on the back.
+    label_panels: list[LabelPanel] = field(default_factory=list)
     # Whether the artwork pass ran at all on this reading (ADR 0017).
     #
     # False means the pictures inside the document were located and counted and
@@ -239,8 +280,10 @@ class ParsedApplication:
     # to be read at check time, because the second one is not a gap the agent
     # has to fill.
     artwork_read: bool = True
-    # The embedded image the label side can be taken from when the agent
-    # supplied no photograph of their own (ADR 0010, FR-1).
+    # The first of those panels: the one the response names as the page the
+    # label came from (ADR 0010, FR-1). Kept alongside ``label_panels`` because
+    # one picture is still the ordinary case, and a caller that wants the
+    # pool takes the list.
     label_artwork: EmbeddedArtwork | None = None
     # **What that image was already read to say, so it is read once.** The
     # picture chosen as the label side is by construction a picture this module
@@ -609,7 +652,7 @@ def _parse_image(content: bytes, *, pre_read: OcrResult | None = None) -> Parsed
 
 
 # --------------------------------------------------------------------------
-# The embedded label artwork (ADR 0010).
+# The embedded label artwork (ADR 0010, amended 2026-09-03).
 # --------------------------------------------------------------------------
 
 
@@ -620,11 +663,18 @@ class _ArtworkReading:
     values: dict[str, str]
     images_found: int
     images_read: int
-    label_artwork: EmbeddedArtwork | None
     rejected: list[RejectedImage] = field(default_factory=list)
-    # The OCR result for ``label_artwork``, carried so that the label side does
-    # not read the same picture a second time. See ParsedApplication.
-    label_artwork_read: OcrResult | None = None
+    # Every picture that cleared the floor, with what happened to it, largest
+    # first. This is the other half of ``rejected``: the table an agent needs
+    # to see why a value is absent is the one that lists what was read as well
+    # as what was set aside.
+    accepted: list[AcceptedImage] = field(default_factory=list)
+    # The panel each value in ``values`` was taken from.
+    value_panels: dict[str, EmbeddedArtwork] = field(default_factory=dict)
+    # Every picture that read with text, in the order the label side takes
+    # them: the ones that yielded a label value first, then the rest, each
+    # group largest first. Empty when nothing was read.
+    label_panels: list[LabelPanel] = field(default_factory=list)
     # Whether Tesseract was run over these pictures at all (ADR 0017). False
     # means they were located and counted and left unread.
     read: bool = True
@@ -644,11 +694,12 @@ def _embedded_images(
     printed captions mixed in with the label text. Lifting the image object out
     gives the pipeline the artwork at its native size and nothing else.
 
-    Only images clearing every part of the floor survive; see ``_rejection`` and
-    ``Settings.max_artwork_aspect_ratio``. They are returned largest first, and
-    no more than ``max_artwork_images`` of them, because each one costs a full
-    OCR read. The count returned alongside is how many cleared the floor, which
-    is not the same as how many were read.
+    Only images clearing the area floor survive; see ``_rejection`` and
+    ``Settings.min_artwork_pixels``. Every survivor is returned, largest first;
+    how many of them are read is ``_read_artwork``'s decision, bounded by
+    ``max_artwork_images``, and a survivor past that bound is reported as
+    accepted and not read rather than dropped. The count returned alongside is
+    how many cleared the floor.
 
     **What was rejected is returned too, with the reason (v1.1.0).** A filed
     application carries the applicant's handwritten signature, and a rejection
@@ -697,37 +748,48 @@ def _embedded_images(
 
     candidates.sort(key=lambda art: (-art.pixels, art.page))
     rejected.sort(key=lambda image: (image.page, -image.width * image.height))
-    return candidates[: settings.max_artwork_images], len(candidates), rejected
+    return candidates, len(candidates), rejected
 
 
 # Why one embedded image was not treated as candidate label artwork. Named
 # rather than free text so that the reason is a value an agent's tooling can
 # read, and so that adding a test to the floor forces a name for what it
-# rejects.
-RejectionReason = Literal["short_edge", "area", "aspect_ratio", "unreadable"]
+# rejects. ``short_edge`` and ``aspect_ratio`` were reasons until v1.5.0; the
+# two rules behind them rejected five of the six pictures on a real filing and
+# are gone (ADR 0010 as amended, #121).
+RejectionReason = Literal["area", "unreadable"]
+
+# What happened to one picture that cleared the floor. ``read`` means Tesseract
+# ran and text came back; ``no_text`` means it ran and nothing did;
+# ``undecodable`` means the picture would not decode for it; ``not_read``
+# means it was never put through the engine, either because the prefill pass
+# deliberately reads nothing (ADR 0017) or because it fell past
+# ``max_artwork_images``.
+AcceptedStatus = Literal["read", "no_text", "not_read", "undecodable"]
 
 
 def _rejection(width: int, height: int) -> RejectionReason | None:
     """Why this embedded image is not label artwork, or None if it might be.
 
-    Three tests, and the first one that fails is the reason reported. Agency
-    seals, barcodes, logos and signature strips are furniture on the form;
-    label artwork is the thing the form is about.
+    One test: the area floor in ``Settings.min_artwork_pixels``, which is what
+    separates the applicant's signature from a label panel on both real filings
+    the author has measured. Agency seals, barcodes, logos and signature strips
+    are furniture on the form and small; label panels are the thing the form is
+    about and are not.
 
-    ``short_edge`` and ``area`` are absolute sizes, and an absolute size is a
-    property of the scanner as much as of the thing scanned: the same signature
-    strip clears both of them at 300 dpi and fails both at 100.
-    ``aspect_ratio`` is the test that does not move with resolution. A signature
-    is wide and short at every resolution it is ever scanned at; label artwork
-    is large in both directions. See ``Settings.max_artwork_aspect_ratio`` for
-    the numbers and for the neck-label case this deliberately trades away.
+    There used to be three tests. A short-edge floor and an aspect-ratio ceiling
+    were added so that a signature scanned at a higher resolution would still be
+    excluded by its shape, and they were set from one document whose artwork is
+    one flat sheet. On the second document the author measured, a bourbon filing
+    whose labels are embedded as separate panels, the two shape tests rejected
+    every panel: front, back, wrap-around and side band, at ratios from 3.24 to
+    9.07 and short edges from 187 to 340. The signature that motivated them,
+    687 by 195, has a ratio of 3.52 and a short edge of 195, which no ceiling and
+    no floor can place on the other side of those panels. Area does, with margin
+    on both sides. The numbers are beside the setting.
     """
-    if min(width, height) < settings.min_artwork_edge_px:
-        return "short_edge"
     if width * height < settings.min_artwork_pixels:
         return "area"
-    if max(width, height) > settings.max_artwork_aspect_ratio * min(width, height):
-        return "aspect_ratio"
     return None
 
 
@@ -750,6 +812,18 @@ def _artwork_bitmap(image: pdfium.PdfImage, page_index: int) -> Image.Image | No
         return None
 
 
+def _accepted(
+    image: EmbeddedArtwork, status: AcceptedStatus, confidence: float | None = None
+) -> AcceptedImage:
+    return AcceptedImage(
+        page=image.page,
+        width=image.width,
+        height=image.height,
+        status=status,
+        ocr_confidence=confidence,
+    )
+
+
 def _unread_artwork(
     images: list[EmbeddedArtwork], rejected: list[RejectedImage] | None = None
 ) -> _ArtworkReading:
@@ -762,19 +836,18 @@ def _unread_artwork(
     that the check a moment later reads the same pictures for again.
 
     What survives is everything that costs nothing: how many pictures cleared
-    the floor, and which ones did not and why. What does not survive is any
-    value, and any claim that one of these pictures can stand in as the label
-    side, because deciding that means reading them. ``read`` says which of the
-    two readings this is, so that "no artwork" and "artwork not yet read" are
-    never confused for each other downstream.
+    the floor, which ones, and which did not and why. What does not survive is
+    any value, and any claim that one of these pictures can stand in as the
+    label side, because deciding that means reading them. ``read`` says which
+    of the two readings this is, so that "no artwork" and "artwork not yet
+    read" are never confused for each other downstream.
     """
     return _ArtworkReading(
         values={},
         rejected=list(rejected or []),
+        accepted=[_accepted(image, "not_read") for image in images],
         images_found=len(images),
         images_read=0,
-        label_artwork=None,
-        label_artwork_read=None,
         read=False,
     )
 
@@ -790,32 +863,44 @@ def _read_artwork(
     they do to a photograph. The artwork is flat, which is the input that
     pipeline handles well; that is the whole reason this is worth doing.
 
-    Values are taken from the images in size order, so the largest picture that
-    states a field wins and a smaller one fills what the larger one did not
-    show, which is the front-and-back case. ``label_artwork`` is the image the
-    label side can be taken from: the largest one that both read and yielded a
-    label value, falling back to the largest one that read at all. Preferring
-    the one that yielded values keeps a large scan of a page of prose from being
-    offered as the label when a smaller picture of the label was there; it never
-    passes over a larger picture that did yield values, so the rule is still
-    "the largest that qualifies".
+    **Every panel up to ``max_artwork_images`` is read, largest first, and all
+    of them are handed on as the label side** (ADR 0010 as amended). A filing
+    that embeds its labels as separate panels puts the brand on the front, the
+    alcohol content and the net contents on the back, and the class or type
+    wherever the designer put it; a reading that stopped at the first panel to
+    answer anything reported the rest as absent. So there is no early exit any
+    more: reading stops when the panels run out or the bound is reached, and a
+    panel past the bound is reported as accepted and not read rather than
+    silently dropped. The cost is one label read per panel, and the response
+    carries it per panel.
 
-    Nothing shaped like a signature reaches this function at all. That is
-    ``_rejection``'s job, done before any picture is decoded, and it is done on
-    shape as well as size so that a signature scanned at a higher resolution
-    does not clear a floor a smaller one failed.
+    Values are taken per field from the panel that read that field most
+    confidently, which is the rule ADR 0007 uses to merge two photographs of
+    one label and the rule that keeps a large picture read badly from
+    overriding a smaller one read well. The panel each value came from is
+    recorded, so a value that was misread can be traced to the picture it was
+    read off.
+
+    ``label_panels`` is every picture that read with text, the ones that yielded
+    a label value first and then the rest, each group largest first. Preferring
+    the ones that yielded values keeps a large scan of a page of prose from
+    being the first thing offered as the label when a smaller picture of the
+    label was there; nothing is dropped from the pool for it.
 
     A picture that will not decode is skipped rather than fatal. It is a picture
     inside a document, and the document may have answered already.
     """
     values: dict[str, str] = {}
-    read_count = 0
-    with_values: EmbeddedArtwork | None = None
-    with_values_read: OcrResult | None = None
-    any_read: EmbeddedArtwork | None = None
-    any_read_result: OcrResult | None = None
+    value_confidence: dict[str, float] = {}
+    value_panels: dict[str, EmbeddedArtwork] = {}
+    accepted: list[AcceptedImage] = []
+    with_values: list[LabelPanel] = []
+    without_values: list[LabelPanel] = []
 
-    for image in images:
+    bound = settings.max_artwork_images
+    accepted.extend(_accepted(image, "not_read") for image in images[bound:])
+
+    for image in images[:bound]:
         try:
             with timing.phase("artwork_ocr"):
                 result = extract_text(image.content)
@@ -824,45 +909,38 @@ def _read_artwork(
                 "embedded image could not be decoded",
                 extra={"page": image.page, "cause": type(exc).__name__},
             )
+            accepted.append(_accepted(image, "undecodable"))
             continue
         if not result.has_text:
+            accepted.append(_accepted(image, "no_text", result.mean_confidence))
             continue
-        read_count += 1
-        if any_read is None:
-            any_read, any_read_result = image, result
+        accepted.append(_accepted(image, "read", result.mean_confidence))
 
         parsed = parse_fields(result.lines)
         found = {
             name: value for name in ARTWORK_FIELDS if (value := getattr(parsed, name)) is not None
         }
-        if found and with_values is None:
-            with_values, with_values_read = image, result
         for name, value in found.items():
-            values.setdefault(name, value)
+            confidence = parsed.confidence.get(name, 0.0)
+            # Strictly greater, so a tie goes to the larger panel, which was
+            # read first.
+            if name not in values or confidence > value_confidence[name]:
+                values[name] = value
+                value_confidence[name] = confidence
+                value_panels[name] = image
+        panel = LabelPanel(artwork=image, read=result)
+        (with_values if found else without_values).append(panel)
 
-        # **Stop once there is nothing left to find.** Every remaining picture
-        # costs a full Tesseract pass, and a picture can only ever add a value
-        # no earlier picture showed: values are taken in size order and never
-        # overwritten. So once all four are in hand, the passes still to come
-        # cannot change a single thing in the response.
-        #
-        # It does not weaken the front-and-back case ADR 0010 reads several
-        # pictures for. That case is a largest picture answering only some of
-        # the four, and it does not trigger this: reading continues exactly as
-        # before until either the values are complete or the pictures run out.
-        # Nor does it change which picture becomes the label side, because the
-        # candidates arrive largest first, so the first one to yield values is
-        # the one that would have been chosen anyway.
-        if len(values) == len(ARTWORK_FIELDS):
-            break
-
+    accepted.sort(key=lambda image: (-(image.width * image.height), image.page))
+    panels = with_values + without_values
     return _ArtworkReading(
         values=values,
         rejected=list(rejected or []),
+        accepted=accepted,
+        value_panels=value_panels,
         images_found=len(images),
-        images_read=read_count,
-        label_artwork=with_values or any_read,
-        label_artwork_read=with_values_read if with_values is not None else any_read_result,
+        images_read=len(panels),
+        label_panels=panels,
     )
 
 
@@ -877,22 +955,28 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
     """
     values = dict(text_side.values)
     sources = dict(text_side.value_sources)
+    value_panels: dict[str, EmbeddedArtwork] = {}
     for name, value in artwork.values.items():
         if values.get(name) is None:
             values[name] = value
             sources[name] = "embedded_artwork"
+            value_panels[name] = artwork.value_panels[name]
+    first = artwork.label_panels[0] if artwork.label_panels else None
     return ParsedApplication(
         values=values,
         fanciful_name=text_side.fanciful_name,
         class_type_code=text_side.class_type_code,
         path=text_side.path,
         value_sources=sources,
+        artwork_value_panels=value_panels,
         artwork_images_found=artwork.images_found,
         artwork_images_read=artwork.images_read,
         artwork_images_rejected=artwork.rejected,
+        artwork_images_accepted=artwork.accepted,
         artwork_read=artwork.read,
-        label_artwork=artwork.label_artwork,
-        label_artwork_read=artwork.label_artwork_read,
+        label_panels=artwork.label_panels,
+        label_artwork=None if first is None else first.artwork,
+        label_artwork_read=None if first is None else first.read,
     )
 
 
@@ -1565,18 +1649,4 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
     from_artwork = "embedded_artwork" in parsed.value_sources.values()
     if from_artwork or parsed.label_artwork is not None:
         notes.append(SELF_CONSISTENCY_NOTE)
-    return ParsedApplication(
-        values=parsed.values,
-        fanciful_name=parsed.fanciful_name,
-        class_type_code=parsed.class_type_code,
-        path=path,
-        pages_read=pages_read,
-        notes=notes,
-        value_sources=parsed.value_sources,
-        artwork_images_found=parsed.artwork_images_found,
-        artwork_images_read=parsed.artwork_images_read,
-        artwork_images_rejected=parsed.artwork_images_rejected,
-        artwork_read=parsed.artwork_read,
-        label_artwork=parsed.label_artwork,
-        label_artwork_read=parsed.label_artwork_read,
-    )
+    return replace(parsed, path=path, pages_read=pages_read, notes=notes)

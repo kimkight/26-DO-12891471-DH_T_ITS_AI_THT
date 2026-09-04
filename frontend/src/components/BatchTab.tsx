@@ -58,10 +58,38 @@ interface QueuedFile {
   /** Stable across reorders and removals; a name is not, since two files can share one. */
   id: number
   file: File
-  state: 'reading' | 'sorted' | 'failed'
+  /**
+   * `provisional` is an image the page has not sent for sorting (OQ-37). It
+   * is shown as a label image until the batch runs, and the chip says so.
+   */
+  state: 'reading' | 'sorted' | 'failed' | 'provisional'
   classification?: FileClassification
   error?: UiError
 }
+
+/**
+ * Whether a file is sorted on arrival, or sorted when the batch runs (OQ-37).
+ *
+ * A PDF is sorted from its header and its text layer, which costs under fifty
+ * milliseconds a file. An image has no text layer: deciding whether it is a
+ * photographed form or a label is a full OCR pass, the same pass the check
+ * makes a moment later in a different request, and measured at about 2.3 s a
+ * file on the deployed task. Twenty photographs cost 23 s of "Reading..."
+ * before the batch had started, and the check then read every one again. A
+ * server-side cache of that read is what NFR-6 forbids. So an image is not
+ * sent: it is shown as a label image, provisionally and labelled as such,
+ * and the batch line replaces the chip with what the server actually decided.
+ * A photographed form is still sorted correctly; it is sorted when checked.
+ */
+function sortedOnArrival(file: File): boolean {
+  return file.type === 'application/pdf' || /\.pdf$/i.test(file.name)
+}
+
+/** The provisional chip's text and reason, until the batch line arrives. */
+export const PROVISIONAL_SIDE = 'Label image, sorted when checked'
+export const PROVISIONAL_REASON =
+  'Pictures are sorted when the batch runs, so the batch does not read each one twice. ' +
+  'A photographed application is still read as one then.'
 
 /**
  * How many classification requests are in flight at once.
@@ -77,6 +105,7 @@ const CLASSIFY_IN_FLIGHT = 2
 function sideOf(entry: QueuedFile): KnownSide {
   if (entry.state === 'reading') return null
   if (entry.state === 'failed') return 'failed'
+  if (entry.state === 'provisional') return 'label_image'
   return entry.classification?.classified_as ?? 'failed'
 }
 
@@ -146,10 +175,15 @@ export function BatchTab() {
     for (const file of chosen) {
       if (queue.some((queued) => sameFile(queued.file, file))) continue
       if (additions.some((queued) => sameFile(queued.file, file))) continue
-      const entry: QueuedFile = { id: nextId.current++, file, state: 'reading' }
+      const deferred = !sortedOnArrival(file)
+      const entry: QueuedFile = {
+        id: nextId.current++,
+        file,
+        state: deferred ? 'provisional' : 'reading',
+      }
       additions.push(entry)
       live.current.add(entry.id)
-      waiting.current.push(entry)
+      if (!deferred) waiting.current.push(entry)
     }
     if (!additions.length) return
     setQueue((previous) => [...previous, ...additions])
@@ -219,6 +253,18 @@ export function BatchTab() {
       (line) => {
         setTotal(line.total)
         setLines((previous) => ({ ...previous, [line.position]: line }))
+        // The server's own sorting replaces a provisional chip (OQ-37): the
+        // line carries what each file in the row was taken to be.
+        const sorted = line.result?.files ?? []
+        if (sorted.length) {
+          setQueue((previous) =>
+            previous.map((queued) => {
+              if (queued.state !== 'provisional') return queued
+              const entry = sorted.find((file) => file.filename === queued.file.name)
+              return entry ? { ...queued, state: 'sorted', classification: entry } : queued
+            }),
+          )
+        }
       },
       controller.signal,
     )
@@ -328,6 +374,8 @@ export function BatchTab() {
                     </span>
                   ) : entry.state === 'failed' ? (
                     <span className="chip">Could not be read</span>
+                  ) : entry.state === 'provisional' ? (
+                    <span className="chip chip--navy">{PROVISIONAL_SIDE}</span>
                   ) : (
                     <span className="chip">Reading...</span>
                   )}
@@ -335,6 +383,8 @@ export function BatchTab() {
                     <span className="upload-panel__reason">{entry.classification.reason}</span>
                   ) : entry.error ? (
                     <span className="upload-panel__reason">{entry.error.message}</span>
+                  ) : entry.state === 'provisional' ? (
+                    <span className="upload-panel__reason">{PROVISIONAL_REASON}</span>
                   ) : null}
                   <button
                     className="button button--quiet"

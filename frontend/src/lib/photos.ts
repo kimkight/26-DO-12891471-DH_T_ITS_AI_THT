@@ -7,7 +7,7 @@
  * should not need a render to check.
  */
 import { plainMessage } from './plainLanguage'
-import type { PhotoResult } from '../types'
+import type { ApplicationDocumentResult, PhotoResult } from '../types'
 
 /** What was done to one photograph, as a sentence, or null if nothing was. */
 export function photoNote(photo: PhotoResult): string | null {
@@ -59,11 +59,65 @@ export function photoListHeading(photos: PhotoResult[]): string {
   return photos.length === 1 ? 'Your photo' : `Your ${photos.length} photos`
 }
 
-/** How one entry in that list is named. */
+/**
+ * How one entry in that list is named.
+ *
+ * A piece of artwork is named by where it sat in the document and how big it
+ * is, because a filing that embeds its labels as separate panels has several
+ * and "label artwork from the application" three times over tells an agent
+ * nothing about which is which (ADR 0010 as amended).
+ */
 export function photoItemLabel(photo: PhotoResult): string {
-  return photo.origin === 'application_artwork'
-    ? 'Label artwork from the application'
-    : `Photo ${photo.index}`
+  if (photo.origin !== 'application_artwork') return `Photo ${photo.index}`
+  const panel = photo.artwork_panel
+  return panel
+    ? `Label artwork on page ${panel.page} of the application, ${panel.width} by ${panel.height} pixels`
+    : 'Label artwork from the application'
+}
+
+/**
+ * What else was in the application, and what happened to it (ADR 0010 as
+ * amended, #121).
+ *
+ * The response lists every embedded picture that was set aside with the
+ * reason, and every one that cleared the floor and was not read. An agent
+ * looking at a value the tool did not find is entitled to that table without
+ * instrumenting anything: on a real filing five of six pictures were set
+ * aside and nothing on screen said so. Null when there is nothing to say,
+ * which is the ordinary case.
+ */
+export function artworkNote(document: ApplicationDocumentResult | null | undefined): string | null {
+  if (!document) return null
+  const rejected = document.artwork_images_rejected ?? []
+  const unread = (document.artwork_images_accepted ?? []).filter((image) => image.status !== 'read')
+  const parts: string[] = []
+  if (rejected.length) {
+    const sizes = rejected.map((image) => `${image.width} by ${image.height} on page ${image.page}`)
+    parts.push(
+      `${rejected.length === 1 ? 'One picture' : `${rejected.length} pictures`} in the application ${
+        rejected.length === 1 ? 'was' : 'were'
+      } set aside as too small to be label artwork: ${sizes.join('; ')}.`,
+    )
+  }
+  if (unread.length) {
+    const sizes = unread.map(
+      (image) =>
+        `${image.width} by ${image.height} on page ${image.page} (${UNREAD_REASONS[image.status]})`,
+    )
+    parts.push(
+      `${unread.length === 1 ? 'One picture' : `${unread.length} pictures`} cleared the size floor and ${
+        unread.length === 1 ? 'was' : 'were'
+      } not read as label artwork: ${sizes.join('; ')}.`,
+    )
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
+const UNREAD_REASONS: Record<'no_text' | 'not_read' | 'undecodable' | 'read', string> = {
+  no_text: 'no text was found on it',
+  not_read: 'past the limit on how many pictures are read',
+  undecodable: 'it could not be decoded',
+  read: 'read',
 }
 
 /**
