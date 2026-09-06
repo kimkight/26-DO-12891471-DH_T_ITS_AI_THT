@@ -47,6 +47,8 @@ updates every artifact the answer affects.
 | [OQ-35](#oq-35) | Open; measured 2026-09-02, recommendation recorded, Terraform unchanged | Nothing; the task runs. It costs about 59 times the memory it uses |
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 | [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
+| [OQ-38](#oq-38) | Open; named 2026-09-06, logic unchanged | Nothing in the prototype; it bounds the alcohol content presence check to distilled spirits. On a malt beverage or a table wine the check can report a compliant label as a finding |
+| [OQ-39](#oq-39) | Open; measured 2026-09-06 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's alcohol content and net contents sit on one |
 
 ---
 
@@ -2116,3 +2118,86 @@ left off. `frontend/src/__tests__/batchTable.test.tsx` asserts that no
 classify call is made for an image and that the line's sorting replaces the
 chip, including the case of a photographed form the server sorts to the other
 side.
+
+## OQ-38
+**Should "alcohol content not found" be a finding on a malt beverage or a
+table wine at all?**
+
+**Status: Open. Named and cited 2026-09-06; the checking logic is unchanged.**
+
+The alcohol content presence check (FR-14, FR-15, ADR 0013, ADR 0018) reports
+a label that carries no alcohol statement as a finding, citing 27 CFR
+5.63(a)(3) for spirits and 4.32(b)(3) for wine. Two things the regulation says
+are not accounted for in that design:
+
+- **27 CFR 7.65(a)**: on a malt beverage, alcohol content "may be stated on any
+  malt beverage label, unless prohibited by State law". It is optional unless
+  State law requires it. The row's copy already narrows 7.63(a)(3) to malt
+  beverages with alcohol from added nonbeverage ingredients; the general case
+  is that a beer label need not state it.
+- **27 CFR 4.36(a)**: for a wine of 14 percent alcohol or less, the alcohol
+  content "may be stated, but need not be stated if the type designation
+  'table' wine (or 'light' wine) appears on the brand label".
+
+So on a beer, or on a table wine, "not found" can be the correct reading of a
+fully compliant label, and a row that reports it as a finding is wrong about
+that label. The check is calibrated to distilled spirits, which is what the
+assignment's worked examples are and what both real filings are.
+
+**What was done instead of changing the logic.** The row's reason now names
+the 4.36(a) allowance beside the 7.63(a)(3) one, so an agent reading the
+finding sees when it is not a defect; the limit is recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 with the citations; and the
+tests, FR-14 and FR-15 are untouched. Changing the check touches two
+requirements, it needs the beverage type (ADR 0016) to be trusted as the input
+that decides whether absence is a finding, and for wine it needs the class or
+type designation read for the words "table" or "light", none of which belongs
+in the session that found it.
+
+**What would answer it:** a decision on whether the presence check consults
+the beverage type, and if so what it reports when the type is not determined;
+and for wine, whether "table" or "light" in the class or type designation
+stands in for the figure.
+
+**Who can answer:** Jenny Park or Sarah Chen, on whether an agent expects the
+tool to raise absence on a beer or a table wine, and on which they see more of.
+**Blocks:** nothing in the prototype. It bounds the claim the presence check
+makes: on distilled spirits it is a finding; on a malt beverage or a table wine
+it is a question for the agent, and the row says so.
+
+## OQ-39
+**How should a single line of legible type set over full-colour artwork be
+isolated before it is read?**
+
+**Status: Open. Measured 2026-09-06; not tuned for.**
+
+The bourbon filing committed as evidence in `samples/real/` carries its alcohol
+content and its net contents on one line of light type about 24 pixels tall
+along the bottom edge of a 1950 by 862 panel that is otherwise a painting. On
+the session's Tesseract 5.3.4 the whole panel reads as no text at all through
+every arm of the pipeline; the container's 5.3.0 read it at 45.3 confidence
+and found neither value. Every page segmentation mode Tesseract offers was
+tried on the whole panel, on the colour image, the 1600-pixel grayscale and
+the native grayscale, and the best recovered the percentage figure alone.
+Cropped to its own text band, the same line reads at 88.0 confidence,
+complete, and every rule downstream accepts it: the matcher, the proof
+cross-check, the net contents unit.
+
+So the type is legible and the pipeline reads it; what fails is the layout
+analysis, which does not find one line of text on a picture. That is a
+different limit from the low-contrast labels recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 alongside it, where the type
+itself is the problem and tuning is declined. Here the fix would be text-region
+detection before OCR: finding the bands of a panel that carry type and reading
+those on their own. It is real image-processing work, it would run only on a
+panel that read poorly, and it is not attempted in this session; the crop
+measurement is recorded so that whoever attempts it knows the line reads once
+it is found.
+
+**What would answer it:** a region detector measured on this panel and on the
+twelve synthetic labels, showing the line found here and nothing lost there,
+with its cost.
+
+**Who can answer:** measurement.
+**Blocks:** nothing in the prototype. On this filing the alcohol content and
+the net contents are reported not found, and the deployment notes say why.
