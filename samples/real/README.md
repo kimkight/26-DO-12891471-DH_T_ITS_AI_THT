@@ -56,10 +56,13 @@ appears in the public registry, solely to make this evaluation reproducible.
 ## What reads these files
 
 Nothing automated. No test loads them, CI does not touch them, and no
-assertion depends on their contents. Committing them would put their text
-into the test suite, which is the thing the test data policy was written to
+assertion depends on their contents. Asserting on them would put their text
+into the test suite, which is the thing the test data policy is written to
 avoid; the regression tests remain synthetic and live in `samples/`, and
 these two sit here as evidence a person can open.
 
-See `docs/07_TEST_STRATEGY.md` section 8 for the policy as it now stands and
-`docs/adr/` for the decision that changed it.
+See `docs/07_TEST_STRATEGY.md` section 8 for the policy as it now stands,
+[ADR 0021](../../docs/adr/0021-real-filings-as-evidence-not-fixtures.md) for
+the decision that changed it and the alternatives declined, and OQ-22 in
+`docs/OPEN_QUESTIONS.md` for what running the tool on these two documents
+measured.
