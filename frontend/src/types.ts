@@ -23,6 +23,13 @@ export type Outcome =
   | 'mismatch'
   | 'not_compared'
   /**
+   * The government warning alone (FR-5, ADR 0022): the statement is on the
+   * label, it does not match 27 CFR 16.21, and every line that differs was
+   * read too poorly to attribute the difference to the label. A failing
+   * outcome that asks a person to look at the label; never a pass.
+   */
+  | 'not_certified'
+  /**
    * A passing one-sided finding (FR-15, ADR 0018): 27 CFR requires this element
    * on the label and the label carries it. The row has a label value and no
    * application value, because the application declared none, and no score,
@@ -345,6 +352,22 @@ export interface WarningResult {
   near_miss: boolean
   /** The character-level difference, in reading order. */
   diff: WarningDiffSegment[]
+  /**
+   * Whether the prefix was read as GOVERNMENT WARNING at all. False when OCR
+   * damaged its first word and the statement was located by what survived;
+   * `prefix_is_capitalized` is then null, unchecked rather than failed
+   * (ADR 0022). Optional so an older server's response still reads.
+   */
+  prefix_legible?: boolean
+  /** Lines of the statement that are not a run of the regulation's text. */
+  differing_lines?: number
+  /** How many of those were read below the legibility floor. */
+  illegible_lines?: number
+  /**
+   * The statement is present and not certified: every differing line read
+   * too poorly to attribute the difference to the label. Never a pass.
+   */
+  not_certified?: boolean
 }
 
 /**

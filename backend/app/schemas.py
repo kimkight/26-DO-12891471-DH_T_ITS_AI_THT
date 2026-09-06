@@ -157,8 +157,8 @@ class FieldResult(BaseModel):
     )
     outcome: Outcome = Field(
         description=(
-            "match, needs_review, mismatch, not_compared, present, or "
-            "artwork_derived. "
+            "match, needs_review, mismatch, not_compared, present, "
+            "artwork_derived, or not_certified. "
             "present is a passing one-sided finding (FR-15, ADR 0018): 27 CFR "
             "requires alcohol content and net contents on the label, and where "
             "the application declared neither, the row reports that the label "
@@ -170,7 +170,12 @@ class FieldResult(BaseModel):
             "same label artwork that supplied the label side, so the two values "
             "compared are one reading of one picture and could not have "
             "disagreed. It never carries a score either, and ADR 0018 narrows "
-            "it to the fields presence checks do not cover."
+            "it to the fields presence checks do not cover. not_certified "
+            "belongs to the government warning alone (FR-5, ADR 0022): the "
+            "statement is on the label, it does not match 27 CFR 16.21, and "
+            "every line that differs was read too poorly to attribute the "
+            "difference to the label; a failing outcome that asks a person to "
+            "look, never a pass."
         )
     )
     reason: str = Field(description="Why this outcome, in terms an agent can check.")
@@ -265,6 +270,41 @@ class WarningResult(BaseModel):
         description=(
             "The character-level difference against 27 CFR 16.21, in reading "
             "order. Empty when the statement matches, and when none was found."
+        ),
+    )
+    prefix_legible: bool = Field(
+        default=True,
+        description=(
+            "Whether the prefix was read as GOVERNMENT WARNING at all. False "
+            "when the statement was located by WARNING alone or by the body's "
+            "own opening, because OCR damaged the first word; "
+            "`prefix_is_capitalized` is then null, unchecked rather than failed "
+            "(FR-6, ADR 0022)."
+        ),
+    )
+    differing_lines: int = Field(
+        default=0,
+        description=(
+            "How many lines of the located statement are not a run of the "
+            "regulation's text. Zero when it matches, and on a caller with no "
+            "per-line reading."
+        ),
+    )
+    illegible_lines: int = Field(
+        default=0,
+        description=(
+            "How many of those differing lines were read below TTB_WARNING_LEGIBLE_CONFIDENCE."
+        ),
+    )
+    not_certified: bool = Field(
+        default=False,
+        description=(
+            "Whether the difference is reported as the statement being present "
+            "and not certified rather than as a mismatch (ADR 0022): the "
+            "statement is on the label, it does not match, and every line that "
+            "differs was read below the legibility floor, so the tool cannot "
+            "attribute the difference to the label. **Never a pass**, and never "
+            "true for a near miss, which has its own outcome."
         ),
     )
 

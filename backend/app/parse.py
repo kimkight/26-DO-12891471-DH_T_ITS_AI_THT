@@ -104,6 +104,20 @@ _NET_CONTENTS_LINE = re.compile(
     re.IGNORECASE,
 )
 _WARNING_PREFIX_LINE = re.compile(r"government\s+warning", re.IGNORECASE)
+# The two fallbacks for a prefix OCR damaged: WARNING on its own, and the
+# body's opening. See ``app.warning.locate_warning`` for why, and for the
+# measurement behind it.
+_DAMAGED_PREFIX_LINE = re.compile(r"\bwarning\b", re.IGNORECASE)
+_BODY_OPENING_LINE = re.compile(r"according\s+to\s+the|surgeon\s+general", re.IGNORECASE)
+_BODY_CONTINUES_LINE = re.compile(
+    r"surgeon\s+general|should\s+not\s+drink|birth\s+defects|alcoholic\s+beverages",
+    re.IGNORECASE,
+)
+# A line with no letter in it cannot carry a word of the statement, so it is
+# not part of the block even when it sits inside it: on a real filing the
+# panel carrying the warning is overprinted with a run of digits from the
+# printer's registration marks, which OCR returns as a line of its own.
+_HAS_A_LETTER = re.compile(r"[^\W\d_]")
 
 
 @dataclass(frozen=True)
@@ -162,7 +176,14 @@ def lines_from_text(text: str) -> list[OcrLine]:
 def parse_fields(lines: list[OcrLine]) -> ParsedFields:
     """Locate all five fields. Every field may independently be not found."""
     warning_indices, warning_text = _find_warning(lines)
-    warning = check_warning(warning_text) if warning_text else check_warning("")
+    warning = (
+        check_warning(
+            warning_text,
+            lines=[(lines[index].text, lines[index].confidence) for index in warning_indices],
+        )
+        if warning_text
+        else check_warning("")
+    )
 
     abv_index = _first_match(lines, is_alcohol_content_line, skip=warning_indices)
     net_index = _first_match(lines, _matcher(_NET_CONTENTS_LINE), skip=warning_indices)
@@ -261,10 +282,7 @@ def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
     a mismatch for a reason that has nothing to do with its wording. What is
     returned is still the text as printed; only the stopping rule is joined.
     """
-    start = next(
-        (index for index, line in enumerate(lines) if _WARNING_PREFIX_LINE.search(line.text)),
-        None,
-    )
+    start = _warning_start(lines)
     if start is None:
         return [], None
 
@@ -272,11 +290,39 @@ def _find_warning(lines: list[OcrLine]) -> tuple[list[int], str | None]:
     indices: list[int] = []
     collected: list[str] = []
     for index in range(start, len(lines)):
+        if not _HAS_A_LETTER.search(lines[index].text):
+            continue
         indices.append(index)
         collected.append(lines[index].text)
         if len(join_line_break_hyphens(normalize_whitespace(" ".join(collected)))) >= target_length:
             break
     return indices, normalize_whitespace(" ".join(collected))
+
+
+def _warning_start(lines: list[OcrLine]) -> int | None:
+    """The line the statement starts on: by its prefix, or by what survived of it.
+
+    The prefix first, as always. Then a line carrying WARNING whose next two
+    lines, joined, open the body, which is the prefix with GOVERNMENT damaged;
+    the body has to follow so that another warning on the label, or the word
+    on its own, is not taken for this one. Then the body's opening itself,
+    for a prefix OCR lost entirely. What the fallbacks find is reported with
+    its prefix illegible, never as a capitalization verdict (FR-6, ADR 0022).
+    """
+    for index, line in enumerate(lines):
+        if _WARNING_PREFIX_LINE.search(line.text):
+            return index
+    for index, line in enumerate(lines):
+        if _DAMAGED_PREFIX_LINE.search(line.text):
+            window = " ".join(entry.text for entry in lines[index : index + 3])
+            if _BODY_OPENING_LINE.search(window) and _BODY_CONTINUES_LINE.search(window):
+                return index
+    for index, line in enumerate(lines):
+        if _BODY_OPENING_LINE.search(line.text):
+            window = " ".join(entry.text for entry in lines[index : index + 3])
+            if _BODY_CONTINUES_LINE.search(window):
+                return index
+    return None
 
 
 def _matcher(pattern: re.Pattern[str]) -> Callable[[str], bool]:

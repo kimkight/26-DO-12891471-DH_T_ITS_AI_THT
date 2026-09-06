@@ -165,6 +165,13 @@ export function HelpTab() {
               missing something the regulation requires.
             </dd>
 
+            <dt>Present, not certified</dt>
+            <dd>
+              The government warning is on the label, and it does not match the regulation word for
+              word, but every line that differs was read too poorly for us to say whether the
+              difference is the label's or ours. Look at the label itself. This is not a pass.
+            </dd>
+
             <dt>Not found</dt>
             <dd>
               We could not read this on the label at all. That may be the photo rather than the
