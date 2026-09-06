@@ -938,6 +938,9 @@ def build_result(
     # measuring it is how that stays a fact rather than an assumption.
     with timing.phase("compare"):
         attribution = dict(sources or {})
+        # The panel behind each photo index, so a row can name the picture its
+        # value came off rather than only number it (2026-09-06).
+        panel_by_photo = {photo.index: photo.artwork_panel for photo in photos or []}
         value_sources = application_sources or {}
         searchable = sheets or []
         label_values: dict[str, str | None] = {
@@ -1055,6 +1058,7 @@ def build_result(
                 reason=comparison.reason,
                 label_region=_region_detail(regions.get(name)),
                 source_photo=attribution.get(name),
+                source_panel=panel_by_photo.get(attribution.get(name)),
                 # **No application side on a presence row**, because there is
                 # nothing on that side (FR-15, ADR 0018). A row printing the
                 # same string in both columns is what invited the confusion this
@@ -1075,6 +1079,7 @@ def build_result(
                 parsed.warning_text,
                 attribution.get("government_warning"),
                 parsed.region.get("government_warning"),
+                source_panel=panel_by_photo.get(attribution.get("government_warning")),
             )
         )
 
@@ -1183,6 +1188,7 @@ def _warning_field(
     warning_text: str | None,
     source_photo: int | None = None,
     region: TextRegion | None = None,
+    source_panel: ArtworkPanelDetail | None = None,
 ) -> FieldResult:
     """The warning as one field row (FR-5, FR-6, ADR 0012).
 
@@ -1221,4 +1227,5 @@ def _warning_field(
         reason=f"{warning.reason} {warning.bold_type_note}",
         label_region=_region_detail(region),
         source_photo=source_photo,
+        source_panel=source_panel,
     )

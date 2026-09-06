@@ -122,6 +122,18 @@ class TextRegionDetail(BaseModel):
     block: int = Field(description="Tesseract's layout block number within that column.")
 
 
+class ArtworkPanelDetail(BaseModel):
+    """One embedded picture, named by where it sat and how big it is.
+
+    Enough to find it in the artwork tables on the application block and
+    nothing else: never the picture, never anything read out of it (NFR-6).
+    """
+
+    page: int = Field(description="The page the picture sat on, numbered from 1.")
+    width: int = Field(description="Its width in pixels, as the file stores it.")
+    height: int = Field(description="Its height in pixels, as the file stores it.")
+
+
 class FieldResult(BaseModel):
     """One field, its two values, its score, its outcome, and why (FR-3)."""
 
@@ -188,8 +200,24 @@ class FieldResult(BaseModel):
         default=None,
         description=(
             "Which submitted photograph this value was read from, numbered from "
-            "1 in submission order (ADR 0007). Null where the field was not "
-            "found on any photograph."
+            "1 in submission order (ADR 0007). It is the `index` of an entry in "
+            "`photos`, and `photos` is in that order, so a value of 5 is the "
+            "entry whose `index` is 5, the fifth in the array. Where the label "
+            "side is the application's artwork the order is the reading order, "
+            "largest picture first, which is also the order of the read entries "
+            "in `application_document.artwork_images_accepted`. Null where the "
+            "field was not found on any photograph."
+        ),
+    )
+    source_panel: ArtworkPanelDetail | None = Field(
+        default=None,
+        description=(
+            "Where the label side is the application's artwork, the embedded "
+            "picture this value was read from, named by its page and pixel "
+            "size: the same `artwork_panel` the `photos` entry `source_photo` "
+            "addresses carries, put on the row so that no index has to be "
+            "followed to know which panel a value came off. Null for an "
+            "uploaded photograph and where the field was not found."
         ),
     )
     application_value_source: ApplicationSource = Field(
@@ -301,18 +329,6 @@ class ParsedApplicationField(BaseModel):
             "the picture it came off (ADR 0010 as amended)."
         ),
     )
-
-
-class ArtworkPanelDetail(BaseModel):
-    """One embedded picture, named by where it sat and how big it is.
-
-    Enough to find it in the artwork tables on the application block and
-    nothing else: never the picture, never anything read out of it (NFR-6).
-    """
-
-    page: int = Field(description="The page the picture sat on, numbered from 1.")
-    width: int = Field(description="Its width in pixels, as the file stores it.")
-    height: int = Field(description="Its height in pixels, as the file stores it.")
 
 
 class ApplicationDocumentResult(BaseModel):

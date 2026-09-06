@@ -221,6 +221,30 @@ wrong shape either way.
   docs/07 updated.
 
 
+### `source_photo` addresses the `photos` it names, and the row names its panel (ADR 0010 as amended 2026-09-06)
+
+Found while measuring the bourbon on the deployed build: the brand's
+`source_photo` read 5 on a document whose `photos` array had five entries,
+and the artwork table listed the same five pictures in another order. The
+index was one-based and correct; the two lists disagreed about order, and
+nothing on screen said which picture "photo 5" was.
+
+#### Changed
+
+- The pooled panels are in reading order, largest first, which is the order
+  `application_document.artwork_images_accepted` already lists them in. The
+  page the label is said to come from is still the first panel that yielded
+  a value, found separately.
+- Every field row carries `source_panel`: the page and pixel size of the
+  embedded picture its value was read off, the same panel the addressed
+  `photos` entry carries. The interface reads "Read from the label artwork on
+  page 3 of the application, 1050 by 309 pixels" on such a row, the way the
+  artwork list names its entries; an uploaded photograph is still "Read from
+  photo 2". `source_photo`'s description says which array it addresses and in
+  what order.
+- `test_artwork_panels.py::TestTheSourcePhotoAddressesThePhotosList` pins the
+  join and the order, and a panel that yields nothing keeping its rank.
+
 ## [1.4.0] - 2026-09-03
 
 The bulk page becomes the same tool as the single-label page. The author,
