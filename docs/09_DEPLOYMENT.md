@@ -920,6 +920,316 @@ This section is the record of the runs; the README is the summary of them.
       like. The follow-up, and why it is not done here, is
       [OQ-37](OPEN_QUESTIONS.md#oq-37).
 
+- [x] **The cost of reading every panel, and the arrival sort on the batch
+      tab** (v1.5.0, #121, OQ-24, OQ-37; [ADR 0010](adr/0010-embedded-label-artwork.md)
+      as amended). **Measured 2026-09-03 on a session container**, not
+      production hardware, against a local uvicorn with `TTB_BATCH_WORKERS=1`
+      and `OMP_THREAD_LIMIT=1` as the task definition sets them, one warm-up
+      batch run first and discarded. This container is slower than the one
+      the 2026-09-02 rows above were taken on (a one-panel filing took 1.32 s
+      there and 1.98 s here), so the figures below compare with each other and
+      not with the rows above. Two fixture shapes, both synthetic and neither
+      the author's document: the one-panel filing is
+      `samples/applications/filed/*.pdf`, the Registry printout with the
+      rendered 1000 by 1500 label sheet affixed; the three-panel filing is
+      `backend/tests/test_artwork_panels.py`'s bourbon-shaped document, a
+      1350 by 300 front panel, a 1050 by 309 back panel, a 187 by 1697 side
+      band and a 687 by 195 signature, of which the floor admits the first
+      three. No image was sent, so every row's label side is the artwork
+      inside its application.
+
+      | Batch | Wall clock | Per label | `ocr_passes` per row | `tesseract_reads` per row, median (max) | row `total_ms`, median | `artwork_ocr_ms`, median | panels read |
+      | --- | --- | --- | --- | --- | --- | --- | --- |
+      | 1 one-panel filing | 1.98 s | 1.98 s | 1 | 2 (2) | 1973 | 1944 | 1 |
+      | 5 one-panel filings | 9.02 s | 1.80 s | 1 | 2 (4) | 1893 | 1874 | 1 |
+      | 20 one-panel filings | 40.04 s | 2.00 s | 1 | 2 (4) | 2084 | 2066 | 1 |
+      | 1 three-panel filing | 2.86 s | 2.86 s | 3 | 6 (6) | 2856 | 2841 | 3 |
+      | 5 three-panel filings | 13.39 s | 2.68 s | 3 | 6 (6) | 2731 | 2713 | 3 |
+      | 20 three-panel filings | 53.75 s | 2.69 s | 3 | 6 (6) | 2677 | 2661 | 3 |
+
+      Every row returned `ok` with `label_source` `application_artwork`, all
+      five checks passing on the three-panel filing and `label_ocr_ms` zero on
+      every row: each panel is read once, to fill the application values, and
+      that read is the label side (ADR 0017). **Three panels cost about 1.35
+      times one flat sheet, not three times.** The phase timings say where the
+      time goes: `artwork_ocr_ms` is the whole of the row on both shapes, and
+      `tesseract_reads` is two per panel (the orientation call and the read)
+      on either. A Tesseract pass costs by the text it has to read rather than
+      by the picture it is handed, and a 1350 by 300 panel carrying two lines,
+      scaled to the same 1600 pixel long edge, is about 0.9 s against about
+      1.9 s for a full sheet carrying the whole label including the
+      government warning. So four panels is not four times the work on
+      artwork shaped like this filing's; it is roughly the cost of the text
+      on them, however it is divided. **That is a property of this fixture's
+      text density and not a law**: the author's real bourbon panels carry
+      whatever they carry, and the honest per-label figure on the deployed
+      target is the next thing to measure with that document. The per-panel
+      cost is visible in the response either way, and the lever if it is too
+      high is `TTB_MAX_ARTWORK_IMAGES`, which now lists what it cut as
+      `not_read` rather than dropping it.
+
+      **The capacity limiter holds.** During the 20-row batches `GET
+      /api/health` was polled every 250 ms from a second thread: 159 probes
+      during the one-panel batch, median 3 ms, maximum 5 ms; 212 probes
+      during the three-panel batch, median 3 ms, maximum 69 ms. None was
+      near a second.
+
+      **Classify on arrival, for a twenty-file drop**, one `POST /api/classify`
+      per file with two in flight, on the same server, before the change:
+
+      | Twenty files | Wall clock | Per call, median |
+      | --- | --- | --- |
+      | filed PDFs | 0.57 s | 56 ms |
+      | label PNGs | 36.55 s | 3 734 ms |
+
+      The same shape as the 2026-09-02 row, on a slower container. Three
+      cheaper sorts were on the table, since NFR-6 rules out keeping the read
+      for the check: a heavily downscaled read, metadata alone, or deferring
+      the decision to the check with a provisional chip. The downscaled read
+      was measured before being chosen against, and the table is in
+      [OQ-37](OPEN_QUESTIONS.md#oq-37): at every scale down to 600 pixels it
+      cost 70 to 85 percent of a full read, because a lower-confidence first
+      arm sends the pipeline into its other arms, and at 400 pixels, the one
+      scale that saved anything, it sorted both synthetic photographed forms
+      as labels. **The batch tab now defers.** An image is not sent on
+      arrival; its chip reads "Label image, sorted when checked" with a line
+      saying why, and the batch line, which carries the server's sorting of
+      every file in the row, replaces it. So the twenty-PNG figure above is
+      now 0 s before the batch starts, a PDF is still sorted on arrival in
+      the 56 ms it costs, a photographed form is still sorted correctly when
+      checked, and the check reads each image once as it always did. The
+      single-label tab is unchanged.
+
+- [x] **The stopping rule, and what it recovered per shape** (#121, OQ-24;
+      [ADR 0010](adr/0010-embedded-label-artwork.md) as amended 2026-09-04).
+      **The second measurement on the deployed target first**, from the
+      author's browser on 2026-09-04 against the v1.5.0 build with the
+      rebuilt floor, same bourbon filing as the 2026-09-03 row:
+
+      | Page | Panel | Status | OCR confidence |
+      | --- | --- | --- | --- |
+      | 2 | 1950 x 862 | read | 45.3 |
+      | 4 | 1350 x 300 | read | 89.9 |
+      | 2 | 1103 x 340 | read | 29.0 |
+      | 3 | 1050 x 309 | read | 86.8 |
+      | 3 | 187 x 1697 | not read | |
+      | 2 | 772 x 194 | rejected, area | |
+
+      Brand name and class or type matched; document OCR confidence 62.8
+      against 45.3 on v1.4.0; alcohol content, net contents and government
+      warning still not found; `elapsed_ms` 7325 and `tesseract_reads` 16
+      against 2600 and 4 on v1.4.0. The two panels the shape rules had
+      rejected read better than the sheet they kept. The fifth panel was
+      never read because `TTB_MAX_ARTWORK_IMAGES` was four.
+
+      **Before and after the stopping rule, on a session container**, not
+      production hardware: a local uvicorn with `TTB_BATCH_WORKERS=1` and
+      `OMP_THREAD_LIMIT=1` as the task definition sets them, one warm-up
+      request discarded, then three `POST /api/verify` requests per fixture
+      with the document alone. "Before" is the #140 merge (`2565f5e`, count
+      of four, no early exit) and "after" is this change, served from the
+      same container minutes apart. Three synthetic fixtures, none the
+      author's document: the one-sheet filing is
+      `samples/applications/filed/01-spirits-clean.pdf`; the five-panel
+      filing is `backend/tests/test_artwork_panels.py`'s bourbon-shaped
+      document, whose last three values are on the 187 by 1697 strip that
+      ranks fifth; the sheet-plus-two is the 1000 by 1500 sample label ahead
+      of two prose panels, the shape a stopping rule is for.
+
+      | Fixture | `elapsed_ms` before, median (min, max) | `tesseract_reads` before | panels read before | outcome before | `elapsed_ms` after, median (min, max) | `tesseract_reads` after | panels read after | outcome after |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | one-sheet filing | 1072 (1022, 1090) | 2 | 1 | 5 of 5 | 1021 (1021, 1053) | 2 | 1 | 5 of 5 |
+      | five-panel filing, values on the fifth | 1745 (1723, 1792) | 8 | 4 of 5 | 2 of 5 | 2566 (2534, 2598) | 13 | 5 of 5 | 5 of 5 |
+      | sheet plus two prose panels | 1845 (1794, 1853) | 6 | 3 | 4 of 4 compared | 1141 (1076, 1160) | 2 | 1 | 4 of 4 compared |
+
+      `ocr_passes` equals panels read on every row and `label_ocr_ms` is zero
+      on every row: each panel is read once and that read is the label side
+      (ADR 0017). The sheet-plus-two row compares four fields because its
+      paper form declares no class or type. The five-panel row's 13 reads for
+      5 passes against 8 for 4 is the strip: turned 90 degrees, it costs the
+      orientation call, the 180-degree second opinion and the arms.
+
+      **What the table says, plainly.** On the one-sheet filing nothing
+      changes: one pass either way. On the sheet-plus-two the rule reads one
+      panel where the count read three, and that is the whole of what it
+      recovers: reads that were never needed. On the five-panel filing it
+      recovers nothing, because the values the check needs are on the last
+      panel and the rule reads until it has them; what changes there is the
+      outcome, two of five to five of five, at the cost of one more panel
+      than the count allowed. **So the stopping rule does not recover most
+      of the bourbon's 4.7 seconds, and this is said rather than implied.**
+      If the author's three missing values are on the strip, the bourbon's
+      cost is five panels' worth of reads, about what four cost plus one
+      strip, and the correct answer. If they are on the panel that read at
+      29.0, the count was never the problem and a low-contrast preprocessing
+      change is the next fix. Which it is, the next request settles.
+
+- [x] **The bourbon on the deployed build, with the stopping rule.** Measured
+      by the author against the deployed build once #141 landed: **all five
+      panels read**, the 187 by 1697 strip among them at 67.0; `elapsed_ms`
+      **7534**, `tesseract_reads` **19**, document confidence 63.6. And the
+      alcohol content, the net contents and the government warning were
+      **still all reported not found**. So it was not the count, and it was
+      not the 29.0 panel. What it was is the next entry.
+
+      | Page | Panel | Status | OCR confidence |
+      | --- | --- | --- | --- |
+      | 2 | 1950 x 862 | read | 45.3 |
+      | 4 | 1350 x 300 | read | 89.9 |
+      | 2 | 1103 x 340 | read | 29.0 |
+      | 3 | 1050 x 309 | read | 86.8 |
+      | 3 | 187 x 1697 | read | 67.0 |
+
+- [x] **The three missing values, taken apart, on a session container
+      (2026-09-06).** The same filing, now committed as evidence in
+      `samples/real/` (#142, ADR 0021), put through the pipeline panel by
+      panel on the session's Tesseract 5.3.4 rather than the container's
+      5.3.0, so the figures here are about the reading and not about the
+      deployed latency. **They are three different problems, and the premise
+      that one of them was the tool being right did not survive the
+      measurement.**
+
+      **The alcohol content is on the label, and the matcher already accepts
+      the way it is printed.** It sits on the 1950 by 862 panel, which is a
+      full-colour painting with one line of light type about 24 pixels tall
+      along its bottom edge. Through the whole pipeline that panel reads as
+      **no text at all** on this Tesseract, from every one of the three arms
+      (colour, preprocessed, plain), where the container's 5.3.0 read it at
+      45.3; and no page segmentation mode Tesseract offers reads the line off
+      the whole panel either (automatic, single block and sparse text were
+      each tried on the colour image, the 1600-pixel grayscale and the native
+      grayscale: the best recovered the percentage figure and nothing of the
+      marker). **Cropped to its own text band, the same line reads at 88.0
+      confidence, complete**: the class or type, the percentage in the slash
+      form, the proof to one decimal place in parentheses, and a net contents
+      after it. The line predicate accepts it as printed, and `parse_abv`
+      reads the percentage and the proof, which agree exactly. **So the gap
+      is not the slash form.** The nine-label survey below confirms the
+      predicate covers every shape labels use, and every shape is now a named
+      test; what the wide panel needs is for the reader to find the line,
+      which is OQ-39.
+
+      **One defect did come out of the read, and it is fixed.** The proof on
+      this label is printed to one decimal place, and the point came back as
+      a dash from one segmentation mode and a degree sign from another. The
+      proof pattern then read the last digit as the whole proof, and the A-12
+      cross-check would have reported a label that agrees with itself
+      exactly, 45.2 percent at 90.4 proof, as contradicting itself. The
+      repair is one of four characters between a run of digits and exactly
+      one digit, immediately before PROOF; a range of percentages is
+      untouched (`test_compare.py`).
+
+      **The net contents is on the label too, and the tool is not right about
+      it.** The prompt for this session recorded net contents as genuinely
+      absent from every panel. It is not: the same bottom line ends in a
+      litre figure fused to its unit, in a face whose figure one reads as a
+      capital I. So on this document "not found" is a reading failure twice
+      over, once for the whole panel and once for the glyph, and it is
+      recorded here as that rather than as the tool working. The row's copy
+      was read as asked and now says every panel read was searched, and cites
+      27 CFR 4.37(c) beside the spirits and malt beverage carve-outs, because
+      wine has one as well. Nothing was loosened to make the value appear.
+
+      **The government warning is on the 1050 by 309 panel and reads well
+      except where it is overprinted.** At 86.8 the body comes back almost
+      complete; what breaks is the prefix, where the registration marks run
+      through GOVERNMENT and it reads as a garble, so the statement is never
+      located and the row says the label has no warning. That is the worst of
+      the three answers for a label a person would pass, and it is the
+      subject of its own change and ADR.
+
+      **The nine-label survey.** Before this session the author pulled the
+      label artwork of nine approved applications from the Public COLA
+      Registry, across six beverage classes, and transcribed the alcohol and
+      net contents statements as printed. Counts only, here and in the tests:
+      five of nine alcohol statements use the slash form, two abbreviate
+      `ALC.` before the figure with `BY VOL` after it, one uses `ALC BY VOL`
+      and one the spelled-out form; three carry a proof, one in square
+      brackets and two in parentheses, one of those behind a dash. **Exactly
+      one uses `ALC BY VOL`, and it is the filing the matcher was built
+      against.** The regulation agrees: 27 CFR 5.65(b)(3) allows `alc`, `%`,
+      the slash and `vol`, and (b)(4)'s first example is `40% alc/vol`; 27 CFR
+      7.65(b)(4) and (b)(5) say the same for malt beverages; 27 CFR 4.36(b)
+      fixes `alc.` and `vol.` for wine and permits a range. Net contents comes
+      in six shapes across the nine: metric with and without a space, metric
+      with the estimated-quantity sign, metric behind `CONT.`, metric fused
+      to a lot code, and one pint; two print it on the alcohol line. The unit
+      list is widened to 27 CFR 5.70(a), 7.70(a) and 4.37, each shape is a
+      named test, and the rule is unchanged: a number has to sit against a
+      unit.
+
+      **Cost, on the session container**, one warm-up discarded, three
+      `POST /api/verify` requests with the document alone, before and after
+      this change on the same container minutes apart:
+
+      | Document | `elapsed_ms` before, median (min, max) | reads | outcome | `elapsed_ms` after, median (min, max) | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | the bourbon filing | 5554 (5480, 5610) | 19 | 1 of 5 | 5554 (5480, 5610) | 19 | 1 of 5 |
+      | the mezcal filing | 3016 (2966, 3026) | 4 | 5 of 5 | 3016 (2966, 3026) | 4 | 5 of 5 |
+
+      The same numbers on both sides, because on this Tesseract the wide
+      panel reads nothing, so there is no line for the widened rules to
+      accept and the stopping rule has nothing new to stop on. **On the
+      deployed build the alcohol fix cannot finish the stop rule earlier
+      either**, for the same reason one level up: the values are on a panel
+      whose line the reader does not isolate. Where a reader does isolate it
+      (OQ-39), the alcohol content and the net contents both come off the
+      largest panel, which is read first, and the rule then stops after the
+      fourth panel with the strip unread: about the strip's three reads
+      saved, and the correct answer. Stated as the expectation, not measured.
+
+- [x] **A limit of the current scope, named and cited: the alcohol content
+      check is calibrated to distilled spirits (2026-09-06).** Two things the
+      regulation says that the current design does not account for, found in
+      the same reading:
+
+      - **27 CFR 7.65(a)**: alcohol content "may be stated on any malt
+        beverage label, unless prohibited by State law"; it is optional
+        unless State law requires it.
+      - **27 CFR 4.36(a)**: for a wine of 14 percent alcohol or less, "the
+        alcohol content may be stated, but need not be stated if the type
+        designation 'table' wine (or 'light' wine) appears on the brand
+        label".
+
+      So on a beer, or on a table wine, "alcohol content not found" can be
+      the correct reading of a fully compliant label, and reporting it as a
+      finding would be wrong. **The checking logic is not changed in this
+      session**: it touches FR-14 and FR-15, the assignment's worked examples
+      are spirits, and the row already says that 7.63(a)(3) narrows the
+      requirement for malt beverages; it now says the same for table wine.
+      Applying the check unmodified to malt beverages and to table wine would
+      produce false findings, and that is recorded as OQ-38 rather than
+      discovered by a reviewer.
+
+- [x] **A limit of the approach, named: type the reader will not read
+      (2026-09-06).** Also in the nine: an approved vodka specialty label
+      printing its alcohol statement small, curved, in pale pink on deep
+      purple inside dense engraving; a wine label in gold on near-black; a
+      bourbon label in pale mint on white. Low contrast at small type is a
+      property of the label, not of the pipeline, and tuning against it costs
+      more than it returns. TTB's own registry states that it has not
+      reviewed labels for type size, characters per inch or contrasting
+      background, which is to say the registry does not certify the property
+      this reader depends on. Recorded, not tuned for. The wide bourbon panel
+      above is a different case, and a nearer one: its type is legible and
+      reads at 88 on its own, and what fails is finding it on the painting
+      (OQ-39).
+
+- [ ] **The bourbon on the deployed build, once the reader isolates the
+      line.** The manual step that settles which panel each of the three values is on.
+      Submit the bourbon filing alone on the single-label tab and read
+      `application_document.artwork_images_accepted`: the 187 by 1697 strip
+      should now be `read` with a confidence beside it, and
+      `fields[].source_photo` with `photos[].artwork_panel` names the panel
+      each check's value was found on. Record here: the panel for each of
+      the five values, the strip's confidence, `elapsed_ms` and
+      `tesseract_reads`. If the strip reads and the three values are on it,
+      OQ-24's size question is closed for this filing and the cost is the
+      cost of five panels. If the strip reads and the three values are still
+      absent, the 1103 by 340 panel at 29.0 is the next suspect and the fix
+      is preprocessing, not counting. Nothing about the document enters the
+      repository; the numbers do.
+
 The README status table and its
 [Measured performance and accuracy](../README.md#measured-performance-and-accuracy)
 section have been updated from this run.

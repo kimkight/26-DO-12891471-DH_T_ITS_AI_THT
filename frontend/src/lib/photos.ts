@@ -7,7 +7,7 @@
  * should not need a render to check.
  */
 import { plainMessage } from './plainLanguage'
-import type { PhotoResult } from '../types'
+import type { ApplicationDocumentResult, FieldResult, PhotoResult } from '../types'
 
 /** What was done to one photograph, as a sentence, or null if nothing was. */
 export function photoNote(photo: PhotoResult): string | null {
@@ -59,21 +59,95 @@ export function photoListHeading(photos: PhotoResult[]): string {
   return photos.length === 1 ? 'Your photo' : `Your ${photos.length} photos`
 }
 
-/** How one entry in that list is named. */
+/**
+ * How one entry in that list is named.
+ *
+ * A piece of artwork is named by where it sat in the document and how big it
+ * is, because a filing that embeds its labels as separate panels has several
+ * and "label artwork from the application" three times over tells an agent
+ * nothing about which is which (ADR 0010 as amended).
+ */
 export function photoItemLabel(photo: PhotoResult): string {
-  return photo.origin === 'application_artwork'
-    ? 'Label artwork from the application'
-    : `Photo ${photo.index}`
+  if (photo.origin !== 'application_artwork') return `Photo ${photo.index}`
+  const panel = photo.artwork_panel
+  return panel
+    ? `Label artwork on page ${panel.page} of the application, ${panel.width} by ${panel.height} pixels`
+    : 'Label artwork from the application'
+}
+
+/**
+ * What else was in the application, and what happened to it (ADR 0010 as
+ * amended, #121).
+ *
+ * The response lists every embedded picture that was set aside with the
+ * reason, and every one that cleared the floor and was not read. An agent
+ * looking at a value the tool did not find is entitled to that table without
+ * instrumenting anything: on a real filing five of six pictures were set
+ * aside and nothing on screen said so. Null when there is nothing to say,
+ * which is the ordinary case.
+ */
+export function artworkNote(document: ApplicationDocumentResult | null | undefined): string | null {
+  if (!document) return null
+  const rejected = document.artwork_images_rejected ?? []
+  const unread = (document.artwork_images_accepted ?? []).filter((image) => image.status !== 'read')
+  const parts: string[] = []
+  if (rejected.length) {
+    const sizes = rejected.map((image) => `${image.width} by ${image.height} on page ${image.page}`)
+    parts.push(
+      `${rejected.length === 1 ? 'One picture' : `${rejected.length} pictures`} in the application ${
+        rejected.length === 1 ? 'was' : 'were'
+      } set aside as too small to be label artwork: ${sizes.join('; ')}.`,
+    )
+  }
+  if (unread.length) {
+    const sizes = unread.map(
+      (image) =>
+        `${image.width} by ${image.height} on page ${image.page} (${UNREAD_REASONS[image.status]})`,
+    )
+    parts.push(
+      `${unread.length === 1 ? 'One picture' : `${unread.length} pictures`} cleared the size floor and ${
+        unread.length === 1 ? 'was' : 'were'
+      } not read as label artwork: ${sizes.join('; ')}.`,
+    )
+  }
+  return parts.length ? parts.join(' ') : null
+}
+
+const UNREAD_REASONS: Record<
+  'no_text' | 'not_needed' | 'not_read' | 'undecodable' | 'read',
+  string
+> = {
+  no_text: 'no text was found on it',
+  not_needed: 'the pictures read before it already carried every value',
+  not_read: 'past the limit on how many pictures are read',
+  undecodable: 'it could not be decoded',
+  read: 'read',
 }
 
 /**
  * "Read from photo 2", for a field card, when more than one photograph was
- * submitted.
+ * submitted; or, where the label side is the artwork inside the application,
+ * the panel itself: "Read from the label artwork on page 3 of the
+ * application, 1050 by 309 pixels".
+ *
+ * The panel is named rather than numbered because the artwork list names
+ * its entries that way (`photoItemLabel`), and a number here pointed an agent
+ * at a list with no numbers in it: on the author's bourbon the brand's
+ * `source_photo` read 5 against five pieces of artwork named by page and size
+ * (2026-09-06). The row now carries the panel, so the name comes from the row
+ * and no index is followed to produce it.
  *
  * Suppressed for a single photograph, where "read from photo 1" says nothing
  * an agent does not already know.
  */
-export function sourceLabel(sourcePhoto: number | null, photoCount: number): string | null {
-  if (photoCount < 2 || sourcePhoto === null) return null
-  return `Read from photo ${sourcePhoto}`
+export function sourceLabel(
+  field: Pick<FieldResult, 'source_photo' | 'source_panel'>,
+  photoCount: number,
+): string | null {
+  if (photoCount < 2 || field.source_photo === null) return null
+  const panel = field.source_panel
+  if (panel) {
+    return `Read from the label artwork on page ${panel.page} of the application, ${panel.width} by ${panel.height} pixels`
+  }
+  return `Read from photo ${field.source_photo}`
 }

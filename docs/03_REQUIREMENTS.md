@@ -263,6 +263,28 @@ exactly as it was.
   outcome is mismatch whatever the size of any difference in the body.
 - Given any difference at all, then the character-level difference is reported,
   because it is what an agent needs in order to judge either outcome.
+- **Given a statement whose prefix OCR damaged, so that `GOVERNMENT WARNING`
+  is not on the label text as read but `WARNING` followed by the body's
+  opening is, or the body's opening alone is, then the statement is located
+  and reported as found, with its prefix marked illegible rather than judged
+  (added 2026-09-06, [ADR 0022](adr/0022-warning-present-not-certified.md)).**
+  The capitalization check reads what was read; a prefix that was not read is
+  unchecked, not failed, and the row cannot pass without it.
+- Given a line with no letter in it inside or after the statement, a run of
+  digits from the printer's registration marks say, then it is not part of the
+  statement. No word of 27 CFR 16.21 is letterless, so leaving such a line out
+  cannot hide an altered, added or omitted word.
+- **Given a statement that is found and does not match, beyond the near-miss
+  threshold, and every line of it that is not a run of the regulation's text
+  was read below `TTB_WARNING_LEGIBLE_CONFIDENCE`, then the outcome is
+  `not_certified`: the statement is present and could not be read cleanly
+  enough to certify word for word.** It is a failing outcome, presented as
+  something a person acts on and never as a pass. Given any differing line
+  read at or above the floor, an altered word set in clean type, then the
+  outcome is mismatch exactly as before: a difference the engine read
+  confidently is the label's. Given no differing line at all, an omitted
+  clause, then the outcome is mismatch whatever the confidence, because
+  nothing about the read explains the omission.
 
 **The comparison is exact, and a near miss is routed to a person rather than
 auto-passed. This is not a fuzzy match, and the distinction has to be read as
@@ -303,6 +325,23 @@ and nothing else moves with it. An altered, added or omitted word fails in
 either case; `backend/tests/test_warning.py` asserts that in both. The
 difference an agent is shown is still the label's own text, because the fold is
 length-preserving and the diff segments are sliced from what was printed.
+
+**Why a third failing outcome, added 2026-09-06.** Measured on a real filing:
+the warning panel reads at 86.8 and the body comes back nearly complete, but
+printer registration marks run through the first word of the prefix and through
+one clause, so the prefix reads as a garble and the statement was reported as
+absent. "The label carries no warning" is the worst of the answers available
+about a label a person would pass, and "does not match word for word" is the
+next worst, because it is true of that read and of an altered clause alike. The
+tool cannot tell those two apart from the text. It can tell them apart from the
+reading: the lines that differ on that filing read at 64 and 69 where the lines
+that match read at 91 to 96, and an altered word set in clean type reads in the
+nineties. So a difference the engine read confidently is the label's and stays
+a mismatch; a difference the engine read badly, everywhere it differs, is the
+statement being present and not certified, and the agent is asked to look at
+the label. Nothing passes. A token filter was considered and rejected, because
+any token that cannot belong to the statement is exactly what an altered
+wording adds; the reasoning is in [ADR 0022](adr/0022-warning-present-not-certified.md).
 
 Jenny's constraint: "It has to be exact. Like, word-for-word." She also notes
 the failure modes she sees in practice: "people try to get creative with the
@@ -363,6 +402,31 @@ number also carries an alcohol marker: `ALC`, `ALC.`, `VOL`, `VOLUME`, `ABV`,
 - Given a marker on a line with no number, for example an `ALC./VOL.` that OCR
   split away from its figure, then the field is reported as not found rather
   than reported as `ALC./VOL.`.
+- **Given any of the statement formats 27 CFR fixes, then the line is located
+  (added 2026-09-06).** 27 CFR 5.65(b)(2)(i) fixes "Alcohol __ percent by
+  volume", "__ percent alcohol by volume" and "Alcohol by volume __ percent";
+  (b)(3) allows `alc`, `%`, a slash in place of "by" and `vol`, with or without
+  periods; (b)(4)'s own first example is `40% alc/vol`. 27 CFR 7.65(b)(4) and
+  (b)(5) say the same for malt beverages. 27 CFR 4.36(b)(1) fixes "Alcohol __ %
+  by volume" for wine, abbreviated only as `alc.` and `vol.`, and (b)(2) permits
+  the range "Alcohol __ % to __ % by volume". So `22% ALC/VOL`,
+  `40% ALC./VOL. [80 PROOF]`, `ALC.13% BY VOL`, `4.5% ALC/VOL`,
+  `41% ALC./VOL.- (82 PROOF)`, `13% ALCOHOL BY VOLUME` and `ABV 40%` are each
+  located, with or without spaces around the slash, with a decimal figure, with
+  the figure before or after the words, and with a proof in parentheses or
+  brackets after it. Each is a named case in `test_parse.py`. **Measured**: on
+  the label artwork of nine approved applications in the Public COLA Registry,
+  across six beverage classes, five print the slash form and exactly one prints
+  `ALC BY VOL`, the form of the one filing the rule was first calibrated to
+  (`docs/09_DEPLOYMENT.md` section 9).
+- Given the wine range form, then it is located as the alcohol content and the
+  A-12 rule below routes it to needs human review. Decided rather than left
+  open: not locating it would report a compliant wine label as carrying no
+  alcohol content.
+- Given a slash read by OCR as `I`, `l`, `1` or a bar, so that `ALCIVOL` is one
+  token, then it is still a marker. It has to carry both halves, so it cannot
+  admit a bare percentage. Untested against a real read; the slash survived on
+  every whole-panel read measured on 2026-09-06.
 
 This was written after the fact. The deployed prototype reported `7%` for a real
 bottle on 2026-08-27, read from the back label's environmental copy, because any
@@ -383,6 +447,13 @@ and do not apply to a comparison of two values the applicant declared.
   that does not equal twice the ABV, then the outcome is needs human review with
   both numbers shown, because it indicates an internal inconsistency on the
   label itself.
+- Given a proof figure whose decimal point OCR read as a dash, a degree sign, a
+  middle dot or a comma, for example `90-4 PROOF` for `90.4 PROOF`, then the
+  figure is read as the decimal it is before the cross-check runs (added
+  2026-09-06, measured on a real filing: the cross-check had reported a label
+  that agrees with itself, 45.2 percent at 90.4 proof, as contradicting itself,
+  with `4` as the proof). The repair needs exactly one digit after the
+  separator and the word PROOF after that; a range of percentages is untouched.
 - Given two normalized ABV numbers that are equal, then the outcome is match.
 - Given normalized ABV numbers that differ by any nonzero amount, then the
   outcome is mismatch, with both values and the difference shown. No tolerance
@@ -396,9 +467,34 @@ and do not apply to a comparison of two values the applicant declared.
   semantics.
 
 **Net contents (Assumption A-13).** Values are compared numerically only when
-units match after normalization (`mL`/`ml`/`milliliters`, `L`/`liters`,
-`fl oz`/`fl. oz.`).
+units match after normalization (`mL`/`ml`/`milliliters`, `L`/`liters`/`litres`,
+`cL`/`centiliters`, `fl oz`/`fl. oz.`/`oz`, `pint`/`pt`, `quart`/`qt`,
+`gallon`/`gal`).
 
+**Locating the net contents on the label (added 2026-09-06).** The same rule
+as the alcohol content: a number against a unit of volume on the same OCR
+line, and a number on its own is never a net contents. The unit spellings are
+the regulation's. 27 CFR 5.70(a): "liter" may be spelled "litre" or
+abbreviated "L", "milliliters" may be abbreviated "ml.", "mL." or "ML.", and
+equivalents "such as centiliters" may appear beside the metric statement.
+27 CFR 7.70(a) states malt beverage net contents in fluid ounces, fractions of
+a pint, pints, quarts and gallons. 27 CFR 4.37(a) and (b) state wine net
+contents in liters and milliliters with an optional fluid-ounce equivalent.
+**Measured**: the same nine registry labels print net contents in six shapes,
+metric with and without a space before the unit, metric with the
+estimated-quantity sign after it, metric behind a `CONT.` prefix, metric fused
+to a lot code on the same line, and one pint; two of the nine print it on the
+same line as the alcohol statement. A rule that assumed a number followed by
+`ML` read about half of them, and no document had exercised the other half.
+Each shape is a named case in `test_parse.py`.
+
+- Given `750 ML`, `750ml`, `700ml e`, `CONT.750ML.e`, `750 ML. - L ZR1812K`,
+  `1L`, `1 PINT`, `12 OZ` or `50 CL`, then the line is located as the net
+  contents.
+- Given both statements on one line, for example `45% ALC/VOL 750 ML`, then the
+  line is located as both fields.
+- Given a number that is not against a unit, a year or a batch number, then it
+  is not a net contents.
 - Given two values in matching units, then they are compared numerically.
 - Given two values in different units, for example `750 mL` against
   `25.4 fl oz`, then the outcome is needs human review and no conversion is
@@ -654,10 +750,31 @@ apply to a label image. The note under OOS-1 in
   anything is decoded, with the accepted types named (NFR-7).
 - No outbound network call is made to read the document (NFR-3), and nothing
   about it is persisted or logged beyond a byte count and the path used (NFR-6).
-- Given a document carrying embedded raster images at or above the size floor,
+- Given a document carrying embedded raster images at or above the area floor,
   then each is read through the same local OCR pipeline label artwork is read
-  through, and what it says fills any application value the document's text
-  layer left empty (ADR 0010).
+  through, largest first and up to the configured bound, and what it says
+  fills any application value the document's text layer left empty, with the
+  picture each value came off named beside it (ADR 0010, amended 2026-09-03).
+  The floor is an area and nothing else: it is what separates the applicant's
+  signature from a label panel on both real filings the author has measured,
+  and the two shape rules that sat beside it until v1.5.0 rejected five of the
+  six pictures on one of them.
+- Given a document whose labels are embedded as separate panels, a front, a
+  back, a wrap-around, a side band, then the panels that clear the floor are
+  read largest first until the panels read carry all five values, and the
+  text of all of them is pooled for the check: a value on any panel counts as
+  found, and the response says which panel it was found on with its page and
+  pixel size. A check that reads one panel and reports the others' contents
+  as absent does not meet this requirement, and neither does one that stops
+  at a fixed count with a value still unread (ADR 0010, amended 2026-09-04):
+  the configured ceiling bounds the document missing a value, not the one
+  whose values are on its last panel.
+- Given any embedded picture, then the response lists it: the ones that
+  cleared the floor with what happened to each (read, read with no text, not
+  needed because the panels before it carried every value, not read,
+  undecodable) and the ones that did not with the reason, so that the table
+  an agent needs to see why a value is absent is in the response rather than
+  in an instrumented build.
 - Given a value present in both the text layer and the embedded artwork, then
   the text-layer value is used. The precedence, end to end, is: typed by the
   agent, then the document's text layer or form fields, then the embedded
@@ -667,8 +784,9 @@ apply to a label image. The note under OOS-1 in
   then it behaves exactly as it did before: the values the text layer does not
   carry are reported as not found, with the reason.
 - Given an agent who uploaded the application and no photograph, and a document
-  whose embedded artwork could be read, then the largest such image is the label
-  side of the check, and the response says so.
+  whose embedded artwork could be read, then every picture that read is the
+  label side of the check, pooled as several photographs of one bottle are
+  pooled (ADR 0007), and the response says so and names each.
 - Given the same submission with no readable artwork in the document, then the
   verification does not run, the response names the missing piece and offers the
   photograph upload, and no field reports an outcome. This is an FR-9 message

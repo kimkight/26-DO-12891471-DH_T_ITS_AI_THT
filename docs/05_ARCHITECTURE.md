@@ -292,7 +292,10 @@ which is one more page than either document needs and is a latency limit as much
 as a parsing one. The artwork read runs on every PDF too, and is bounded
 separately by `TTB_MAX_ARTWORK_IMAGES`, because a picture can sit on a page this
 parser does not read for text: the author's own filing states its brand name on
-page 1 and carries the label artwork on page 3.
+page 1 and carries the label artwork on page 3. Pictures are read largest first
+and reading stops as soon as the panels read so far carry all five values the
+check needs, so the ceiling is reached only by a document missing a value (ADR
+0010 as amended 2026-09-04).
 
 **The file classification rule, and where it lives.** Everything submitted for
 one label arrives in one repeated `files` part, and `classify.py` decides what
@@ -552,10 +555,10 @@ committed. [Source: Decision D-4; Decision D-9]
 | `TTB_ALLOWED_MIME_TYPES` | `image/jpeg`, `image/png`, `image/webp`, `image/tiff` | Accepted upload types, checked before decoding. Set as a JSON array. |
 | `TTB_MAX_LABEL_PHOTOS` | `3` | How many photographs of one label the single-label path accepts (ADR 0007). Also sets the single-label envelope limit, as one more than this times `TTB_MAX_UPLOAD_BYTES`, the extra file being the optional COLA document. |
 | `TTB_MAX_DOCUMENT_PAGES` | `3` | How many pages of an uploaded COLA document are read (FR-11, ADR 0008). The application side of TTB F 5100.31 is page 1 and a Registry printout runs to one or two, so this is a bound on cost rather than a limit anyone should meet. It bounds text reading only; embedded artwork is searched for on every page. |
-| `TTB_MIN_ARTWORK_EDGE_PX` | `400` | The shortest edge an embedded image must have to be treated as label artwork (ADR 0010). It is what rejects a long thin barcode or signature strip. |
-| `TTB_MIN_ARTWORK_PIXELS` | `250000` | The total pixels an embedded image must have, a 500 by 500 square. It is what rejects a small seal or logo. Both halves of the floor must be met. |
+| `TTB_MIN_ARTWORK_PIXELS` | `250000` | The total pixels an embedded image must have to be treated as label artwork (ADR 0010 as amended). It is the one part of the floor: it excludes the applicant's signature (133,965 pixels on the author's filing) and admits the smallest real label panel measured (317,339 pixels, a side band). The short-edge and aspect-ratio rules that sat beside it until v1.5.0 rejected five of six label pictures on a real filing and are gone. |
 | `TTB_WARNING_NEAR_MISS_EDITS` | `2` | How many single-character edits between the government warning as printed and 27 CFR 16.21 are reported as needing human review rather than as a mismatch (FR-5, ADR 0012). A near miss is never a pass; the comparison that decides a match is unchanged and still exact. |
-| `TTB_MAX_ARTWORK_IMAGES` | `4` | How many surviving embedded images are read. Each costs a full OCR read, so this is a latency bound in the same sense `TTB_MAX_DOCUMENT_PAGES` is. |
+| `TTB_WARNING_LEGIBLE_CONFIDENCE` | `80` | Below this mean word confidence, a line of the government warning that differs from 27 CFR 16.21 is taken to have been read badly rather than printed wrongly (FR-5, ADR 0022). Where every differing line is below it the row reports the statement present and not certified, a failing outcome that asks a person to look; where any is at or above it the difference is the label's and the row is a mismatch. Decides between two failing outcomes, never a pass |
+| `TTB_MAX_ARTWORK_IMAGES` | `8` | The ceiling on how many surviving embedded images are read on one document. Pictures are read largest first and reading stops as soon as the panels read so far carry all five values, so the ceiling is a bound on the worst case, a document missing a value, and not a count that decides whether a value is found; at four it dropped the fifth panel of a real filing (ADR 0010 as amended 2026-09-04). The response lists every surviving picture as read, not needed, not read or undecodable. |
 | `TTB_OCR_LONG_EDGE_PX` | `1600` | The long edge an image is scaled to before OCR |
 | `TTB_MATCH_THRESHOLD` | `95` | At or above this score, a field is a match |
 | `TTB_REVIEW_THRESHOLD` | `80` | Between this and the match threshold, a field needs human review |

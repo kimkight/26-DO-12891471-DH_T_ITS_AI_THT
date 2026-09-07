@@ -201,14 +201,21 @@ class TestTheTextLayerWins:
 @requires_tesseract
 @requires_fonts
 class TestTheSizeFloor:
-    """Seals, barcodes and signature blocks are small. Label artwork is not."""
+    """Seals, barcodes and signature blocks are small. Label panels are not.
+
+    The floor is an area and nothing else since v1.5.0 (ADR 0010 as amended,
+    #121): the short-edge and aspect-ratio rules that sat beside it rejected
+    five of the six pictures on a real filing, and `test_artwork_panels.py` is
+    the fixture that shows it. What is asserted here is what the one remaining
+    rule still does.
+    """
 
     def test_only_tiny_images_leave_the_artwork_fields_absent(self):
         """Below the floor, nothing is read and nothing crashes.
 
         The three shapes are the ones a real filing carries: a square seal, a
-        wide flat barcode, and a signature strip. Each is rejected by a
-        different half of the floor, which is why the floor has two halves.
+        wide flat barcode, and a signature strip. All three are under 250,000
+        pixels, and area is the reason reported for each.
         """
         pdf = as_pdf_bytes(
             paper_form_lines(ApplicationSpec()),
@@ -220,6 +227,9 @@ class TestTheSizeFloor:
         assert parsed.artwork_images_found == 0
         assert parsed.artwork_images_read == 0
         assert parsed.label_artwork is None
+        assert parsed.label_panels == []
+        assert [image.reason for image in parsed.artwork_images_rejected] == ["area"] * 3
+        assert parsed.artwork_images_accepted == []
         assert parsed.values["alcohol_content"] is None
         assert parsed.values["net_contents"] is None
         assert parsed.values["class_type"] is None
@@ -227,28 +237,33 @@ class TestTheSizeFloor:
         assert parsed.values["brand_name"] == "STONE'S THROW"
         assert SELF_CONSISTENCY_NOTE not in parsed.notes
 
-    def test_a_wide_barcode_is_rejected_by_the_edge_floor_not_the_area_floor(self):
-        """Stated as an assertion so the two halves cannot silently become one.
+    def test_a_wide_strip_above_the_area_floor_is_read_rather_than_rejected(self):
+        """The case the edge floor used to refuse, stated as what happens now.
 
-        A 900 by 120 strip is 108,000 pixels, which is under the area floor as
-        well. A 2000 by 200 strip is 400,000, which clears it. The edge floor is
-        what rejects that, and this asserts it rather than trusting the numbers
-        to stay where they are.
+        A 2000 by 200 strip is 400,000 pixels, which clears the area floor; its
+        short edge of 200 failed the edge floor, and a 1350 by 300 front panel
+        on a real filing failed it with it. Now it is read, reported as read
+        with whatever the read found, and a blank strip yields no value.
         """
         wide = solid_png(2000, 200)
         assert settings.min_artwork_pixels <= 2000 * 200
-        assert min(2000, 200) < settings.min_artwork_edge_px
 
         parsed = parse_application_document(
             as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[wide]),
             "application/pdf",
         )
 
-        assert parsed.artwork_images_found == 0
+        assert parsed.artwork_images_found == 1
+        assert parsed.artwork_images_rejected == []
+        [accepted] = parsed.artwork_images_accepted
+        assert (accepted.width, accepted.height) == (2000, 200)
+        assert accepted.status in ("read", "no_text")
+        assert parsed.values["alcohol_content"] is None
+        assert parsed.values["net_contents"] is None
 
 
 class TestTheApplicantsSignatureIsNeverLabelArtwork:
-    """The shape test, which is the one a better scanner cannot defeat (v1.1.0).
+    """The signature is kept out by area, on both real filings (v1.5.0).
 
     A filed TTB F 5100.31 carries the applicant's handwritten signature. It is
     not label artwork, and it is the most personal artefact on the form: the
@@ -256,32 +271,36 @@ class TestTheApplicantsSignatureIsNeverLabelArtwork:
     handled or committed, and reading a signature through an OCR pipeline and
     letting what comes back fill a compliance field is the opposite of that.
 
-    The author's own document carries the signature at 687 by 195, which the two
-    absolute floors reject twice over. That is not the interesting case. The
-    interesting case is the same strip scanned at 300 dpi rather than 100: about
-    2000 by 580, which clears the short-edge floor and clears the area floor by
-    more than four times, and is still a signature. An absolute size is a
-    property of the scanner. The shape is a property of the thing scanned.
+    The author's own document carries the signature at 687 by 195, which is
+    133,965 pixels, and the area floor rejects it. Until v1.5.0 a shape rule sat
+    beside the floor so that the same strip scanned at 300 dpi, about 2000 by
+    580, would be rejected too. That rule also rejected every label panel on
+    the second real filing the author measured, at ratios of 3.24 to 9.07, and
+    no ceiling separates those from a signature at 3.52. So the shape rule is
+    gone, the hypothetical large signature is read, and what protects the
+    fields is what the read yields: nothing, or a few letters at low
+    confidence that lose to any real panel. Both halves are asserted below.
     """
 
-    def test_the_authors_own_signature_is_rejected_on_size(self):
-        """687 by 195, and the reason reported is the first floor it fails."""
+    def test_the_authors_own_signature_is_rejected_on_area(self):
+        """687 by 195, and the reason reported is the area floor."""
+        assert settings.min_artwork_pixels > 687 * 195
         pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[signature_strip(687, 195)])
 
         parsed = parse_application_document(pdf, "application/pdf")
 
         assert parsed.artwork_images_found == 0
-        assert [image.reason for image in parsed.artwork_images_rejected] == ["short_edge"]
+        assert [image.reason for image in parsed.artwork_images_rejected] == ["area"]
 
-    def test_the_same_signature_scanned_larger_is_rejected_on_shape(self):
-        """The case no absolute floor catches, asserted against both of them.
+    @requires_tesseract
+    def test_the_same_signature_scanned_larger_is_read_and_yields_nothing(self):
+        """The case the shape rule existed for, now handled by the read itself.
 
-        Both size floors are asserted to pass here rather than assumed to, so
-        that this test cannot quietly start passing for the wrong reason if
-        somebody raises one of them.
+        The area floor is asserted to pass here rather than assumed to, so that
+        this test cannot quietly start passing for the wrong reason if somebody
+        raises it. The strip is read, reported, and fills no field.
         """
         width, height = 2000, 580
-        assert min(width, height) >= settings.min_artwork_edge_px
         assert width * height >= settings.min_artwork_pixels
 
         pdf = as_pdf_bytes(
@@ -290,23 +309,38 @@ class TestTheApplicantsSignatureIsNeverLabelArtwork:
 
         parsed = parse_application_document(pdf, "application/pdf")
 
-        assert parsed.artwork_images_found == 0
-        assert [image.reason for image in parsed.artwork_images_rejected] == ["aspect_ratio"]
+        assert parsed.artwork_images_found == 1
+        assert parsed.artwork_images_rejected == []
+        [accepted] = parsed.artwork_images_accepted
+        assert accepted.status in ("read", "no_text")
+        for name in ("class_type", "alcohol_content", "net_contents"):
+            assert parsed.values[name] is None
+        assert parsed.values["brand_name"] == "STONE'S THROW"
+        assert parsed.value_sources["brand_name"] == "embedded_text"
 
     def test_a_rejection_carries_no_trace_of_the_picture(self):
         """NFR-6. The page, the size, the reason, and nothing else.
 
         Asserted on the fields of the record rather than on one instance,
         because the thing being prevented is somebody adding the bytes to it
-        later for debugging and shipping it.
+        later for debugging and shipping it. The accepted record is held to the
+        same rule, with a status and a confidence figure added and still no
+        picture.
         """
-        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[signature_strip(2000, 580)])
+        pdf = as_pdf_bytes(paper_form_lines(ApplicationSpec()), images=[signature_strip(687, 195)])
 
         parsed = parse_application_document(pdf, "application/pdf")
         rejected = parsed.artwork_images_rejected[0]
 
         assert {field.name for field in fields(rejected)} == {"page", "width", "height", "reason"}
         assert rejected.page == 2
+        assert {field.name for field in fields(application_form.AcceptedImage)} == {
+            "page",
+            "width",
+            "height",
+            "status",
+            "ocr_confidence",
+        }
 
 
 @requires_tesseract
@@ -316,11 +350,18 @@ class TestTheArtworkIsChosenOverTheSignature:
 
     Page 1 is the form, page 2 carries the signature, page 3 carries the label
     artwork. The artwork is what the check has to run on, and the response has
-    to say so: which page it came from, what else was in the file, and why each
-    of those was not used.
+    to say so: which page it came from, what else was in the file, and what
+    happened to each of those.
+
+    The signature here is the large hypothetical one, 2000 by 580, which the
+    area floor admits. Since the stopping rule (ADR 0010 as amended a second
+    time) it is not even read: the label sheet is larger, it is read first,
+    it carries all five values, and the strip is listed as not needed. The
+    cases below hold that, and hold what the per-field rule does on the one
+    ordering where the strip is read first.
     """
 
-    def test_the_artwork_is_read_and_the_signature_is_not(self, label_artwork):
+    def test_the_artwork_is_read_and_the_signature_yields_nothing(self, label_artwork):
         pdf = as_pdf_bytes(
             paper_form_lines(ApplicationSpec()),
             images=[signature_strip(2000, 580), label_artwork],
@@ -328,11 +369,41 @@ class TestTheArtworkIsChosenOverTheSignature:
 
         parsed = parse_application_document(pdf, "application/pdf")
 
-        assert parsed.artwork_images_found == 1
+        assert parsed.artwork_images_found == 2
         assert parsed.artwork_images_read == 1
         assert parsed.label_artwork is not None
         assert parsed.label_artwork.page == 3
-        assert [image.reason for image in parsed.artwork_images_rejected] == ["aspect_ratio"]
+        assert [panel.artwork.page for panel in parsed.label_panels] == [3]
+        assert parsed.artwork_images_rejected == []
+        assert [(image.page, image.status) for image in parsed.artwork_images_accepted] == [
+            (3, "read"),
+            (2, "not_needed"),
+        ]
+
+    def test_a_signature_read_first_yields_nothing_and_the_reading_goes_on(self):
+        """The ordering where the strip is read: larger than the label sheet.
+
+        A 2000 by 580 strip outranks the label sheet at half size, 500 by
+        750, so it is read first, yields no text, and the reading goes on to
+        the sheet, which answers. The strip is listed as no text.
+        """
+        image = Image.open(io.BytesIO(render_png_bytes(SAMPLE_LABEL)))
+        buffer = io.BytesIO()
+        image.resize((image.width // 2, image.height // 2)).save(buffer, format="PNG")
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(2000, 580), buffer.getvalue()],
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert [(image.page, image.status) for image in parsed.artwork_images_accepted] == [
+            (2, "no_text"),
+            (3, "read"),
+        ]
+        assert parsed.label_artwork is not None
+        assert parsed.label_artwork.page == 3
+        assert parsed.values["alcohol_content"] == "45% Alc./Vol. (90 Proof)"
 
     def test_the_values_come_off_the_artwork_and_not_off_the_signature(self, label_artwork):
         """The failure this prevents, stated as the values it would corrupt.
@@ -351,6 +422,36 @@ class TestTheArtworkIsChosenOverTheSignature:
 
         assert parsed.values["alcohol_content"] == "45% Alc./Vol. (90 Proof)"
         assert parsed.values["net_contents"] == "750 mL"
+        assert parsed.artwork_value_panels["alcohol_content"].page == 3
+
+    def test_a_signature_that_reads_as_letters_still_fills_nothing(self, label_artwork):
+        """A strip that OCR turns into a word, next to a real label.
+
+        At 1442 by 433 the synthetic strip clears the floor and, read on its
+        own, comes back as three letters at a mean word confidence in the
+        thirties. It ranks below the label sheet, the sheet answers everything,
+        and the strip is listed as not needed; had it been read, the per-field
+        rule takes every value from the panel that read it most confidently,
+        so the label would still win every field. Either way the label is the
+        first panel offered as the label side and nothing off the strip is
+        reported.
+        """
+        pdf = as_pdf_bytes(
+            paper_form_lines(ApplicationSpec()),
+            images=[signature_strip(1442, 433), label_artwork],
+        )
+
+        parsed = parse_application_document(pdf, "application/pdf")
+
+        assert parsed.values["class_type"] == "Kentucky Straight Bourbon Whiskey"
+        assert parsed.values["alcohol_content"] == "45% Alc./Vol. (90 Proof)"
+        assert parsed.values["net_contents"] == "750 mL"
+        assert all(panel.page == 3 for panel in parsed.artwork_value_panels.values())
+        assert parsed.label_artwork is not None
+        assert parsed.label_artwork.page == 3
+        strip = next(image for image in parsed.artwork_images_accepted if image.page == 2)
+        assert strip.status == "not_needed"
+        assert strip.ocr_confidence is None
 
     def test_the_response_says_which_page_the_label_came_from(self, label_artwork):
         """An agent reading a poor result has to know which picture was read."""
@@ -362,8 +463,15 @@ class TestTheArtworkIsChosenOverTheSignature:
         document = document_result(parse_application_document(pdf, "application/pdf"))
 
         assert document.label_artwork_page == 3
-        assert [image.reason for image in document.artwork_images_rejected] == ["aspect_ratio"]
-        assert [image.page for image in document.artwork_images_rejected] == [2]
+        assert document.artwork_images_rejected == []
+        assert [(image.page, image.status) for image in document.artwork_images_accepted] == [
+            (3, "read"),
+            (2, "not_needed"),
+        ]
+        assert [(image.width, image.height) for image in document.artwork_images_accepted] == [
+            (1000, 1500),
+            (2000, 580),
+        ]
 
 
 @requires_tesseract

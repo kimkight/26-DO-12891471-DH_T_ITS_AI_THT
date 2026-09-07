@@ -18,7 +18,7 @@
 import type { BatchLine, Outcome } from '../types'
 
 /** The shapes. Deliberately different silhouettes, not one shape recoloured. */
-export type Glyph = 'check' | 'triangle' | 'cross' | 'dash' | 'artwork' | 'carried'
+export type Glyph = 'check' | 'triangle' | 'cross' | 'dash' | 'artwork' | 'carried' | 'look'
 
 export interface OutcomePresentation {
   /** The word an agent reads. Plain language, no jargon (NFR-4). */
@@ -92,6 +92,21 @@ const PRESENTATIONS: Record<Outcome, OutcomePresentation> = {
     tone: 'artwork',
     spoken: 'was read from the label artwork and could not be compared against it',
   },
+  /*
+   * FR-5, ADR 0022. The government warning alone: it is on the label, it does
+   * not match word for word, and every line that differs was read too poorly
+   * to say whether the difference is the label's or the reading's. A failing
+   * outcome, in the review tone because it is a person's next action, with
+   * its own silhouette, a magnifier, because what it asks is "look at the
+   * label", which no other outcome asks. The word says what was established
+   * and what was not, in that order.
+   */
+  not_certified: {
+    label: 'Present, not certified',
+    glyph: 'look',
+    tone: 'review',
+    spoken: 'is on the label but could not be read cleanly enough to certify word for word',
+  },
 }
 
 /**
@@ -120,6 +135,7 @@ export function tally(outcomes: Outcome[]): Record<Outcome, number> {
     not_compared: 0,
     present: 0,
     artwork_derived: 0,
+    not_certified: 0,
   }
   for (const outcome of outcomes) {
     if (outcome in counts) counts[outcome] += 1
@@ -203,6 +219,14 @@ export function announcement(outcomes: Outcome[]): string {
   if (counts.mismatch > 0) {
     parts.push(`${counts.mismatch} does not match.`)
   }
+  if (counts.not_certified > 0) {
+    // Said in full: the chip's words are not on offer to a listener, and what
+    // this asks of them is different from what a review asks (ADR 0022).
+    parts.push(
+      'The government warning is on the label but could not be read cleanly enough ' +
+        'to certify word for word; check the label itself.',
+    )
+  }
   if (counts.not_compared > 0) {
     parts.push(`${counts.not_compared} was not compared.`)
   }
@@ -240,6 +264,10 @@ export function rowOutcome(line: BatchLine): Outcome | 'error' {
   if (line.status === 'error' || !line.result) return 'error'
   const outcomes = line.result.fields.map((field) => field.outcome)
   if (outcomes.includes('mismatch')) return 'mismatch'
+  // Between a mismatch and a review: failing, like both, and asking for the
+  // label itself rather than a diff, which is more than a review asks
+  // (ADR 0022).
+  if (outcomes.includes('not_certified')) return 'not_certified'
   if (outcomes.includes('needs_review')) return 'needs_review'
   if (outcomes.includes('not_compared')) return 'not_compared'
   // Ranked below "not compared" rather than above it, because the two say
@@ -275,6 +303,7 @@ export const ROW_BUCKETS: { outcome: Outcome | 'error'; label: string }[] = [
   { outcome: 'match', label: 'fully matching' },
   { outcome: 'present', label: 'passing on what the label carries, with nothing declared' },
   { outcome: 'needs_review', label: 'needing review' },
+  { outcome: 'not_certified', label: 'with a warning present and not certified' },
   { outcome: 'mismatch', label: 'not matching' },
   { outcome: 'not_compared', label: 'with a value not compared' },
   { outcome: 'artwork_derived', label: 'read from the artwork only' },

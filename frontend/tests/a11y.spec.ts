@@ -272,11 +272,13 @@ test.describe('WCAG 2.1 AA, checked by axe-core against the built page', () => {
       { name: '0001-STONES-THROW.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF') },
     ])
 
-    // Each file's chip, from the same classification the single-label tab
-    // shows (FR-12), and the labels described in one sentence that is both
-    // visible and announced (ADR 0020, NFR-5).
+    // The application's chip, from the same classification the single-label
+    // tab shows (FR-12); an image's chip is provisional until the batch runs,
+    // because sorting a picture is a full OCR read (OQ-37); and the labels
+    // described in one sentence that is both visible and announced (ADR 0020,
+    // NFR-5).
     await expect(panel.getByText('Label application', { exact: true })).toBeVisible()
-    await expect(panel.getByText('Label image', { exact: true })).toHaveCount(2)
+    await expect(panel.getByText('Label image, sorted when checked', { exact: true })).toHaveCount(2)
     await expect(
       panel.getByText('2 labels to check: 1 with an application and an image, 1 image on its own.'),
     ).toBeVisible()

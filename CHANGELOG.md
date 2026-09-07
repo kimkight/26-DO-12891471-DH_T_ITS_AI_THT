@@ -5,7 +5,347 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-09-07
+
+The artwork floor rejected real label panels. A second real filed COLA, a
+bourbon, returned one of five on the deployed v1.4.0, and the reason was in
+the response: six embedded pictures, five rejected on `short_edge` before any
+was read, and the aspect-ratio rule would have taken four of them next. The
+reader never saw the label. [ADR 0010](docs/adr/0010-embedded-label-artwork.md)
+is amended rather than rewritten, and #121 closes with this.
+
+### Reading stops when the values are in hand (ADR 0010 as amended 2026-09-04, FR-11, #121)
+
+The rebuilt floor was deployed and the bourbon was put through it again. It
+worked, and the evidence was better than expected: every panel cleared the
+floor, the brand and the class or type matched, and the two panels the shape
+rules had thrown away read at 86.8 and 89.9, better than the 45.3 of the
+wide sheet the rules had kept. It was also two of five, not five of five. The
+alcohol content, the net contents and the government warning were still not
+found, and the cost had gone from 2,600 ms and 4 Tesseract reads to 7,325 ms
+and 16. `TTB_MAX_ARTWORK_IMAGES` was four, the filing carries five pictures
+above the floor, and the 187 by 1697 side strip, the smallest, was listed as
+`not_read`. A tall narrow strip is exactly where a spirits label carries
+those three values. The count chosen as a latency bound was deciding
+correctness, and reading every panel to that count on every document was the
+wrong shape either way.
+
+#### Changed
+
+- **Panels are read largest first, and reading stops as soon as the panels
+  read so far carry all five values.** After each panel the reader asks the
+  question the check will ask: the declared brand and class or type found on
+  the pooled text by the check's own search (ADR 0015), at the match
+  threshold and not in the review band; the alcohol content and the net
+  contents located by pattern; the government warning located by its prefix.
+  A one-sheet filing is one read, as before. A sheet ahead of two prose
+  panels is one read where it was three. A filing whose last value is on its
+  last panel reads every panel, which is the read that finds the value. A
+  filing missing a value reads every panel up to the ceiling, and the
+  response lists each with its confidence so the absence is traceable. The
+  rule is keyed to the check's question and not to "did this panel yield a
+  value" because a back label prints the distiller's name large above the
+  three pattern fields, and a rule that took that as the brand would stop
+  there and never read the front.
+- **`TTB_MAX_ARTWORK_IMAGES` is a ceiling on the worst case, and its default
+  is eight, up from four.** Twice the most any measured filing carries above
+  the floor, so that on every filing measured it is never what decides
+  whether a value is found. The setting's comment says what it is now for.
+  The panels it cuts are still listed as `not_read`.
+- **A panel the stopping rule left unread is `not_needed`**, a new value of
+  `application_document.artwork_images_accepted[].status`, distinct from
+  `not_read`: the first says the values were found without this picture,
+  the second says nothing about whether they are on it. The interface's
+  note under the artwork list says which. Per-panel confidence stays in the
+  response; it is what made the second measurement diagnosable in one
+  request.
+
+#### Added
+
+- **`backend/tests/test_artwork_panels.py` rebuilt as the bourbon's five
+  pictures above the floor**, a 1950 by 862 sheet, a 1350 by 300 front, a
+  1103 by 340 wrap-around, a 1050 by 309 back, a 187 by 1697 side strip
+  carrying the alcohol content, the net contents and the government warning,
+  and the 687 by 195 signature. At a count of four with no stopping rule it
+  returns two of five with the strip listed as not read, exactly the
+  deployed outcome; with this change all five pass, each attributed to its
+  panel, and the two-of-five outcome is held under a forced count of four as
+  a guard. The stopping rule's own answers are held on readings built from
+  text, including the back-label case and the near miss it must not stop on,
+  and on real reads: one read when the sheet answers everything, back then
+  front when the back's largest text is not the brand, and the full sweep
+  when a value is missing. Neither of the author's documents, nor any
+  excerpt, enters the repository; only the dimensions and the measured
+  confidences do.
+
+#### Measured
+
+- On a session container with one worker, before the change (the #140
+  merge) and after, three `POST /api/verify` requests per fixture with the
+  document alone, medians of `elapsed_ms` and `tesseract_reads`:
+
+  | Fixture | Before | After |
+  | --- | --- | --- |
+  | one-sheet filing | 1072 ms, 2 reads, 5 of 5 | 1021 ms, 2 reads, 5 of 5 |
+  | five-panel filing, values on the fifth | 1745 ms, 8 reads, 4 panels, **2 of 5** | 2566 ms, 13 reads, 5 panels, **5 of 5** |
+  | sheet plus two prose panels | 1845 ms, 6 reads, 3 panels | 1141 ms, 2 reads, 1 panel |
+
+  The one-sheet filing is unchanged. The sheet-plus-two, the shape a
+  stopping rule is for, drops from three panels to one. The five-panel
+  filing costs more, not less, because its last value is on its last panel
+  and the rule reads until it has it; **the stopping rule does not recover
+  most of the bourbon's 4.7 seconds on that shape, and this is said rather
+  than implied.** What it buys is that no document pays for panels it does
+  not need. The full tables are in [docs/09](docs/09_DEPLOYMENT.md) section
+  9, with the manual step against the deployed build that settles which
+  panel the bourbon's three values are on.
+
+### Documents
+
+- ADR 0010 amended a second time with the second measurement, why shape was
+  the wrong discriminator, and why a stopping rule keyed to the check's
+  question replaced a count that was deciding correctness; FR-11's panel
+  criteria amended; the traceability matrix gains source row 43; OQ-24
+  narrowed to the editions and routes question alone, with no code decision
+  resting on it; the README status row, `docs/05` settings table and
+  `.env.example` updated for the ceiling and its purpose; `docs/09` section 9
+  gains the before-and-after table and the manual step against the deployed
+  build.
+
+### The label panels are read (ADR 0010 as amended, FR-11, #121)
+
+#### Changed
+
+- **The floor is an area alone.** `TTB_MIN_ARTWORK_EDGE_PX` (400) and
+  `TTB_MAX_ARTWORK_ASPECT_RATIO` (3.0) are removed as rejection rules, and the
+  rejection reasons `short_edge` and `aspect_ratio` are no longer produced.
+  Both were set from one document whose artwork is a single flat 1750 by 1150
+  sheet, and the comment on the ratio said it "sits above the widest
+  wrap-around label any source describes"; no source had described one. The
+  bourbon's panels are 1350 by 300, 1103 by 340, 1050 by 309 and 187 by 1697,
+  ratios of 4.50, 3.24, 3.40 and 9.07 and short edges of 300 to 187, and every
+  one failed both rules. The signature on the author's other filing is 687 by
+  195: a ratio of 3.52 and a short edge of 195, which no ceiling and no edge
+  floor can place on the other side of those panels. Area can, with margin:
+  the signature is 133,965 pixels and the smallest panel 317,339, and
+  `TTB_MIN_ARTWORK_PIXELS` stays at 250,000 with both numbers beside it in the
+  setting's comment. Setting either removed variable now has no effect, and
+  `.env.example` and `docs/05_ARCHITECTURE.md` say so.
+- **Every panel that clears the floor is read, largest first, up to
+  `TTB_MAX_ARTWORK_IMAGES`, and there is no early exit.** Reading used to stop
+  once all four artwork values were in hand; with panels, the panel left
+  unread may be the one carrying the government warning. A panel past the
+  bound is reported as accepted and not read rather than dropped.
+- **The label side is every panel that read, pooled** the way ADR 0007 pools
+  three photographs of one bottle. The brand and the class or type are
+  searched for across all of them, the alcohol content and the net contents
+  are merged per field, the warning is taken from the panel that shows the
+  most of it, and every value's `source_photo` names the panel, whose page
+  and pixel size are on `photos[].artwork_panel`. The application-side values
+  the artwork supplies are taken per field from the panel that read that
+  field most confidently, and `application_document.fields[].artwork_panel`
+  names it.
+- **The response carries the table, not only the rejections.**
+  `application_document.artwork_images_accepted` lists every picture that
+  cleared the floor, largest first, with its page, size, what happened to it
+  (`read`, `no_text`, `not_read`, `undecodable`) and the read's mean word
+  confidence, beside the `artwork_images_rejected` list that already existed.
+  The next person debugging a filing has the same table the author had to
+  instrument the deployed build to get. The picture itself still never
+  travels (NFR-6).
+- **The interface names each panel** by its page and size in the list under
+  the result, and says under it what was set aside as too small and what
+  cleared the floor unread, with the sizes.
+- **A large signature is read, and that is the accepted trade.** A strip
+  scanned above 250,000 pixels is no longer excluded by its shape. On the
+  synthetic strip it yields nothing at 2000 by 580 and three letters at a
+  confidence of 34 at 1442 by 433; the per-field rule takes every value from
+  the panel that read it best, so a real panel beside it wins every field,
+  and the strip is listed as read with its confidence. No real filing the
+  author has measured carries a signature above the floor.
+
+#### Added
+
+- **`backend/tests/test_artwork_panels.py`, the regression fixture OQ-24 asked
+  for**: a filing in the bourbon's shape with synthetic text, a 1350 by 300
+  front panel carrying the brand and class, a 1050 by 309 back panel carrying
+  the alcohol content, net contents and government warning, a 187 by 1697
+  side band, and a 687 by 195 signature. On v1.4.0 it returned `422
+  no_label_to_check`; now all five checks pass, each attributed to the panel
+  it is on, three panels are read, and the signature is the only rejection,
+  on `area`. The floor arithmetic is asserted over all eighteen measured
+  pictures across the three real documents, and the v1.4.0 verdicts are held
+  as a guard against a shape rule coming back. Neither of the author's
+  documents, nor any excerpt, enters the repository; only the dimensions do.
+- `samples/labelmaker.py` renders a label panel at a stated pixel size, flat
+  or turned, for fixtures shaped like real panels.
+
+#### Measured
+
+- On a session container with one worker, a three-panel filing costs about
+  1.35 times a one-panel filing per label (2.69 s against 2.00 s over twenty
+  rows), not three times: `tesseract_reads` is two per panel on either, and a
+  Tesseract pass costs by the text it reads rather than by the picture it is
+  handed. That is a property of the fixture's text density, not a law; the
+  per-panel cost is in the response and `TTB_MAX_ARTWORK_IMAGES` is the
+  lever. `GET /api/health` answered in a median of 3 ms and never over 69 ms
+  while a twenty-row batch ran. The tables are in
+  [docs/09](docs/09_DEPLOYMENT.md) section 9.
+
+### The batch tab sorts an image when it checks it (OQ-37)
+
+#### Changed
+
+- **An image dropped on the batch tab is no longer sent to
+  `POST /api/classify` on arrival.** Sorting a picture is a full OCR pass, the
+  same pass the check makes a moment later in another request, and twenty
+  label photographs cost 23 s of "Reading..." on the 2026-09-02 container and
+  36.55 s on the 2026-09-03 one before the batch had started. A cache of that
+  read is what NFR-6 forbids. A downscaled read was measured before being
+  chosen against: at every scale down to 600 pixels it cost 70 to 85 percent
+  of a full read, because a low-confidence first arm sends the pipeline into
+  its other arms, and at 400 pixels, the one scale that saved anything, it
+  sorted both synthetic photographed forms as labels. So the chip reads
+  "Label image, sorted when checked" with a line saying why, and the batch
+  line, which carries the server's sorting of every file in the row, replaces
+  it. A PDF is still sorted on arrival in the 56 ms it costs; a photographed
+  form is still sorted correctly, when checked; the single-label tab is
+  unchanged. OQ-37 closes.
+
+### Documents
+
+- ADR 0010 amended with the measurement and what replaced the floor; FR-11's
+  artwork criteria rewritten; the traceability matrix gains source row 42 and
+  the FR-11 evidence; OQ-24 narrowed to the distribution across editions;
+  OQ-37 closed; A-17, the README status table and the test data policy in
+  docs/07 updated.
+
+
+### The government warning, present and not certified (FR-5, ADR 0022)
+
+The bourbon's warning panel reads at 86.8 and the body comes back nearly
+complete, but printer registration marks run through the first word of the
+prefix and through one clause, so the statement was reported as absent. On a
+label a person would pass, "no warning" was the worst answer available and
+"does not match word for word" the next, because the latter is true of a
+damaged read and an altered clause alike. What separates them is the reading,
+not the text: the lines that differ read at 64 and 69 and the lines that
+match at 91 to 96.
+
+#### Changed
+
+- **The statement is located by what survived of its prefix.** `WARNING` with
+  the body's opening after it, or the body's opening alone, followed by the
+  statement going on as it does. The prefix is then reported as illegible:
+  unchecked rather than failed (FR-6), and the row cannot pass without it.
+- **A line with no letter in it is not part of the statement.** No word of
+  27 CFR 16.21 is letterless, so leaving such a line out cannot hide an
+  altered, added or omitted word.
+- **A seventh outcome, `not_certified`, for the warning alone.** The
+  statement is found, it does not match beyond the near-miss threshold, and
+  every line that differs was read below `TTB_WARNING_LEGIBLE_CONFIDENCE`
+  (eighty). A differing line read confidently is the label's and stays a
+  mismatch; an omitted clause is a mismatch at any confidence; a near miss
+  keeps its own outcome; the plain-text path is unchanged. The chip reads
+  "Present, not certified", in the review tone with its own silhouette; it
+  counts as not passed everywhere, outranks a review on a batch row and is
+  outranked by a mismatch. The response carries `prefix_legible`, the
+  differing and illegible line counts and `not_certified`.
+- The comparison FR-5 fixes is untouched. A token filter was rejected because
+  any token that cannot belong to the statement is what an altered wording
+  adds (ADR 0022, alternative A).
+
+### `source_photo` addresses the `photos` it names, and the row names its panel (ADR 0010 as amended 2026-09-06)
+
+Found while measuring the bourbon on the deployed build: the brand's
+`source_photo` read 5 on a document whose `photos` array had five entries,
+and the artwork table listed the same five pictures in another order. The
+index was one-based and correct; the two lists disagreed about order, and
+nothing on screen said which picture "photo 5" was.
+
+#### Changed
+
+- The pooled panels are in reading order, largest first, which is the order
+  `application_document.artwork_images_accepted` already lists them in. The
+  page the label is said to come from is still the first panel that yielded
+  a value, found separately.
+- Every field row carries `source_panel`: the page and pixel size of the
+  embedded picture its value was read off, the same panel the addressed
+  `photos` entry carries. The interface reads "Read from the label artwork on
+  page 3 of the application, 1050 by 309 pixels" on such a row, the way the
+  artwork list names its entries; an uploaded photograph is still "Read from
+  photo 2". `source_photo`'s description says which array it addresses and in
+  what order.
+- `test_artwork_panels.py::TestTheSourcePhotoAddressesThePhotosList` pins the
+  join and the order, and a panel that yields nothing keeping its rank.
+
+### The alcohol and net contents statements labels actually print (FR-7, A-13)
+
+The bourbon filing's three missing values were taken apart on the committed
+evidence, and they are three different problems (`docs/09_DEPLOYMENT.md`
+section 9). The alcohol content is on the label in the slash form and the
+matcher already accepted it; what fails is reading one line of type off a
+full-colour painting, which is OQ-39. The net contents is on the same line,
+so the premise that its absence was the tool being right did not hold. The
+warning is on the label and reads well where it is not overprinted, and is
+its own change.
+
+#### Changed
+
+- **Every alcohol statement shape 27 CFR fixes is a named test.** 27 CFR
+  5.65(b)(2) to (b)(4), 7.65(b)(4) and (b)(5), and 4.36(b): the slash form
+  with and without periods, spaces and a proof in parentheses or brackets,
+  `ALC.` fused to the figure, the spelled-out forms with the figure first or
+  last, `ABV` either side, and the wine range, which is located and then
+  routed to review under A-12. Measured on the label artwork of nine approved
+  registry applications across six classes: five print the slash form and
+  exactly one prints `ALC BY VOL`, the filing the rule was calibrated to. The
+  rule is unchanged, a marker beside a number; the one addition is a slash
+  read as `I`, `l`, `1` or a bar, so `ALCIVOL` is still a marker.
+- **A decimal point misread inside the proof figure is repaired** before the
+  A-12 cross-check. Measured: `90.4 PROOF` came back as `90-4` and `90°4`, the
+  cross-check read `4` as the proof, and a label that agrees with itself was
+  reported as contradicting itself. One of four characters, exactly one digit
+  after it, PROOF after that; ranges are untouched.
+- **Net contents is located by the units 27 CFR 5.70(a), 7.70(a) and 4.37
+  use**: litres and centilitres, fluid ounces with or without `FL`, pints,
+  quarts and gallons and their abbreviations, and the six measured shapes,
+  including the estimated-quantity sign, a `CONT.` prefix, a value fused to a
+  lot code, and a value on the alcohol line. The unit spellings are defined
+  once, in `app.compare`, and the line rule in `app.parse` reads them from
+  there. Each is a named test. A number that is not against a unit is still
+  never a net contents.
+- The absence rows' copy says every panel read was searched, names 27 CFR
+  4.36(a)'s table wine allowance beside 7.63(a)(3), and cites 4.37(c) for
+  wine's own container carve-out.
+
+#### Recorded
+
+- OQ-38: the alcohol content presence check is calibrated to distilled
+  spirits; on a malt beverage (27 CFR 7.65(a)) or a table wine (27 CFR
+  4.36(a)) absence can be compliant. Logic unchanged.
+- OQ-39: a legible line of type on a painting is not isolated by the reader;
+  cropped to its band it reads at 88. Not tuned for.
+- Three registry labels the approach will not read, low contrast at small
+  type, recorded as a limit of the label rather than of the pipeline.
+
+### Real filings committed as evidence; fixtures stay synthetic (ADR 0021, OQ-22 closed)
+
+The two real filed COLAs every measurement in this repository was taken on,
+the mezcal and the bourbon, are committed unaltered to `samples/real/` so that
+a reviewer can run the tool against exactly what it was measured on. That
+reverses one line of the test data policy, and the documents that argued the
+old line now say so: section 8 of `docs/07_TEST_STRATEGY.md` restates the rule
+as the difference between a fixture, which a test asserts on and stays
+synthetic, and evidence, which a person opens, and keeps the paragraphs it
+replaced; `samples/README.md` points at `samples/real/` and keeps its
+git-ignore rationale for generated artwork; the README status row and the
+traceability matrix match. OQ-22 closes by measurement rather than assertion.
+Nothing automated reads the two files, no behaviour changes, and NFR-6 is
+unchanged. [ADR 0021](docs/adr/0021-real-filings-as-evidence-not-fixtures.md)
+records the decision and the three alternatives declined. `.gitignore` gains a
+trailing negation for `samples/real/` so a broader rule added later cannot
+shadow the files.
 
 ## [1.4.0] - 2026-09-03
 

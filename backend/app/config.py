@@ -60,50 +60,75 @@ class Settings(BaseSettings):
     # embedded raster image at or above the floor below is read through the same
     # OCR pipeline label artwork goes through.
     #
-    # **The floor separates label artwork from furniture.** An agency seal, a
-    # barcode, a signature strip and a logo are small; a scan of a label is not.
-    # All three parts of the floor have to be met: an edge of at least
-    # ``min_artwork_edge_px`` in each direction, at least ``min_artwork_pixels``
-    # in total, and a long-to-short edge ratio no greater than
-    # ``max_artwork_aspect_ratio``. The numbers are stated rather than derived:
-    # 400 pixels is below any scan of a label at a readable resolution and above
-    # every seal and barcode, and 250,000 pixels is a 500 by 500 square, which is
-    # smaller than any label scan and larger than any mark. The author's own
-    # document carries its label artwork at 1750 by 1150, which is 2.0
-    # megapixels and a ratio of 1.52: eight times the area floor and half the
-    # ratio ceiling.
+    # **The floor is an area, and it is the signature discriminator.** A filed
+    # TTB F 5100.31 carries the applicant's handwritten signature as an embedded
+    # picture, and nothing read out of a signature may fill a compliance field.
+    # What separates it from a label panel, on the two real filings the author
+    # has measured, is absolute area and nothing else. The signature on the
+    # author's own filing is 687 by 195, which is 133,965 pixels, and this floor
+    # excludes it. The smallest label panel on the second filing, a bourbon
+    # measured on 2026-09-03, is a 187 by 1697 side band, which is 317,339
+    # pixels, and this floor admits it. 250,000 sits between the two with a
+    # margin on each side. A 772 by 194 picture on the same filing, 149,768
+    # pixels, is excluded; it is small enough to be a neck band or a strip, and
+    # a rejection is reported with its dimensions and the reason rather than
+    # being silent, so an agent can see that it happened.
     #
-    # **The ratio is the half that keeps a signature out (v1.1.0).** The other
-    # two are absolute sizes, and absolute sizes are a property of the scanner
-    # rather than of the thing scanned. The author's document carries the
-    # applicant's handwritten signature on page 2 at 687 by 195, which is
-    # rejected twice over by the two numbers above; the same signature strip
-    # scanned at 300 dpi instead of 100 is about 2000 by 580, which clears both
-    # of them comfortably and is still a signature. What does not change with
-    # resolution is the shape: a signature strip is wide and short, and label
-    # artwork is large in both directions. 3.0 sits above the widest wrap-around
-    # label any source describes and below every signature strip, and it is the
-    # one part of this floor that a higher-resolution scan cannot defeat.
+    # **There is no shape rule any more, and the second filing is why.** Until
+    # v1.5.0 two more tests had to be met: a shortest edge of at least 400
+    # pixels, and a long-to-short edge ratio no greater than 3.0, chosen so that
+    # a signature scanned at a higher resolution would still be excluded by its
+    # shape. Both were set from one example document whose artwork is one flat
+    # 1750 by 1150 sheet. The bourbon filing carries its labels as separate
+    # panels at 1350 by 300, 1103 by 340, 1050 by 309 and 187 by 1697: ratios
+    # of 4.50, 3.24, 3.40 and 9.07, short edges of 300, 340, 309 and 187. Every
+    # one of them failed both shape tests, and five of that document's six
+    # pictures were discarded before anything was read. A wrap-around spirits
+    # label at four and a half to one is ordinary. No ratio ceiling and no edge
+    # floor separates those panels from a signature strip at 687 by 195 (a
+    # ratio of 3.52, a short edge of 195), so neither test can be set to a
+    # value that admits real panels and excludes it; the area floor does both.
+    # ADR 0010 as amended records the measurement.
     #
-    # A consequence worth stating: a neck or strip label filed on its own, which
-    # is genuinely long and thin, is rejected by this. That is the intended
-    # trade. Such a label carries at most one of the five values, the largest
-    # qualifying image is preferred over it in any case (ADR 0010), and a
-    # rejection is reported with its reason rather than being silent, so an
-    # agent can see that it happened.
+    # What the area floor gives up: a signature scanned large enough to clear
+    # 250,000 pixels is read. On the synthetic strip in
+    # tests/test_embedded_artwork.py that read yields a three-letter misread at
+    # a mean word confidence of 34 and no label value, and every value taken
+    # off the artwork is taken from the panel that read it most confidently,
+    # so it fills nothing. It is reported as a panel that was read, with its
+    # size and its confidence, where an agent can see it.
     #
-    # All three are settings, because the floor is a judgement about what a
-    # filing looks like rather than a measurement (NFR-11, OQ-24).
-    min_artwork_edge_px: int = 400
+    # A setting, because the floor is a judgement about what a filing looks
+    # like, now made against two filings rather than one (NFR-11, OQ-24).
     min_artwork_pixels: int = 250_000
-    max_artwork_aspect_ratio: float = 3.0
 
-    # How many surviving embedded images are read. Each one costs about what
-    # reading a label photograph costs, so this is a latency bound in the same
-    # sense max_document_pages is. Four, because the author's three-page document
-    # carries two and a filing with front, back, neck and a strip label is the
-    # most any source describes.
-    max_artwork_images: int = 4
+    # The ceiling on how many surviving embedded images are read on one
+    # document. It is a ceiling on the worst case, and nothing else: it no
+    # longer decides whether a value is found.
+    #
+    # Panels are read largest first, and reading stops as soon as the panels
+    # read so far carry all five values the check needs (the declared brand and
+    # class or type found by the check's own search, the alcohol content and
+    # the net contents by pattern, the government warning by its prefix). A
+    # one-sheet filing therefore costs one read whatever this number is, and a
+    # filing whose values are spread across panels costs as many reads as it
+    # takes to find them, and no more. The only document that reads this many
+    # is one whose values genuinely are not all present, and that is the case
+    # where the sweep is doing real work: the response reports each panel as
+    # read, with its confidence, so an absent value can be traced to the
+    # pictures that were looked at (docs/09 section 9, ADR 0010 as amended).
+    #
+    # Eight, because the bourbon filing measured on 2026-09-03 carries five
+    # pictures above the floor and the setting used to be four, which left the
+    # fifth, a 187 by 1697 side strip, listed as not read and never looked at.
+    # The two smaller panels it did read came back at 86.8 and 89.9 against
+    # the 45.3 of the largest, so neither size nor shape says which panel
+    # carries a value, and a ceiling that sits inside the count a real filing
+    # carries is a ceiling that decides correctness. Twice the most any
+    # measured filing embeds keeps it out of that position; an operator with
+    # slower hardware can lower it, and the panels it cuts are listed as
+    # not_read rather than dropped.
+    max_artwork_images: int = 8
 
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
@@ -123,6 +148,21 @@ class Settings(BaseSettings):
     # admit substituted short words, which is where the wording of the sentence
     # begins to change rather than its rendering.
     warning_near_miss_edits: int = 2
+
+    # Below this mean word confidence, a line of the government warning that
+    # differs from 27 CFR 16.21 is taken to have been read badly rather than
+    # printed wrongly (FR-5, ADR 0022). Where every differing line is below it
+    # the row reports the statement as present and not certified, a failing
+    # outcome that asks a person to look; where any differing line is at or
+    # above it the difference is the label's and the row is a mismatch.
+    #
+    # Eighty, from one measurement: on the real filing whose warning panel is
+    # overprinted with registration marks, the lines that read correctly read
+    # at 91 to 96 and the two damaged lines at 64 and 69, and on the twelve
+    # synthetic labels a compliant statement reads above 90 throughout. An
+    # altered word set in clean type reads in the nineties, so it stays a
+    # mismatch. Zero means no reading happened and is never below the floor.
+    warning_legible_confidence: float = 80.0
 
     # Allowed difference between the label ABV and the application ABV, in
     # percentage points. 0.0 is a compliance position rather than a tuning

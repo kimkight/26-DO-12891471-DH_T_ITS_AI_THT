@@ -201,6 +201,7 @@ export function applicationDocument(
     artwork_images_found: 0,
     artwork_images_read: 0,
     artwork_images_rejected: [],
+    artwork_images_accepted: [],
     label_artwork_page: null,
     label_artwork_available: false,
     notes: [

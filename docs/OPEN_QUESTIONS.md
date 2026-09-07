@@ -31,9 +31,9 @@ updates every artifact the answer affects.
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 | [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
-| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
+| [OQ-22](#oq-22) | Closed 2026-09-06, by measurement on two real filings (ADR 0021) | Nothing; the two documents are committed as evidence in `samples/real/`, and what stays unmeasured, editions and routes, is carried by OQ-24 |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
-| [OQ-24](#oq-24) | Open; a real answer arrived 2026-09-01 (#121) and is tracked, not fixed, in v1.3.0 | Nothing in the prototype; it bounds the size and shape floor and the coverage claim for the embedded artwork path (ADR 0010), and the floor is now known to reject a real Registry printout's artwork wholesale |
+| [OQ-24](#oq-24) | Narrowed 2026-09-03 and again 2026-09-04: the size question is answered for three real documents and no code decision now rests on it; what stays open is which editions and routes embed the artwork at all | Nothing in the prototype; it bounds the coverage claim for the embedded artwork path (ADR 0010) and nothing else |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
 | [OQ-26](#oq-26) | Answered 2026-08-30: met at 5.0 s, at the line | Nothing; re-measured against deploy #12, and the 1.4 s the orientation check costs is what took the margin |
 | [OQ-27](#oq-27) | Open | Nothing; it would buy back part of the NFR-1 margin the orientation check consumed (OQ-26) |
@@ -47,6 +47,8 @@ updates every artifact the answer affects.
 | [OQ-35](#oq-35) | Open; measured 2026-09-02, recommendation recorded, Terraform unchanged | Nothing; the task runs. It costs about 59 times the memory it uses |
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 | [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
+| [OQ-38](#oq-38) | Open; named 2026-09-06, logic unchanged | Nothing in the prototype; it bounds the alcohol content presence check to distilled spirits. On a malt beverage or a table wine the check can report a compliant label as a finding |
+| [OQ-39](#oq-39) | Open; measured 2026-09-06 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's alcohol content and net contents sit on one |
 
 ---
 
@@ -1130,7 +1132,56 @@ artwork, and it is the reason no such claim is made.
 **Which COLA document shapes and which form editions has the parser actually
 been verified against?**
 
-**Status: Open, 2026-08-27.**
+**Status: Closed 2026-09-06, by measurement.** The parser has been run against
+two real Public COLA Registry printouts, both now committed unaltered as
+evidence in `samples/real/` under
+[ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md), which also
+records why the no-personal-data rule below no longer forbids that and what it
+still forbids. Nothing automated reads either file.
+
+**What was measured, in one paragraph each.** The mezcal, TTB ID
+22118001000389, returns five of five: its declared values are read off the
+printout and its embedded artwork is read as the label side, all five fields
+matched, at the NFR-1 line on the application-document path. The figures are
+in the README's latency table and in [09_DEPLOYMENT.md](09_DEPLOYMENT.md)
+section 9, and the misread that preceded them is traceability source row 31.
+The bourbon, TTB ID 15309001000084, found three separate defects, and the
+record of them is [ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md)
+and `samples/real/README.md` rather than a restatement here: an alcohol
+statement in a form the matcher did not handle, a government warning that
+reads well but is overprinted so that a word for word comparison fails on a
+label a human would pass, and a net contents statement absent from every
+panel, which is the tool being correct about the label as submitted. Before
+those three it had also found the two defects in the artwork floor, one of
+five on v1.4.0 and two of five on v1.5.0, which are source rows 42 and 43 and
+ADR 0010 as amended twice.
+
+**What the two documents answered about editions.** The question anticipated
+that an earlier edition might number its items differently, and both do. The
+bourbon's printout states TTB F 5100.31 (07/2012) and the mezcal's states
+(06-2016); neither is the 04/2023 edition the item map in A-17 was read off,
+and the telephone number, for one, is item 12 on the one and item 16 on the
+other. The values parser reads the Registry captions rather than item
+numbers, and it read both. So the caption path is measured on two editions.
+The item map itself, which serves the fillable-form path and item 5's radio
+group, is still measured on the 04/2023 form alone, because neither real
+document is a fillable form.
+
+**What stays unmeasured, and where it lives.** A filled-in fillable form of
+any edition, and which editions and submission routes embed the artwork at
+all. Both bound the coverage claim and neither blocks anything; OQ-24 already
+carries the editions and routes question, and it is not reopened here. A
+per-field extraction rate by document shape and edition, which the original
+entry named as the full answer, would need more than two documents and is
+not claimed.
+
+The original entry follows, unchanged, because the reasoning it records for
+keeping real records out of fixtures still holds; what changed is that
+evidence is no longer treated as a fixture.
+
+---
+
+**Original status, 2026-08-27: Open.**
 
 FR-11 accepts an uploaded label application and reads the values off it. Two
 things about that are verified and two are not, and the difference matters
@@ -1210,9 +1261,14 @@ being wrong is that agents rename files they should not have had to.
 **Which COLA form editions embed the label artwork in the filed PDF, and which
 file it separately? And how big are those embedded images in practice?**
 
-**Status: Open, 2026-08-29. The first real answer arrived 2026-09-01, and it is
-the highest-value finding the secondary test produced: see the last paragraph,
-and #121.**
+**Status: Narrowed 2026-09-03, and again 2026-09-04. The size question is
+answered for three real documents and the floor is rebuilt on the answer; the
+second measurement of the bourbon then showed that neither size nor shape
+says which panel carries a value, and the fixed read count that still rested
+on size is gone. No code decision now depends on the distribution this entry
+asks for. What stays open is which editions and submission routes embed the
+artwork at all, which bounds the coverage claim and nothing else. See the last
+two paragraphs, ADR 0010 as amended twice, and #121.**
 
 [ADR 0010](adr/0010-embedded-label-artwork.md) extracts every embedded raster
 image from an uploaded COLA document, discards the ones below a size floor, and
@@ -1289,6 +1345,65 @@ submission that is already defensible (SC-5), so it is recorded here and in
 #121 rather than half-built. **What would change the answer:** the fixture,
 and the numbers from a second real Registry page. The printout itself never
 enters the repository.
+
+**The second filing answered it, and the floor is rebuilt (2026-09-03,
+v1.5.0).** The author put a real filed bourbon COLA through the deployed
+v1.4.0 build. One of five checks passed, and the response said why: six
+embedded pictures, five rejected on `short_edge`, and the aspect-ratio rule
+would have taken four of them next. Their sizes, which are the measurement
+this question asked for:
+
+| Picture | Area | Ratio | What it is |
+| --- | --- | --- | --- |
+| 1103 x 340 | 375,020 | 3.24 | a label panel |
+| 772 x 194 | 149,768 | 3.98 | small enough to be a neck band |
+| 1050 x 309 | 324,450 | 3.40 | a label panel |
+| 187 x 1697 | 317,339 | 9.07 | a vertical side band |
+| 1350 x 300 | 405,000 | 4.50 | a label panel, a wrap-around |
+| 687 x 195, the author's other filing | 133,965 | 3.52 | the applicant's signature |
+
+Against the Registry printout's seven (the largest 1442 by 433, then 754 by
+379, 800 by 226, 519 by 327, 190 by 190, 355 by 93, 238 by 62), that is three
+real documents and eighteen embedded pictures, which is a distribution of
+three rather than one. What it shows: the two shape rules reject real label
+panels wholesale and no value of either admits the panels while excluding the
+signature; the area floor at 250,000 admits every panel that carries a value
+on both filings and excludes the signature with margin on each side. So the
+shape rules are gone, the area floor is the whole of the floor, every panel
+that clears it is read and pooled, and the response lists what was read as
+well as what was set aside. [ADR 0010](adr/0010-embedded-label-artwork.md)
+as amended on 2026-09-03 records the reasoning; `backend/tests/test_artwork_panels.py`
+is the synthetic fixture in the bourbon's shape this entry asked for, and it
+fails on the v1.4.0 rules and passes on the new one. The 772 by 194 picture is
+still set aside, reported with its size and the reason, which is the right
+outcome for a neck band and would be the wrong one for a small back label;
+whether such a picture ever carries one of the five values is the part of this
+question the two filings do not answer.
+
+**The second measurement of the bourbon, and what it took off this question
+(2026-09-04).** The rebuilt floor was deployed and the bourbon was put through
+it again. Every panel cleared the floor; the two panels the shape rules had
+thrown away read at 86.8 and 89.9, better than the 45.3 of the wide sheet the
+rules had kept; the brand and the class or type matched. And the alcohol
+content, the net contents and the government warning were still not found,
+because `TTB_MAX_ARTWORK_IMAGES` was four, the filing carries five pictures
+above the floor, and the 187 by 1697 side strip ranked last by area and was
+never read. The size question this entry asked had been answered well enough
+to set the floor; it was still being asked, silently, by a count. Reading now
+stops when the panels read so far carry all five values and the count is a
+ceiling on the worst case, at eight (ADR 0010 as amended 2026-09-04). So the
+sizes of embedded pictures no longer decide anything in the code except which
+of them is the applicant's signature, and that decision has three real
+documents on the right side of it. Which of the bourbon's panels carries the
+three missing values is the author's next request against the deployed build,
+and the response now says; the synthetic fixture puts them on the strip.
+
+**What stays open.** Which form editions and submission routes embed the
+artwork at all. Three documents cannot answer that; a redacted or synthetic
+set from TTB still would. It bounds the claim that the artwork path works
+across filings, and it is the reason no such claim is made. Nothing in the
+prototype blocks on it: every picture above the floor is read until the values
+are in hand, and every picture is reported either way.
 
 
 
@@ -1962,8 +2077,10 @@ infrastructure change alongside OQ-35.
 **Classifying an image on arrival is an OCR pass, and the check makes it
 again. Should the batch tab pay it twice?**
 
-**Status: Open. Measured 2026-09-02 (section 9 of
-[09_DEPLOYMENT.md](09_DEPLOYMENT.md)); recorded rather than designed around.**
+**Status: Closed 2026-09-03, v1.5.0. The batch tab no longer sorts an image on
+arrival; it labels it provisionally and the batch line sorts it. The option
+was chosen by measurement, below, and the numbers are in section 9 of
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md).**
 
 **What was measured.** The batch tab classifies every file on arrival with the
 single-label tab's `POST /api/classify`, one request per file, two in flight
@@ -2003,3 +2120,133 @@ two files at a time.
 drops are applications, option 4 costs nothing; if they are photographs,
 option 1 is the one to measure.
 **Blocks:** nothing.
+
+**Measured and decided, 2026-09-03.** Three ways to make the arrival sort
+cheaper were on the table, since a cache is not: read a heavily downscaled
+copy, decide from metadata alone, or defer the decision to the check and say
+so in the chip. The first was measured before it was chosen against. On a
+session container, the twelve sample labels and two synthetic photographed
+forms (the paper form and a Registry printout rendered as PNGs by
+`samples/formmaker.py`) were each read once at five scales, and the read's
+verdict compared with what the file is:
+
+| Long edge | Label read, median | Twenty labels | Labels sorted right | Form read, median | Forms sorted right |
+| --- | --- | --- | --- | --- | --- |
+| 1600 px (the default) | 1784 ms | 21.2 s | 12 of 12 | 1860 ms | 2 of 2 |
+| 1000 px | 1247 ms | 15.0 s | 12 of 12 | 2103 ms | 1 of 2 |
+| 800 px | 1551 ms | 18.5 s | 12 of 12 | 1634 ms | 2 of 2 |
+| 600 px | 1335 ms | 15.7 s | 12 of 12 | 1110 ms | 1 of 2 |
+| 400 px | 550 ms | 7.3 s | 12 of 12 | 427 ms | 0 of 2 |
+
+Downscaling does not buy a proportional saving, and the reason is in the
+pipeline rather than in the engine: a read whose first arm comes back under
+the short-circuit confidence runs the other arms too, so a smaller image is
+read more times, and the cost lands between 70 and 85 percent of a full read
+until the scale is low enough that the form's own markers stop being
+recognized. At 400 pixels the read is a third of the cost and sorts both
+photographed forms as labels, which is the wrong side, silently, on the chip.
+The point of sorting on arrival was that the chip is the file's own evidence
+(ADR 0011); a chip that is right for labels and wrong for forms is a guess
+that looks like evidence.
+
+**The decision is to defer.** An image dropped on the batch tab is not sent
+to `POST /api/classify`. It is shown with the chip "Label image, sorted when
+checked" and a line saying why, the batch runs on it exactly as before, and
+the batch line, which carries what the server took each file in the row to
+be, replaces the chip with the server's sorting. A PDF is still sorted on
+arrival, because that costs about fifty milliseconds and reads no picture
+(0.57 s for twenty on the same container, 56 ms a call). So twenty label
+photographs cost nothing before the batch starts, where they cost 23 s on the
+2026-09-02 container and 36.55 s on the 2026-09-03 one; a photographed form is
+still sorted correctly, a moment later than it was; and the check reads every
+image once, as it always did. The single-label
+tab is unchanged: one image's arrival read is what fills the five boxes from a
+photographed form, and one read was never the problem. Metadata alone was not
+taken because it is the same provisional answer with the word "provisional"
+left off. `frontend/src/__tests__/batchTable.test.tsx` asserts that no
+classify call is made for an image and that the line's sorting replaces the
+chip, including the case of a photographed form the server sorts to the other
+side.
+
+## OQ-38
+**Should "alcohol content not found" be a finding on a malt beverage or a
+table wine at all?**
+
+**Status: Open. Named and cited 2026-09-06; the checking logic is unchanged.**
+
+The alcohol content presence check (FR-14, FR-15, ADR 0013, ADR 0018) reports
+a label that carries no alcohol statement as a finding, citing 27 CFR
+5.63(a)(3) for spirits and 4.32(b)(3) for wine. Two things the regulation says
+are not accounted for in that design:
+
+- **27 CFR 7.65(a)**: on a malt beverage, alcohol content "may be stated on any
+  malt beverage label, unless prohibited by State law". It is optional unless
+  State law requires it. The row's copy already narrows 7.63(a)(3) to malt
+  beverages with alcohol from added nonbeverage ingredients; the general case
+  is that a beer label need not state it.
+- **27 CFR 4.36(a)**: for a wine of 14 percent alcohol or less, the alcohol
+  content "may be stated, but need not be stated if the type designation
+  'table' wine (or 'light' wine) appears on the brand label".
+
+So on a beer, or on a table wine, "not found" can be the correct reading of a
+fully compliant label, and a row that reports it as a finding is wrong about
+that label. The check is calibrated to distilled spirits, which is what the
+assignment's worked examples are and what both real filings are.
+
+**What was done instead of changing the logic.** The row's reason now names
+the 4.36(a) allowance beside the 7.63(a)(3) one, so an agent reading the
+finding sees when it is not a defect; the limit is recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 with the citations; and the
+tests, FR-14 and FR-15 are untouched. Changing the check touches two
+requirements, it needs the beverage type (ADR 0016) to be trusted as the input
+that decides whether absence is a finding, and for wine it needs the class or
+type designation read for the words "table" or "light", none of which belongs
+in the session that found it.
+
+**What would answer it:** a decision on whether the presence check consults
+the beverage type, and if so what it reports when the type is not determined;
+and for wine, whether "table" or "light" in the class or type designation
+stands in for the figure.
+
+**Who can answer:** Jenny Park or Sarah Chen, on whether an agent expects the
+tool to raise absence on a beer or a table wine, and on which they see more of.
+**Blocks:** nothing in the prototype. It bounds the claim the presence check
+makes: on distilled spirits it is a finding; on a malt beverage or a table wine
+it is a question for the agent, and the row says so.
+
+## OQ-39
+**How should a single line of legible type set over full-colour artwork be
+isolated before it is read?**
+
+**Status: Open. Measured 2026-09-06; not tuned for.**
+
+The bourbon filing committed as evidence in `samples/real/` carries its alcohol
+content and its net contents on one line of light type about 24 pixels tall
+along the bottom edge of a 1950 by 862 panel that is otherwise a painting. On
+the session's Tesseract 5.3.4 the whole panel reads as no text at all through
+every arm of the pipeline; the container's 5.3.0 read it at 45.3 confidence
+and found neither value. Every page segmentation mode Tesseract offers was
+tried on the whole panel, on the colour image, the 1600-pixel grayscale and
+the native grayscale, and the best recovered the percentage figure alone.
+Cropped to its own text band, the same line reads at 88.0 confidence,
+complete, and every rule downstream accepts it: the matcher, the proof
+cross-check, the net contents unit.
+
+So the type is legible and the pipeline reads it; what fails is the layout
+analysis, which does not find one line of text on a picture. That is a
+different limit from the low-contrast labels recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 alongside it, where the type
+itself is the problem and tuning is declined. Here the fix would be text-region
+detection before OCR: finding the bands of a panel that carry type and reading
+those on their own. It is real image-processing work, it would run only on a
+panel that read poorly, and it is not attempted in this session; the crop
+measurement is recorded so that whoever attempts it knows the line reads once
+it is found.
+
+**What would answer it:** a region detector measured on this panel and on the
+twelve synthetic labels, showing the line found here and nothing lost there,
+with its cost.
+
+**Who can answer:** measurement.
+**Blocks:** nothing in the prototype. On this filing the alcohol content and
+the net contents are reported not found, and the deployment notes say why.

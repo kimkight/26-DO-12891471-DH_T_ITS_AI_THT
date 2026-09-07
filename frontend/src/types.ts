@@ -23,6 +23,13 @@ export type Outcome =
   | 'mismatch'
   | 'not_compared'
   /**
+   * The government warning alone (FR-5, ADR 0022): the statement is on the
+   * label, it does not match 27 CFR 16.21, and every line that differs was
+   * read too poorly to attribute the difference to the label. A failing
+   * outcome that asks a person to look at the label; never a pass.
+   */
+  | 'not_certified'
+  /**
    * A passing one-sided finding (FR-15, ADR 0018): 27 CFR requires this element
    * on the label and the label carries it. The row has a label value and no
    * application value, because the application declared none, and no score,
@@ -66,9 +73,17 @@ export interface FieldResult {
   label_region?: TextRegionDetail | null
   /**
    * Which submitted photograph this value was read from, numbered from 1
-   * (ADR 0007). Null where the field was not found on any of them.
+   * (ADR 0007): the `index` of a `photos` entry, which is in that order, so 5
+   * is `photos[4]`. Null where the field was not found on any of them.
    */
   source_photo: number | null
+  /**
+   * Where the label side is the application's artwork, the embedded picture
+   * the value was read from, by page and pixel size: the same panel the
+   * addressed `photos` entry carries, on the row so no index has to be
+   * followed. Optional so an older server's response still reads.
+   */
+  source_panel?: ArtworkPanelDetail | null
   /**
    * Whether the agent typed this application value or it was read off an
    * uploaded COLA document (FR-11). A typed value always wins over a parsed
@@ -85,6 +100,20 @@ export interface ParsedApplicationField {
   found_on_document: boolean
   /** Where in the document it was read: text, form field, or embedded artwork. */
   source: DocumentValueSource
+  /**
+   * Where the source is the embedded artwork, which picture the value was read
+   * off: its page and its pixel size (ADR 0010 as amended). A filing that
+   * embeds its labels as separate panels answers different fields from
+   * different pictures. Optional so that an older server's response still reads.
+   */
+  artwork_panel?: ArtworkPanelDetail | null
+}
+
+/** One embedded picture, named by where it sat and how big it is. */
+export interface ArtworkPanelDetail {
+  page: number
+  width: number
+  height: number
 }
 
 /**
@@ -128,7 +157,17 @@ export interface ApplicationDocumentResult {
    * appears here.
    */
   artwork_images_rejected: RejectedImageDetail[]
-  /** The page the chosen label artwork came from, or null when none was chosen. */
+  /**
+   * Every embedded picture that did clear the floor, largest first, with what
+   * happened to it (v1.5.0). The other half of the table above. Optional so
+   * that an older server's response still reads.
+   */
+  artwork_images_accepted?: AcceptedImageDetail[]
+  /**
+   * The page the first label panel came from, or null when none was read.
+   * Since v1.5.0 every panel that read is the label side; `photos[]` names
+   * each with its page and size.
+   */
   label_artwork_page: number | null
   /** Whether one of them can stand in as the label side of the check. */
   label_artwork_available: boolean
@@ -139,7 +178,29 @@ export interface RejectedImageDetail {
   page: number
   width: number
   height: number
-  reason: 'short_edge' | 'area' | 'aspect_ratio' | 'unreadable'
+  /**
+   * `area` is the pixel floor, which is what separates a signature from a label
+   * panel; `unreadable` means it cleared the floor and would not decode. The
+   * two shape reasons a server before v1.5.0 could report are kept so that an
+   * older response still reads; no current server sends them.
+   */
+  reason: 'area' | 'unreadable' | 'short_edge' | 'aspect_ratio'
+}
+
+/** One embedded picture that cleared the floor, and what happened to it. */
+export interface AcceptedImageDetail {
+  page: number
+  width: number
+  height: number
+  /**
+   * `read` means text came back; `no_text` means the read found none;
+   * `not_needed` means the pictures read before it already carried all five
+   * values, so reading stopped; `not_read` means it was never put through OCR
+   * for another reason, on the prefill pass or past the ceiling on how many
+   * pictures are read; `undecodable` speaks for itself.
+   */
+  status: 'read' | 'no_text' | 'not_needed' | 'not_read' | 'undecodable'
+  ocr_confidence: number | null
 }
 
 /** How one photograph was turned before it was read (A-15). */
@@ -231,6 +292,11 @@ export interface PhotoResult {
    * picture of the label lifted out of their application document (ADR 0010).
    */
   origin: 'uploaded' | 'application_artwork'
+  /**
+   * When the origin is the application artwork, which embedded picture this
+   * is: its page and its pixel size (v1.5.0). Null for an uploaded photograph.
+   */
+  artwork_panel?: ArtworkPanelDetail | null
   orientation: OrientationDetail
   ocr_confidence: number
   read_path: ReadPathDetail
@@ -294,6 +360,22 @@ export interface WarningResult {
   near_miss: boolean
   /** The character-level difference, in reading order. */
   diff: WarningDiffSegment[]
+  /**
+   * Whether the prefix was read as GOVERNMENT WARNING at all. False when OCR
+   * damaged its first word and the statement was located by what survived;
+   * `prefix_is_capitalized` is then null, unchecked rather than failed
+   * (ADR 0022). Optional so an older server's response still reads.
+   */
+  prefix_legible?: boolean
+  /** Lines of the statement that are not a run of the regulation's text. */
+  differing_lines?: number
+  /** How many of those were read below the legibility floor. */
+  illegible_lines?: number
+  /**
+   * The statement is present and not certified: every differing line read
+   * too poorly to attribute the difference to the label. Never a pass.
+   */
+  not_certified?: boolean
 }
 
 /**

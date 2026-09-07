@@ -30,6 +30,7 @@ from app import timing
 from app.application_form import (
     APPLICATION_FIELDS,
     SELF_CONSISTENCY_NOTE,
+    EmbeddedArtwork,
     ParsedApplication,
 )
 from app.compare import Comparison, Outcome, compare_abv, compare_net_contents, compare_text
@@ -46,8 +47,10 @@ from app.ocr import (
 from app.parse import ParsedFields, TextRegion, parse_fields
 from app.schemas import (
     FIELD_LABELS,
+    AcceptedImageDetail,
     ApplicationDocumentResult,
     ApplicationSource,
+    ArtworkPanelDetail,
     ErrorDetail,
     FieldResult,
     OrientationCheckDetail,
@@ -267,6 +270,7 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
                 value=parsed.values.get(name),
                 found_on_document=parsed.values.get(name) is not None,
                 source=parsed.value_sources.get(name, "absent"),
+                artwork_panel=_panel_detail(parsed.artwork_value_panels.get(name)),
             )
             for name in APPLICATION_FIELDS
         ],
@@ -285,9 +289,26 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
             )
             for image in parsed.artwork_images_rejected
         ],
+        artwork_images_accepted=[
+            AcceptedImageDetail(
+                page=image.page,
+                width=image.width,
+                height=image.height,
+                status=image.status,
+                ocr_confidence=image.ocr_confidence,
+            )
+            for image in parsed.artwork_images_accepted
+        ],
         label_artwork_page=None if parsed.label_artwork is None else parsed.label_artwork.page,
         label_artwork_available=parsed.label_artwork is not None,
     )
+
+
+def _panel_detail(panel: EmbeddedArtwork | None) -> ArtworkPanelDetail | None:
+    """Which embedded picture, by page and size. Never the picture (NFR-6)."""
+    if panel is None:
+        return None
+    return ArtworkPanelDetail(page=panel.page, width=panel.width, height=panel.height)
 
 
 def check_size(content: bytes) -> None:
@@ -381,8 +402,16 @@ def verify_photos(
     application_document: ApplicationDocumentResult | None = None,
     label_source: LabelSource = "uploaded_photographs",
     pre_read: list[OcrResult | None] | None = None,
+    panels: list[EmbeddedArtwork] | None = None,
 ) -> VerificationResult:
     """Read every photograph of one label and compare the union (ADR 0007).
+
+    ``panels`` names the embedded picture each entry in ``contents`` is, where
+    the label side is the artwork inside the application document (ADR 0010 as
+    amended): one filing can embed its labels as several panels, and the
+    response says which panel each value was found on the same way it says
+    which photograph. It is aligned with ``contents`` and ignored for a
+    photograph the agent uploaded.
 
     Each photograph is decoded, turned upright and read on its own, and the
     fields found across all of them are merged: a field counts as found if any
@@ -415,13 +444,19 @@ def verify_photos(
 
     merged, sources = _merge(usable)
     elapsed_ms = (time.perf_counter() - started) * 1000
+    named = panels or []
     return build_result(
         merged,
         application,
         round(sum(read.confidence for read in usable) / len(usable), 1),
         ocr_ms=round(sum(read.ocr_ms for read in reads), 1),
         elapsed_ms=elapsed_ms,
-        photos=[_photo_result(read, label_source) for read in reads],
+        photos=[
+            _photo_result(
+                read, label_source, named[read.index - 1] if read.index <= len(named) else None
+            )
+            for read in reads
+        ],
         sources=sources,
         application_sources=application_sources,
         application_document=application_document,
@@ -655,10 +690,15 @@ def _orientation_check(check: OrientationCheck | None) -> OrientationCheckDetail
     )
 
 
-def _photo_result(read: _Read, label_source: LabelSource = "uploaded_photographs") -> PhotoResult:
+def _photo_result(
+    read: _Read,
+    label_source: LabelSource = "uploaded_photographs",
+    panel: EmbeddedArtwork | None = None,
+) -> PhotoResult:
     return PhotoResult(
         index=read.index,
         origin="application_artwork" if label_source == "application_artwork" else "uploaded",
+        artwork_panel=_panel_detail(panel) if label_source == "application_artwork" else None,
         orientation=OrientationDetail(
             exif_orientation=read.orientation.exif_orientation,
             exif_transposed=read.orientation.exif_transposed,
@@ -898,6 +938,9 @@ def build_result(
     # measuring it is how that stays a fact rather than an assumption.
     with timing.phase("compare"):
         attribution = dict(sources or {})
+        # The panel behind each photo index, so a row can name the picture its
+        # value came off rather than only number it (2026-09-06).
+        panel_by_photo = {photo.index: photo.artwork_panel for photo in photos or []}
         value_sources = application_sources or {}
         searchable = sheets or []
         label_values: dict[str, str | None] = {
@@ -1015,6 +1058,7 @@ def build_result(
                 reason=comparison.reason,
                 label_region=_region_detail(regions.get(name)),
                 source_photo=attribution.get(name),
+                source_panel=panel_by_photo.get(attribution.get(name)),
                 # **No application side on a presence row**, because there is
                 # nothing on that side (FR-15, ADR 0018). A row printing the
                 # same string in both columns is what invited the confusion this
@@ -1035,6 +1079,7 @@ def build_result(
                 parsed.warning_text,
                 attribution.get("government_warning"),
                 parsed.region.get("government_warning"),
+                source_panel=panel_by_photo.get(attribution.get("government_warning")),
             )
         )
 
@@ -1071,6 +1116,10 @@ def build_result(
                 WarningDiffSegment(kind=segment.kind, text=segment.text)
                 for segment in parsed.warning.body_diff
             ],
+            prefix_legible=parsed.warning.prefix_legible,
+            differing_lines=parsed.warning.differing_lines,
+            illegible_lines=parsed.warning.illegible_lines,
+            not_certified=parsed.warning.uncertifiable,
         ),
         ocr_confidence=ocr_confidence,
         # **The recording wins where there is one, and the reason is the defect
@@ -1143,6 +1192,7 @@ def _warning_field(
     warning_text: str | None,
     source_photo: int | None = None,
     region: TextRegion | None = None,
+    source_panel: ArtworkPanelDetail | None = None,
 ) -> FieldResult:
     """The warning as one field row (FR-5, FR-6, ADR 0012).
 
@@ -1168,6 +1218,11 @@ def _warning_field(
         outcome = Outcome.MATCH
     elif warning.near_miss and warning.prefix_is_upper_case:
         outcome = Outcome.NEEDS_REVIEW
+    elif warning.uncertifiable:
+        # The statement is there and every line that differs was read badly
+        # (ADR 0022). Failing, like the two above it; what it asks of the
+        # agent is to look at the label rather than at a diff.
+        outcome = Outcome.NOT_CERTIFIED
     else:
         outcome = Outcome.MISMATCH
     return FieldResult(
@@ -1181,4 +1236,5 @@ def _warning_field(
         reason=f"{warning.reason} {warning.bold_type_note}",
         label_region=_region_detail(region),
         source_photo=source_photo,
+        source_panel=source_panel,
     )

@@ -2,6 +2,14 @@
 
 This directory holds the labeled sample set used by the accuracy tests
 described in [docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md).
+Everything in it is generated from a specification, and everything in it is
+invented.
+
+`samples/real/` is the one exception and is a different kind of thing: two real
+filed COLAs, the documents every measurement in this repository was taken on,
+committed unaltered as evidence a reviewer opens. Nothing automated reads them.
+See [real/README.md](real/README.md) and
+[ADR 0021](../docs/adr/0021-real-filings-as-evidence-not-fixtures.md).
 
 ## Current status
 
@@ -27,6 +35,7 @@ python samples/generate_samples.py
 | `applications/applications.csv` | The application side of each case. No longer an API input; see below | Yes |
 | `applications/documents/*.pdf` | One synthetic Registry printout per label, named to pair with its image (ADR 0009) | No, git-ignored; regenerated like the artwork |
 | `applications/filed/*.pdf` | The same printout with the label artwork affixed: a filed application, a complete batch row on its own (ADR 0020) | No, git-ignored; regenerated like the artwork |
+| `real/` | Two real filed COLAs, the documents the tool was measured on. Evidence a person opens, read by nothing automated (ADR 0021) | Yes, deliberately; see `real/README.md` |
 
 ### COLA application documents
 
@@ -36,14 +45,23 @@ that each of the parser's three ways in is exercised on a document it did not
 also produce: a digitally generated PDF, a filled-in fillable PDF, and a
 rasterized copy with no text layer.
 
-Nothing it produces is committed and nothing real is used. A filed
-TTB F 5100.31 carries a permit number, a signature and a named person on every
-copy, and the test data policy in
-[docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md) section 8 forbids real
-application data and personal data in any fixture. Every value in `formmaker.py`
-is invented, and the permit and serial numbers are deliberately not in a format
-TTB issues. The consequence is recorded honestly as OQ-22: the parser has never
-been run against a real application.
+Nothing it produces is committed, and nothing real is used as a fixture. A
+filed TTB F 5100.31 carries a permit number, a signature and a named person on
+every copy, and the test data policy in
+[docs/07_TEST_STRATEGY.md](../docs/07_TEST_STRATEGY.md) section 8 keeps real
+application data and personal data out of every fixture. Every value in
+`formmaker.py` is invented, and the permit and serial numbers are deliberately
+not in a format TTB issues.
+
+The two real filings the tool was measured on are a different thing and live in
+`samples/real/`: evidence a reviewer opens, read by nothing automated, committed
+so that the measurements in the deployment notes can be repeated on the
+documents that produced them
+([ADR 0021](../docs/adr/0021-real-filings-as-evidence-not-fixtures.md)).
+OQ-22, which recorded that the parser had never been run against a real
+application, is closed by those measurements; what each document showed is in
+[real/README.md](real/README.md). A test that wants to assert on something one
+of them contains wants a synthetic fixture, written here, that reproduces it.
 
 ### `expected.csv` columns
 
@@ -114,6 +132,16 @@ on `image_filename`; `applications.csv` keys on `filename`.
 `samples/images/` is listed in `.gitignore`. Label artwork can carry third-party
 trade dress, and the assignment does not grant rights to redistribute real
 label images. Contributors generate or source their own set locally.
+
+The two PDFs in `samples/real/` are the exception, and a deliberate one. They
+carry two companies' real label artwork, exactly as TTB publishes it in the
+Public COLA Registry, because they are the documents the tool was measured on
+and nothing else lets a reviewer repeat the measurement. That is a decision
+about evidence, recorded with its reasoning and the alternatives declined in
+[ADR 0021](../docs/adr/0021-real-filings-as-evidence-not-fixtures.md), and it
+does not change the rule for this directory: `samples/images/` stays
+git-ignored, the contributor's own set stays local, and nothing sourced for
+testing is committed.
 
 The assignment states: "We encourage you to create or source additional test
 labels; AI image generation tools work well for this."

@@ -61,6 +61,15 @@ class Outcome(StrEnum):
     about; the artwork-derived state stays for what it was built for, a value
     read off the artwork and then compared against that same artwork, which
     after ADR 0018 is a case the presence fields never reach.
+
+    ``NOT_CERTIFIED`` is the seventh, and it belongs to the government warning
+    alone (FR-5, [ADR 0022](../../docs/adr/0022-warning-present-not-certified.md)).
+    The statement is on the label, it does not match 27 CFR 16.21, and every
+    line of it that differs was read below the legibility floor, so the tool
+    cannot attribute the difference to the label rather than to the reading.
+    It is a failing outcome, like a near miss and unlike it: a near miss is a
+    difference too small to attribute, this is a read too damaged to. Neither
+    passes anything, and a difference read confidently is still a mismatch.
     """
 
     MATCH = "match"
@@ -69,6 +78,7 @@ class Outcome(StrEnum):
     NOT_COMPARED = "not_compared"
     PRESENT = "present"
     ARTWORK_DERIVED = "artwork_derived"
+    NOT_CERTIFIED = "not_certified"
 
 
 @dataclass(frozen=True)
@@ -163,6 +173,25 @@ def compare_text(label_value: str | None, application_value: str | None) -> Comp
 # ---------------------------------------------------------------------------
 
 _NUMBER = r"\d+(?:\.\d+)?"
+
+# A decimal point inside the proof figure that OCR read as something else.
+#
+# **Measured on a real filing, 2026-09-06.** The alcohol statement on one
+# panel of a filed bourbon label prints the proof to one decimal place, as
+# 27 CFR 5.65(b)(1)(i) permits beside the mandatory percentage. Read through
+# the pipeline, the point came back as a dash from one Tesseract segmentation
+# mode and as a degree sign from another, so the proof pattern below read the
+# single digit after it as the whole proof, and the A-12 cross-check then
+# reported a label that agrees with itself exactly as contradicting itself.
+#
+# The repair is narrow on purpose: one of these four characters, between a
+# run of digits and exactly one digit, immediately before the word PROOF. A
+# range of percentages uses the same dash and is untouched, because it is not
+# followed by PROOF and carries more than one digit after the separator.
+_PROOF_DECIMAL_MISREAD = re.compile(
+    r"(\d+)[\-\u2013\u00b0\u00b7,](\d)(?=\s*proof\b)", re.IGNORECASE
+)
+
 _ABV_RANGE = re.compile(
     rf"({_NUMBER})\s*(?:%|percent)?\s*(?:to|-|–)\s*({_NUMBER})\s*(?:%|percent)",
     re.IGNORECASE,
@@ -197,6 +226,7 @@ def parse_abv(value: str | None) -> AbvReading:
     if value is None:
         return AbvReading(percent=None, proof=None)
 
+    value = _PROOF_DECIMAL_MISREAD.sub(r"\1.\2", value)
     proof_match = _PROOF.search(value)
     proof = float(proof_match.group(1)) if proof_match else None
 
@@ -252,17 +282,20 @@ _PRESENCE_RULES = {
         "whatever the application form says, so this is reported as a finding "
         "rather than as nothing to compare. 27 CFR 7.63(a)(3) requires it on a "
         "malt beverage only where alcohol is derived from added nonbeverage "
-        "ingredients, so check the product type before treating it as a defect."
+        "ingredients, and 27 CFR 4.36(a) lets a wine of 14 percent or less "
+        "carry \u201ctable\u201d or \u201clight\u201d wine in place of a figure, so check "
+        "the product type before treating it as a defect."
     ),
     "net_contents": (
         "Net contents was not found on the label. 27 CFR 5.63(b)(2) and "
         "27 CFR 7.63(a)(5) require it on distilled spirits and malt beverage "
         "containers and 27 CFR 4.32(b)(2) on a wine label, whatever the "
         "application form says, so this is reported as a finding rather than as "
-        "nothing to compare. Both spirits and malt beverage sections allow it to "
-        "be \u201cblown, embossed, or molded into the container\u201d, which a picture of "
-        "a flat label cannot show, so check the container before treating it as "
-        "a defect."
+        "nothing to compare. Every panel that was read was searched for it. "
+        "Both spirits and malt beverage sections allow it to be \u201cblown, "
+        "embossed, or molded into the container\u201d, and 27 CFR 4.37(c) allows "
+        "the same for wine, which a picture of a flat label cannot show, so "
+        "check the container before treating it as a defect."
     ),
 }
 
@@ -518,12 +551,55 @@ _UNIT_ALIASES = {
     "floz": "fl oz",
     "fluidounce": "fl oz",
     "fluidounces": "fl oz",
+    # A bare ounce on a beverage label is a fluid ounce: 27 CFR 7.70(a) states
+    # malt beverage net contents in fluid ounces and there is no other ounce a
+    # volume could be stated in. Folded onto the same unit so that "12 OZ" and
+    # "12 FL OZ" compare as the quantity they both are (A-13).
+    "oz": "fl oz",
+    "cl": "cL",
+    "centiliter": "cL",
+    "centiliters": "cL",
+    "centilitre": "cL",
+    "centilitres": "cL",
+    "pint": "pint",
+    "pints": "pint",
+    "pt": "pint",
+    "quart": "quart",
+    "quarts": "quart",
+    "qt": "quart",
+    "gallon": "gallon",
+    "gallons": "gallon",
+    "gal": "gallon",
 }
-_NET_CONTENTS = re.compile(
-    rf"({_NUMBER})\s*"
-    r"(fl\.?\s*oz\.?|fluid\s+ounces?|milli\s?lit(?:er|re)s?|lit(?:er|re)s?|ml|mls|l)\b",
-    re.IGNORECASE,
+
+# The unit spellings a net contents statement is located and read by. Shared
+# with ``app.parse``, which locates the line, so that the line found and the
+# value read off it cannot disagree about what a unit is.
+#
+# **Measured, not assumed (2026-09-06).** The label artwork of nine approved
+# applications in TTB's Public COLA Registry, across six beverage classes,
+# prints net contents in six shapes: metric with a space before the unit and
+# without one; metric followed by the estimated-quantity sign; metric behind a
+# "CONT." prefix with the sign after it; metric fused to a lot code on the same
+# line; and US customary, as one pint. A pattern that assumed a number
+# followed by ML read about half of them, and nothing had noticed because the
+# one filing the matcher was calibrated to prints 750 ML. This is the alcohol
+# content defect of the same date found before it cost anything.
+#
+# The spellings come from the regulation rather than from the nine labels.
+# 27 CFR 5.70(a): "liter" may be spelled "litre" or abbreviated "L", and
+# "milliliters" may be abbreviated "ml.", "mL." or "ML."; equivalents "such as
+# centiliters" may appear beside the metric statement. 27 CFR 7.70(a) states
+# malt beverage net contents in fluid ounces, fractions of a pint, pints,
+# quarts and gallons. 27 CFR 4.37(a) and (b) state wine net contents in liters
+# and milliliters, with an optional equivalent in fluid ounces. A number has to
+# sit against one of these; a number on its own is never a net contents.
+NET_CONTENTS_UNIT = (
+    r"(?:fl\.?\s*oz\.?|fluid\s+ounces?|oz\.?"
+    r"|milli\s?lit(?:er|re)s?|centi\s?lit(?:er|re)s?|lit(?:er|re)s?|ml|mls|cl|l"
+    r"|pints?|pt\.?|quarts?|qt\.?|gallons?|gal\.?)"
 )
+_NET_CONTENTS = re.compile(rf"({_NUMBER})\s*({NET_CONTENTS_UNIT})\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)

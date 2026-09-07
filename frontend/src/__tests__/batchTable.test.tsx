@@ -13,7 +13,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BatchTab } from '../components/BatchTab'
+import { BatchTab, PROVISIONAL_REASON, PROVISIONAL_SIDE } from '../components/BatchTab'
 import { BatchTable } from '../components/BatchTable'
 import type { BatchRow } from '../components/BatchTable'
 import { resultsToCsv } from '../lib/csv'
@@ -283,11 +283,48 @@ describe('the batch tab', () => {
 
     await user.upload(picker(), [pdf('0001-stones-throw.pdf'), png('0002-hollow-creek.png')])
 
-    // The same chips the single-label tab puts beside a file (FR-12).
+    // The same chip the single-label tab puts beside an application (FR-12),
+    // from the same classification, which for a PDF costs milliseconds.
     await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
-    await waitFor(() => expect(screen.getByText('Label image')).toBeInTheDocument())
     expect(
       screen.getByText('This is a PDF, so we read it as the label application.'),
+    ).toBeInTheDocument()
+    // An image is not sent for sorting on arrival (OQ-37): sorting it is a
+    // full OCR pass the check makes again a moment later. The chip says it is
+    // provisional rather than pretending the server decided.
+    expect(screen.getByText(PROVISIONAL_SIDE)).toBeInTheDocument()
+    expect(screen.getByText(PROVISIONAL_REASON)).toBeInTheDocument()
+  })
+
+  it('sends no image for sorting on arrival, and lets the batch line sort it (OQ-37)', async () => {
+    const sortedByTheCheck: BatchLine = {
+      ...batchLine('form-photo.png', 1, 1, ['match', 'match', 'match', 'match', 'match']),
+    }
+    sortedByTheCheck.result!.files = [
+      fileClassification('form-photo.png', 'application_document', {
+        basis: 'form_markers',
+        reason: 'This picture carries the wording of a COLA application.',
+      }),
+    ]
+    const fetch = api([sortedByTheCheck])
+    vi.stubGlobal('fetch', fetch)
+    const user = userEvent.setup()
+    render(<BatchTab />)
+
+    await user.upload(picker(), [png('form-photo.png')])
+    expect(screen.getByText(PROVISIONAL_SIDE)).toBeInTheDocument()
+    expect(fetch.mock.calls.filter(([url]) => url === '/api/classify')).toHaveLength(0)
+    // Provisionally an image, so the batch has one label to check.
+    expect(screen.getByRole('button', { name: 'Check 1 label' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: /^Check/ }))
+
+    // The server read it as a photographed application, and the chip says so
+    // now that the server has actually looked.
+    await waitFor(() => expect(screen.getByText('Label application')).toBeInTheDocument())
+    expect(screen.queryByText(PROVISIONAL_SIDE)).not.toBeInTheDocument()
+    expect(
+      screen.getByText('This picture carries the wording of a COLA application.'),
     ).toBeInTheDocument()
   })
 
@@ -349,7 +386,7 @@ describe('the batch tab', () => {
     expect(progress).toHaveAttribute('value', '3')
     expect(progress).toHaveAttribute('max', '3')
 
-    // Each row is counted once, under its worst outcome, so the seven buckets
+    // Each row is counted once, under its worst outcome, so the eight buckets
     // sum to the row count. b-review.png carries both a needs_review and a
     // mismatch, so it counts as a mismatch and not in both.
     const items = within(screen.getByRole('list', { name: '' })).getAllByRole('listitem')
@@ -357,6 +394,7 @@ describe('the batch tab', () => {
       '1 fully matching',
       '0 passing on what the label carries, with nothing declared',
       '0 needing review',
+      '0 with a warning present and not certified',
       '1 not matching',
       '0 with a value not compared',
       '0 read from the artwork only',
@@ -366,13 +404,22 @@ describe('the batch tab', () => {
 
   it('accounts for every row, in a category a reader can name', async () => {
     const rows: BatchLine[] = [
-      batchLine('1-match.png', 1, 7, ['match', 'match', 'match', 'match', 'match']),
-      batchLine('2-present.png', 2, 7, ['present', 'present', 'present', 'present', 'present']),
-      batchLine('3-review.png', 3, 7, ['needs_review', 'match', 'match', 'match', 'match']),
-      batchLine('4-mismatch.png', 4, 7, ['mismatch', 'match', 'match', 'match', 'match']),
-      batchLine('5-not-compared.png', 5, 7, ['not_compared', 'match', 'match', 'match', 'match']),
-      batchLine('6-artwork.png', 6, 7, ['match', 'artwork_derived', 'match', 'match', 'match']),
-      batchLine('7-error.png', 7, 7, null),
+      batchLine('1-match.png', 1, 8, ['match', 'match', 'match', 'match', 'match']),
+      batchLine('2-present.png', 2, 8, ['present', 'present', 'present', 'present', 'present']),
+      batchLine('3-review.png', 3, 8, ['needs_review', 'match', 'match', 'match', 'match']),
+      batchLine('4-mismatch.png', 4, 8, ['mismatch', 'match', 'match', 'match', 'match']),
+      batchLine('5-not-compared.png', 5, 8, ['not_compared', 'match', 'match', 'match', 'match']),
+      batchLine('6-artwork.png', 6, 8, ['match', 'artwork_derived', 'match', 'match', 'match']),
+      // A warning present and not certified outranks a review on the same row
+      // and is outranked by a mismatch (ADR 0022).
+      batchLine('7-not-certified.png', 7, 8, [
+        'needs_review',
+        'match',
+        'match',
+        'match',
+        'not_certified',
+      ]),
+      batchLine('8-error.png', 8, 8, null),
     ]
     vi.stubGlobal('fetch', api(rows))
     const user = userEvent.setup()
@@ -382,16 +429,16 @@ describe('the batch tab', () => {
       rows.map((row) => png(row.filename!)),
     )
     await user.click(screen.getByRole('button', { name: /^Check/ }))
-    await waitFor(() => expect(screen.getByText('7 of 7 labels checked')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('8 of 8 labels checked')).toBeInTheDocument())
 
     const items = within(screen.getByRole('list', { name: '' })).getAllByRole('listitem')
     const counts = items.map((item) => Number(item.textContent?.split(' ')[0]))
-    expect(counts).toEqual([1, 1, 1, 1, 1, 1, 1])
+    expect(counts).toEqual([1, 1, 1, 1, 1, 1, 1, 1])
     expect(counts.reduce((sum, count) => sum + count, 0)).toBe(rows.length)
     expect(
       within(screen.getByRole('region', { name: 'Results' })).getByRole('status'),
     ).toHaveTextContent(
-      'Finished. 7 labels checked: 1 fully matching, 1 passing on what the label carries, with nothing declared, 1 needing review, 1 not matching, 1 with a value not compared, 1 read from the artwork only, 1 could not be checked.',
+      'Finished. 8 labels checked: 1 fully matching, 1 passing on what the label carries, with nothing declared, 1 needing review, 1 with a warning present and not certified, 1 not matching, 1 with a value not compared, 1 read from the artwork only, 1 could not be checked.',
     )
   })
 

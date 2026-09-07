@@ -250,8 +250,12 @@ section 2. Marks OQ-4 as closed by assumption A-12.
 normalization.**
 
 Compare numerically only when units match after normalization (`mL`/`ml`/
-`milliliters`, `L`/`liters`, `fl oz`/`fl. oz.`). Different units: **needs human
-review**, no conversion performed. Standards of fill are not validated.
+`milliliters`, `L`/`liters`/`litres`, `cL`/`centiliters`, `fl oz`/`fl. oz.`/`oz`,
+`pint`/`pt`, `quart`/`qt`, `gallon`/`gal`; the list was widened on 2026-09-06
+to the spellings 27 CFR 5.70(a), 7.70(a) and 4.37 use, after nine registry
+labels showed six shapes of net contents and a pint among them). Different
+units: **needs human review**, no conversion performed. A pint against sixteen
+fluid ounces is such a pair. Standards of fill are not validated.
 
 The reasoning is A-12's: a conversion the tool performs silently is a place a
 false match can be manufactured, and `750 mL` against `25.4 fl oz` is a question
@@ -720,7 +724,12 @@ the last three defect sessions rather than a one-off.
 What is now assumed rather than read is which filings embed their artwork at
 all, and how large those images typically are. One document establishes that the
 practice exists and that the form's item 15 speaks of "THE LABELS AFFIXED
-BELOW". It does not establish the distribution. Tracked as
+BELOW". A second, measured 2026-09-03, establishes that the artwork is not
+always one flat sheet: a bourbon filing embeds its labels as separate panels,
+front, back, wrap-around and side band, at ratios up to nine to one, and the
+size floor set from the first document rejected every one of them. The floor
+is now an area alone, set against both (ADR 0010 as amended). Two documents
+still do not establish the distribution. Tracked as
 [OQ-24](OPEN_QUESTIONS.md#oq-24).
 
 **Confirmed or falsified by:** running the parser against a real filed

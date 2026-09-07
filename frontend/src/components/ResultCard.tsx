@@ -107,7 +107,7 @@ export function ResultCard({
   const isPresence = field.outcome === 'present'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
-  const source = sourceLabel(field.source_photo, photoCount)
+  const source = sourceLabel(field, photoCount)
 
   return (
     <article className={`card card--${tone}`} aria-labelledby={`${idPrefix}-${field.name}`}>
@@ -176,11 +176,15 @@ export function ResultCard({
  * for OOS-4 to drift out of step.
  */
 function WarningDetail({ warning }: { warning: WarningResult }) {
-  const capitalization = warning.statement_found
-    ? warning.prefix_is_capitalized
-      ? 'The prefix is in capital letters, as 27 CFR 16.22(a)(2) requires.'
-      : `The prefix is printed as "${warning.prefix_as_printed}", not in capital letters. 27 CFR 16.22(a)(2) requires capitals.`
-    : 'No warning statement was found, so there was no prefix to check.'
+  const capitalization = !warning.statement_found
+    ? 'No warning statement was found, so there was no prefix to check.'
+    : warning.prefix_legible === false
+      ? warning.prefix_as_printed
+        ? `The prefix was not read as "GOVERNMENT WARNING:"; it reads "${warning.prefix_as_printed}". Its capitalization was not checked, because it was not read (27 CFR 16.22(a)(2)).`
+        : 'The prefix was not read at all, so its capitalization was not checked (27 CFR 16.22(a)(2)).'
+      : warning.prefix_is_capitalized
+        ? 'The prefix is in capital letters, as 27 CFR 16.22(a)(2) requires.'
+        : `The prefix is printed as "${warning.prefix_as_printed}", not in capital letters. 27 CFR 16.22(a)(2) requires capitals.`
 
   return (
     <div className="card__detail">

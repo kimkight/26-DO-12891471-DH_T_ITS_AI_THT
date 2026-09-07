@@ -35,6 +35,10 @@ function Icon({ glyph }: { glyph: Glyph }) {
     carried: (
       <path d="M8 2.2a5.8 5.8 0 1 0 0 11.6 5.8 5.8 0 1 0 0-11.6 M8 5.9a2.1 2.1 0 1 0 0 4.2 2.1 2.1 0 1 0 0-4.2" />
     ),
+    // A magnifier: look at the label yourself (FR-5, ADR 0022). The warning
+    // is there and the read was too damaged to certify it, so the next action
+    // is a person's eyes on the label, which no other shape says.
+    look: <path d="M6.5 2.5a4 4 0 1 0 0 8 4 4 0 1 0 0-8 M9.4 9.4 13.5 13.5" />,
   }
   return (
     <svg
