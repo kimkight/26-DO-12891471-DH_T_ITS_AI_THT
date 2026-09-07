@@ -31,7 +31,7 @@ updates every artifact the answer affects.
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 | [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
-| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
+| [OQ-22](#oq-22) | Closed 2026-09-06, by measurement on two real filings (ADR 0021) | Nothing; the two documents are committed as evidence in `samples/real/`, and what stays unmeasured, editions and routes, is carried by OQ-24 |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Narrowed 2026-09-03 and again 2026-09-04: the size question is answered for three real documents and no code decision now rests on it; what stays open is which editions and routes embed the artwork at all | Nothing in the prototype; it bounds the coverage claim for the embedded artwork path (ADR 0010) and nothing else |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
@@ -1132,7 +1132,56 @@ artwork, and it is the reason no such claim is made.
 **Which COLA document shapes and which form editions has the parser actually
 been verified against?**
 
-**Status: Open, 2026-08-27.**
+**Status: Closed 2026-09-06, by measurement.** The parser has been run against
+two real Public COLA Registry printouts, both now committed unaltered as
+evidence in `samples/real/` under
+[ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md), which also
+records why the no-personal-data rule below no longer forbids that and what it
+still forbids. Nothing automated reads either file.
+
+**What was measured, in one paragraph each.** The mezcal, TTB ID
+22118001000389, returns five of five: its declared values are read off the
+printout and its embedded artwork is read as the label side, all five fields
+matched, at the NFR-1 line on the application-document path. The figures are
+in the README's latency table and in [09_DEPLOYMENT.md](09_DEPLOYMENT.md)
+section 9, and the misread that preceded them is traceability source row 31.
+The bourbon, TTB ID 15309001000084, found three separate defects, and the
+record of them is [ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md)
+and `samples/real/README.md` rather than a restatement here: an alcohol
+statement in a form the matcher did not handle, a government warning that
+reads well but is overprinted so that a word for word comparison fails on a
+label a human would pass, and a net contents statement absent from every
+panel, which is the tool being correct about the label as submitted. Before
+those three it had also found the two defects in the artwork floor, one of
+five on v1.4.0 and two of five on v1.5.0, which are source rows 42 and 43 and
+ADR 0010 as amended twice.
+
+**What the two documents answered about editions.** The question anticipated
+that an earlier edition might number its items differently, and both do. The
+bourbon's printout states TTB F 5100.31 (07/2012) and the mezcal's states
+(06-2016); neither is the 04/2023 edition the item map in A-17 was read off,
+and the telephone number, for one, is item 12 on the one and item 16 on the
+other. The values parser reads the Registry captions rather than item
+numbers, and it read both. So the caption path is measured on two editions.
+The item map itself, which serves the fillable-form path and item 5's radio
+group, is still measured on the 04/2023 form alone, because neither real
+document is a fillable form.
+
+**What stays unmeasured, and where it lives.** A filled-in fillable form of
+any edition, and which editions and submission routes embed the artwork at
+all. Both bound the coverage claim and neither blocks anything; OQ-24 already
+carries the editions and routes question, and it is not reopened here. A
+per-field extraction rate by document shape and edition, which the original
+entry named as the full answer, would need more than two documents and is
+not claimed.
+
+The original entry follows, unchanged, because the reasoning it records for
+keeping real records out of fixtures still holds; what changed is that
+evidence is no longer treated as a fixture.
+
+---
+
+**Original status, 2026-08-27: Open.**
 
 FR-11 accepts an uploaded label application and reads the values off it. Two
 things about that are verified and two are not, and the difference matters

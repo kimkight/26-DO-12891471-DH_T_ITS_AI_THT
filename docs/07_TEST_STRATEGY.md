@@ -597,44 +597,145 @@ says is manual by nature, is the screen reader pass and the greyscale check.
 
 ## 8. Test data policy
 
+**Amended 2026-09-06.** Until this date the rule in this section said that no
+real filed application was committed anywhere in the repository and that none
+had been parsed. Two real filings are now committed at `samples/real/`, as
+evidence rather than as fixtures, and the rule is restated below in the form
+the change actually took. The paragraphs it replaced are kept at the end of
+this section, so that the position that was held, and why it changed, stay
+readable. The decision, and the alternatives that were declined, are in
+[ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md).
+
+### 8.1 A fixture and a piece of evidence are different things
+
+The old rule conflated two things, and the policy now names them separately.
+
+- **A fixture is something a test reads and asserts against.** Every fixture
+  in this repository is synthetic and invented, and that does not change. The
+  reason does not change either: an assertion against a real document copies
+  that document's content into the test suite, in the expected values if not
+  in the file itself, and from then on the suite carries it. A contributor who
+  finds themselves wanting to assert on what one of the real filings contains
+  wants a synthetic fixture that reproduces the property in question, and
+  should write that instead.
+- **Evidence is something a person opens.** The two filings in `samples/real/`
+  are the documents every measurement in `docs/09_DEPLOYMENT.md` section 9, in
+  the CHANGELOG and in the artwork work of v1.4.0 and v1.5.0 was taken on. They
+  are committed so that a reviewer can run the tool against exactly what it was
+  measured on, rather than against a stand-in. **Nothing automated reads
+  them**: no test, no fixture loader, no CI step and no script opens
+  `samples/real/`, and no assertion anywhere depends on their contents.
+  `samples/real/README.md` records where each came from and what each one
+  exercises.
+
+### 8.2 Fixtures stay synthetic
+
 - No real application data and no personal data in any fixture (NFR-6). This
   covers COLA documents as well as labels: `samples/formmaker.py` generates a
   filled TTB F 5100.31 and a Registry printout at test time, with invented
   values and permit and serial numbers deliberately not in a format TTB
-  issues. No real filed application is committed, and none has been parsed;
-  that limit is OQ-22.
+  issues.
 - Sample label artwork is generated or sourced by the contributor and is
   git-ignored; see `samples/README.md` for why. That includes the multi-panel
   sheets `samples/labelmaker.py` renders for the segmentation tier: the panel
   text is nonsense vocabulary chosen so that a crossed line is detectable, and
   it is generated at test time like everything else.
-- **A real filing is evidence, not a fixture.** The defect the panel
-  segmentation fixes was found on the author's own mezcal COLA, which carries a
-  real company, a real tax identifier and a real address. Every measurement in
-  `app/ocr.py`, in the CHANGELOG and in this document was taken on it, and none
-  of it is committed: not to `tests/`, not to `docs/`, not as an encoded blob,
-  and not in a pull request description. What is committed is the synthetic
-  fixture that reproduces the same defect.
-- **No extracted image is logged or kept, and a signature below the area
-  floor is never decoded.** A filed application carries the applicant's
-  handwritten signature, which is the most personal artefact on the form.
-  Nothing keeps an embedded image past the request or puts one in a log line
-  at any point; a picture that is read reaches the OCR engine through the
-  temporary file `pytesseract` writes and deletes before it returns (NFR-6 as
-  reworded in v1.3.0), and a rejected one is never decoded. On both real
-  filings the author has measured the signature sits under the floor. One
-  scanned large enough to clear it is read, since v1.5.0, because the shape
-  rule that used to catch it also caught every label panel on a real filing
-  (ADR 0010 as amended); what such a read yields is nothing, or a few letters
-  at a confidence no field takes, and it is reported as read with that
-  confidence. The rejection record the response carries holds a page number,
-  two dimensions and a named reason and nothing else, and the accepted record
-  adds a status and a confidence figure and still no picture; both are
-  asserted on the record's fields in `backend/tests/test_embedded_artwork.py`
-  rather than on one instance of it. The signature-shaped fixtures in that
-  module are strokes drawn from arithmetic; no signature, real or imitated,
-  is committed, and neither of the author's filed documents is: the
-  panel-shaped fixture in `backend/tests/test_artwork_panels.py` carries only
-  their measured pixel dimensions.
+- Where a real filing found a defect, what is committed to the suite is a
+  synthetic fixture that reproduces the defect, never the filing. The
+  panel-shaped fixture in `backend/tests/test_artwork_panels.py` is built in
+  the bourbon's shape and carries only its measured pixel dimensions; the
+  signature-shaped fixtures in `backend/tests/test_embedded_artwork.py` are
+  strokes drawn from arithmetic. No signature, real or imitated, is a fixture.
 - Ground truth lives in `samples/expected.csv` and is version controlled once it
   exists, because accuracy numbers are meaningless without a fixed reference.
+
+### 8.3 What the repository carries as a result, and why that was judged acceptable
+
+Both files in `samples/real/` are filed applications, saved from the printable
+version of a record in TTB's Public COLA Registry and committed unaltered.
+Stated plainly, the repository now carries: two basic permit numbers; each
+applicant's business name and address as shown on its permit; two business
+telephone numbers; the printed name of an applicant's authorised agent; two
+signature images; and two companies' label trade dress. It carries no email
+address, because neither record states one.
+
+That was judged acceptable for three reasons, none of which is an absolution.
+The documents are public records: TTB publishes them on a public website, they
+are reproduced here exactly as published, and anyone can re-pull either one by
+its TTB ID. The repository is private to its reviewers, so committing the files
+puts them in front of nobody who could not already pull them. And the purpose
+is narrow and stated: they are here so that the measurements this repository
+reports can be repeated on the documents that produced them, and for nothing
+else. "Public record" is a reason, not a licence. These are still the records
+of two businesses and the signature of a person, and the label artwork still
+belongs to whoever owns it. So the values the files carry are repeated nowhere
+else in the repository: not in a test, not in a commit message, not in an
+issue, not in a pull request description, and not in these documents. The
+files carry them; nothing else does. And the decision is to be revisited
+before any change to the repository's visibility, not after, because removing
+a file from history is a rewrite and not a deletion; ADR 0021 records that as
+an accepted risk.
+
+### 8.4 NFR-6 is unchanged
+
+The promises in NFR-6 are about the running system, and this decision does not
+touch them.
+
+- **No extracted image is logged or kept, no OCR result is cached, and a
+  signature below the area floor is never decoded.** A filed application
+  carries the applicant's handwritten signature, which is the most personal
+  artefact on the form. Nothing keeps an embedded image past the request or
+  puts one in a log line at any point; a picture that is read reaches the OCR
+  engine through the temporary file `pytesseract` writes and deletes before it
+  returns (NFR-6 as reworded in v1.3.0), and a rejected one is never decoded.
+  No read is cached: the artwork is read once, by the check, and the prefill
+  pass takes the document's text layer alone (ADR 0017). On both real filings
+  the author has measured the signature sits under the floor. One scanned
+  large enough to clear it is read, since v1.5.0, because the shape rule that
+  used to catch it also caught every label panel on a real filing (ADR 0010 as
+  amended); what such a read yields is nothing, or a few letters at a
+  confidence no field takes, and it is reported as read with that confidence.
+  The rejection record the response carries holds a page number, two
+  dimensions and a named reason and nothing else, and the accepted record adds
+  a status and a confidence figure and still no picture; both are asserted on
+  the record's fields in `backend/tests/test_embedded_artwork.py` rather than
+  on one instance of it.
+- The two signature images the repository now carries are inside the evidence
+  files in `samples/real/`, which no test opens. That is a fact about the
+  repository, not about the system, and it is why 8.3 records it separately.
+
+### 8.5 What this replaced
+
+Until 2026-09-06 this section held two paragraphs that are now false of the
+tree, and they are reproduced here rather than deleted:
+
+> No real application data and no personal data in any fixture (NFR-6). This
+> covers COLA documents as well as labels: `samples/formmaker.py` generates a
+> filled TTB F 5100.31 and a Registry printout at test time, with invented
+> values and permit and serial numbers deliberately not in a format TTB
+> issues. No real filed application is committed, and none has been parsed;
+> that limit is OQ-22.
+
+> **A real filing is evidence, not a fixture.** The defect the panel
+> segmentation fixes was found on the author's own mezcal COLA, which carries a
+> real company, a real tax identifier and a real address. Every measurement in
+> `app/ocr.py`, in the CHANGELOG and in this document was taken on it, and none
+> of it is committed: not to `tests/`, not to `docs/`, not as an encoded blob,
+> and not in a pull request description. What is committed is the synthetic
+> fixture that reproduces the same defect.
+
+The first paragraph was right about fixtures and wrong about the repository:
+its last sentence recorded OQ-22 as open on the ground that nothing real had
+been parsed, while the README's latency table had reported a real filing
+parsed and read since 2026-08-30. The second paragraph had the distinction
+this section now rests on, "evidence, not a fixture", and then drew the wrong
+line from it, keeping the evidence out of the repository as though it were a
+fixture. What changed the position was the bourbon. By v1.5.0 that document
+had found three separate defects, every number about them in the deployment
+notes and the CHANGELOG was taken on it, and a reviewer reading those numbers
+could not repeat one of them without re-pulling the record from the registry
+and trusting that what came back was what had been measured. Evidence a
+reviewer cannot open is a claim, and the point of this repository's
+measurements is that they are not claims. The distinction the old paragraph
+drew was the right one; 8.1 is that distinction with the line in the right
+place.
