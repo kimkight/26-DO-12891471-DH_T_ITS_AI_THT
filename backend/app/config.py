@@ -149,6 +149,21 @@ class Settings(BaseSettings):
     # begins to change rather than its rendering.
     warning_near_miss_edits: int = 2
 
+    # Below this mean word confidence, a line of the government warning that
+    # differs from 27 CFR 16.21 is taken to have been read badly rather than
+    # printed wrongly (FR-5, ADR 0022). Where every differing line is below it
+    # the row reports the statement as present and not certified, a failing
+    # outcome that asks a person to look; where any differing line is at or
+    # above it the difference is the label's and the row is a mismatch.
+    #
+    # Eighty, from one measurement: on the real filing whose warning panel is
+    # overprinted with registration marks, the lines that read correctly read
+    # at 91 to 96 and the two damaged lines at 64 and 69, and on the twelve
+    # synthetic labels a compliant statement reads above 90 throughout. An
+    # altered word set in clean type reads in the nineties, so it stays a
+    # mismatch. Zero means no reading happened and is never below the floor.
+    warning_legible_confidence: float = 80.0
+
     # Allowed difference between the label ABV and the application ABV, in
     # percentage points. 0.0 is a compliance position rather than a tuning
     # starting point: the regulatory tolerances in 27 CFR 5.65, 4.36 and 7.65

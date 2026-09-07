@@ -61,6 +61,15 @@ class Outcome(StrEnum):
     about; the artwork-derived state stays for what it was built for, a value
     read off the artwork and then compared against that same artwork, which
     after ADR 0018 is a case the presence fields never reach.
+
+    ``NOT_CERTIFIED`` is the seventh, and it belongs to the government warning
+    alone (FR-5, [ADR 0022](../../docs/adr/0022-warning-present-not-certified.md)).
+    The statement is on the label, it does not match 27 CFR 16.21, and every
+    line of it that differs was read below the legibility floor, so the tool
+    cannot attribute the difference to the label rather than to the reading.
+    It is a failing outcome, like a near miss and unlike it: a near miss is a
+    difference too small to attribute, this is a read too damaged to. Neither
+    passes anything, and a difference read confidently is still a mismatch.
     """
 
     MATCH = "match"
@@ -69,6 +78,7 @@ class Outcome(StrEnum):
     NOT_COMPARED = "not_compared"
     PRESENT = "present"
     ARTWORK_DERIVED = "artwork_derived"
+    NOT_CERTIFIED = "not_certified"
 
 
 @dataclass(frozen=True)

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import difflib
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -65,6 +66,35 @@ BOLD_TYPE_NOTE = (
 
 _PREFIX_PATTERN = re.compile(r"government\s+warning\s*:?", re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
+
+# The statement located without its prefix intact (ADR 0022, 2026-09-06).
+#
+# **Measured on a real filing.** The bourbon's warning panel reads at 86.8 and
+# the body comes back nearly complete, but printer registration marks run
+# through the first word of the prefix, so GOVERNMENT reads as a garble and
+# WARNING survives. Located by the prefix alone, that statement is reported as
+# absent, which tells an agent the label has no warning when it plainly has
+# one. So the prefix is the first thing looked for and not the only thing: a
+# WARNING with the body opening within a few characters of it is the prefix
+# with its first word damaged, and the body's own opening, which no other text
+# on a label prints, locates the statement when even WARNING is gone. Either
+# way the prefix is recorded as illegible rather than as anything else: its
+# capitalization is not checked, because it was not read, and a checked
+# capitalization is what FR-6 requires before the row can pass.
+_DAMAGED_PREFIX_PATTERN = re.compile(r"\bwarning\s*:?", re.IGNORECASE)
+# "According to the" rather than the whole clause, because on the measured read
+# the word after it is a garble too; and the statement has to go on as the
+# statement does within a few lines (``_BODY_CONTINUES``), so that those three
+# words in a producer's story on a back label are not taken for it.
+_BODY_OPENING = re.compile(
+    r"(?:\(\s*1\s*\)\s*)?according\s+to\s+the|surgeon\s+general", re.IGNORECASE
+)
+_BODY_CONTINUES = re.compile(
+    r"surgeon\s+general|should\s+not\s+drink|birth\s+defects|alcoholic\s+beverages",
+    re.IGNORECASE,
+)
+_PREFIX_TO_BODY_CHARS = 40
+_OPENING_TO_CONTINUATION_CHARS = 160
 
 # A word split across a line break by a printer's hyphen. The hyphen has to sit
 # between two word characters, so a dash used as punctuation, which carries a
@@ -156,6 +186,19 @@ class DiffSegment:
 
 
 @dataclass(frozen=True)
+class LocatedWarning:
+    """Where the statement starts in a run of label text, and how it was found."""
+
+    prefix: str | None
+    remainder: str
+    # False when the prefix was not read as GOVERNMENT WARNING: either its first
+    # word is a garble with WARNING intact, or the statement was found by its
+    # body's opening alone. ``prefix`` then holds whatever was printed before
+    # the body on that line, or None when nothing readable was.
+    prefix_legible: bool
+
+
+@dataclass(frozen=True)
 class WarningCheck:
     """The outcome of both warning checks, reported separately (FR-6).
 
@@ -163,6 +206,14 @@ class WarningCheck:
     case normalization, or not. ``body_edit_distance`` and ``near_miss``
     are about what a difference is *reported* as, and neither can turn a
     mismatch into a match.
+
+    ``uncertifiable`` is the third thing a difference can be reported as
+    (ADR 0022), and it cannot turn a mismatch into a match either: the
+    statement is on the label, it does not match, and every line of it that
+    differs from the regulation was read below ``TTB_WARNING_LEGIBLE_CONFIDENCE``,
+    so the difference belongs to the reading as far as the tool can tell and
+    is not certified either way. A line that differs and was read confidently
+    is the label's, and the outcome is the mismatch it always was.
     """
 
     found: bool
@@ -173,6 +224,20 @@ class WarningCheck:
     reason: str
     bold_type_checked: bool = False
     bold_type_note: str = BOLD_TYPE_NOTE
+    # Whether the prefix was read as GOVERNMENT WARNING at all. False when the
+    # statement was located by WARNING alone or by its body's opening; the
+    # capitalization check then has nothing it read to check.
+    prefix_legible: bool = True
+    # How many lines of the located statement are not a run of the regulation's
+    # text, and how many of those were read below the legibility floor. Both
+    # zero where no per-line confidence was supplied.
+    differing_lines: int = 0
+    illegible_lines: int = 0
+    # Whether the difference is reported as uncertifiable rather than as a
+    # mismatch: see the class docstring. Never true when the body matches and
+    # the prefix is legible, and never true for a near miss, which has its own
+    # outcome.
+    uncertifiable: bool = False
     # How many single-character edits separate the statement as printed from the
     # statement the regulation fixes. 0 when they match; None when no statement
     # was found, because there is nothing to measure a distance from.
@@ -227,26 +292,92 @@ def body_diff(found: str, expected: str) -> list[DiffSegment]:
     return segments
 
 
-def locate_warning(text: str) -> tuple[str, str] | None:
+def locate_warning(text: str) -> LocatedWarning | None:
     """Return the prefix as printed and the text following it, or None.
 
     The search is case-insensitive because a title-case prefix has to be found
     in order to be reported as a capitalization failure (FR-6). Finding it is
     not the same as accepting it.
+
+    The prefix is looked for first. Failing that, the body's opening is looked
+    for, and a WARNING within ``_PREFIX_TO_BODY_CHARS`` before it is taken as
+    the prefix with its first word damaged; failing that too, the statement
+    starts at the opening and the prefix is whatever else that line printed
+    before it, or nothing. In both fallbacks ``prefix_legible`` is False.
     """
     match = _PREFIX_PATTERN.search(text)
-    if match is None:
+    if match is not None:
+        return LocatedWarning(match.group(0), text[match.end() :], prefix_legible=True)
+
+    opening = _BODY_OPENING.search(text)
+    if opening is None:
         return None
-    return match.group(0), text[match.end() :]
+    continues = _BODY_CONTINUES.search(text, opening.end())
+    if continues is None or continues.start() - opening.end() > _OPENING_TO_CONTINUATION_CHARS:
+        return None
+    line_start = text.rfind("\n", 0, opening.start()) + 1
+    damaged = None
+    for candidate in _DAMAGED_PREFIX_PATTERN.finditer(text, line_start, opening.start()):
+        damaged = candidate
+    if damaged is not None and opening.start() - damaged.end() <= _PREFIX_TO_BODY_CHARS:
+        return LocatedWarning(
+            text[line_start : damaged.end()], text[damaged.end() :], prefix_legible=False
+        )
+    before = text[line_start : opening.start()].strip() or None
+    return LocatedWarning(before, text[opening.start() :], prefix_legible=False)
 
 
-def check_warning(text: str) -> WarningCheck:
+def _legibility(lines: Sequence[tuple[str, float]]) -> tuple[int, int]:
+    """How many lines of the located statement differ, and how many of those read poorly.
+
+    A line is a run of the regulation's text, or it is not. The test is a
+    substring test on the folded, whitespace-normalized line against the
+    folded statement, with a line-break hyphen taken off the end first (A-15),
+    so a compliant statement set in a narrow column has no differing lines at
+    all, and neither does a line OCR cut mid-word. A line that is not a run of
+    the statement carries a garbled word, an inserted token, or an altered
+    word, and which of those it is the tool cannot tell from the text. What it
+    can tell is how confidently the engine read the line: below the floor the
+    difference is the reading's as far as the evidence goes, at or above it the
+    difference is the label's.
+
+    A line with no letter in it is not counted either way. The statement's
+    words are all letters, so a run of digits or marks cannot be one of them
+    and cannot hide an altered one; ``app.parse`` leaves such lines out of the
+    block for the same reason.
+
+    A confidence of exactly zero means no reading happened, which is the
+    plain-text path, and a line with no reading behind it is never called
+    illegible: there is no evidence it was misread, and the stricter outcome
+    stands.
+    """
+    folded_statement = fold_case(normalize_whitespace(WARNING_STATEMENT))
+    differing = illegible = 0
+    for text, confidence in lines:
+        probe = fold_case(normalize_whitespace(text)).rstrip("-\u2010\u2011").strip()
+        if not any(character.isalpha() for character in probe):
+            continue
+        if probe in folded_statement:
+            continue
+        differing += 1
+        if 0 < confidence < settings.warning_legible_confidence:
+            illegible += 1
+    return differing, illegible
+
+
+def check_warning(text: str, lines: Sequence[tuple[str, float]] | None = None) -> WarningCheck:
     """Check extracted label text against 27 CFR 16.21.
 
     Returns a mismatch rather than a review outcome for every failure, because
     FR-5 excludes fuzzy tolerance on this field: "Given a warning with altered,
     added, or omitted words, then the outcome is mismatch, not needs human
     review."
+
+    ``lines`` is the located statement line by line with each line's OCR
+    confidence, where the caller has one. It decides nothing about whether the
+    statement matches; it decides only whether a statement that does not match
+    is reported as a mismatch or as uncertifiable (ADR 0022), and a caller with
+    no per-line reading gets the mismatch.
     """
     located = locate_warning(text)
     if located is None:
@@ -262,17 +393,23 @@ def check_warning(text: str) -> WarningCheck:
             ),
         )
 
-    prefix_as_printed, remainder = located
+    prefix_as_printed, remainder = located.prefix, located.remainder
     # The join is applied here, after the prefix has been taken off, so that
     # what is reported as printed is what was printed and the capitalization
     # check reads the same characters it always did (FR-6, A-15).
     remainder = join_line_break_hyphens(remainder)
-    prefix_normalized = normalize_whitespace(prefix_as_printed)
+    prefix_normalized = (
+        normalize_whitespace(prefix_as_printed) if prefix_as_printed is not None else None
+    )
     # The colon is part of the required prefix but its absence is a wording
     # question, not a capitalization one, so the capitalization check reads the
-    # letters only.
-    prefix_letters = prefix_normalized.rstrip(":").strip()
-    prefix_is_upper = prefix_letters == prefix_letters.upper()
+    # letters only. A prefix that was not read as GOVERNMENT WARNING is not
+    # checked: its capitalization is unknown, not failed (FR-6).
+    if located.prefix_legible and prefix_normalized is not None:
+        prefix_letters = prefix_normalized.rstrip(":").strip()
+        prefix_is_upper: bool | None = prefix_letters == prefix_letters.upper()
+    else:
+        prefix_is_upper = None
 
     body_found = normalize_whitespace(remainder)
     expected_body = normalize_whitespace(WARNING_BODY)
@@ -289,7 +426,26 @@ def check_warning(text: str) -> WarningCheck:
     near_miss = not body_matches and distance <= settings.warning_near_miss_edits
     diff = [] if body_matches else body_diff(body_found, expected_body)
 
-    reason = _reason_for(prefix_normalized, prefix_is_upper, body_matches, distance, near_miss)
+    differing, illegible = _legibility(lines) if lines else (0, 0)
+    # Uncertifiable only where the row cannot pass anyway and every line that
+    # differs was read poorly; a near miss keeps its own outcome.
+    uncertifiable = (
+        (not body_matches or not located.prefix_legible)
+        and not near_miss
+        and differing > 0
+        and illegible == differing
+    )
+
+    reason = _reason_for(
+        prefix_normalized,
+        prefix_is_upper,
+        body_matches,
+        distance,
+        near_miss,
+        prefix_legible=located.prefix_legible,
+        uncertifiable=uncertifiable,
+        differing=differing,
+    )
     return WarningCheck(
         found=True,
         prefix_found=prefix_normalized,
@@ -300,6 +456,10 @@ def check_warning(text: str) -> WarningCheck:
         body_edit_distance=distance,
         near_miss=near_miss,
         body_diff=diff,
+        prefix_legible=located.prefix_legible,
+        differing_lines=differing,
+        illegible_lines=illegible,
+        uncertifiable=uncertifiable,
     )
 
 
@@ -322,14 +482,59 @@ def _near_miss_reason(distance: int) -> str:
     )
 
 
+def _uncertifiable_reason(differing: int, prefix_legible: bool) -> str:
+    """What a difference read too poorly to attribute is reported as (ADR 0022).
+
+    It says the statement is there, it says how much of it the engine could
+    not read well, and it says what is being asked of the person. It does not
+    say the statement is compliant and it does not say it is defective; the
+    read cannot support either, and the outcome is not a pass.
+    """
+    lines = "line" if differing == 1 else "lines"
+    prefix_note = (
+        " The prefix was not read as 'GOVERNMENT WARNING:', so its capitalization "
+        "was not checked either."
+        if not prefix_legible
+        else ""
+    )
+    return (
+        "The government warning is on the label, and it reads correctly wherever "
+        f"it was read well. {differing} {lines} of it differ from 27 CFR 16.21, and "
+        f"every one of them was read below {settings.warning_legible_confidence:g} "
+        "confidence, so the tool cannot tell a damaged read from a defect on the "
+        "label. This is not a match and it is not certified word for word: check "
+        f"the label itself.{prefix_note}"
+    )
+
+
 def _reason_for(
-    prefix: str,
-    prefix_is_upper: bool,
+    prefix: str | None,
+    prefix_is_upper: bool | None,
     body_matches: bool,
     distance: int = 0,
     near_miss: bool = False,
+    *,
+    prefix_legible: bool = True,
+    uncertifiable: bool = False,
+    differing: int = 0,
 ) -> str:
     """Name the rule that failed, so an agent can see which one it was (FR-6)."""
+    if uncertifiable:
+        return _uncertifiable_reason(differing, prefix_legible)
+    if not prefix_legible:
+        printed = f"it reads {prefix!r}" if prefix else "nothing readable precedes the statement"
+        prefix_detail = (
+            f"The prefix was not read as {WARNING_PREFIX!r}: {printed}. Its "
+            "capitalization could not be checked (27 CFR 16.22(a)(2))."
+        )
+        body_detail = (
+            "The statement text matches 27 CFR 16.21 word for word."
+            if body_matches
+            else _near_miss_reason(distance)
+            if near_miss
+            else "The statement text does not match 27 CFR 16.21 word for word."
+        )
+        return f"{prefix_detail} {body_detail}"
     body_detail = (
         _near_miss_reason(distance)
         if near_miss

@@ -221,6 +221,40 @@ wrong shape either way.
   docs/07 updated.
 
 
+### The government warning, present and not certified (FR-5, ADR 0022)
+
+The bourbon's warning panel reads at 86.8 and the body comes back nearly
+complete, but printer registration marks run through the first word of the
+prefix and through one clause, so the statement was reported as absent. On a
+label a person would pass, "no warning" was the worst answer available and
+"does not match word for word" the next, because the latter is true of a
+damaged read and an altered clause alike. What separates them is the reading,
+not the text: the lines that differ read at 64 and 69 and the lines that
+match at 91 to 96.
+
+#### Changed
+
+- **The statement is located by what survived of its prefix.** `WARNING` with
+  the body's opening after it, or the body's opening alone, followed by the
+  statement going on as it does. The prefix is then reported as illegible:
+  unchecked rather than failed (FR-6), and the row cannot pass without it.
+- **A line with no letter in it is not part of the statement.** No word of
+  27 CFR 16.21 is letterless, so leaving such a line out cannot hide an
+  altered, added or omitted word.
+- **A seventh outcome, `not_certified`, for the warning alone.** The
+  statement is found, it does not match beyond the near-miss threshold, and
+  every line that differs was read below `TTB_WARNING_LEGIBLE_CONFIDENCE`
+  (eighty). A differing line read confidently is the label's and stays a
+  mismatch; an omitted clause is a mismatch at any confidence; a near miss
+  keeps its own outcome; the plain-text path is unchanged. The chip reads
+  "Present, not certified", in the review tone with its own silhouette; it
+  counts as not passed everywhere, outranks a review on a batch row and is
+  outranked by a mismatch. The response carries `prefix_legible`, the
+  differing and illegible line counts and `not_certified`.
+- The comparison FR-5 fixes is untouched. A token filter was rejected because
+  any token that cannot belong to the statement is what an altered wording
+  adds (ADR 0022, alternative A).
+
 ### `source_photo` addresses the `photos` it names, and the row names its panel (ADR 0010 as amended 2026-09-06)
 
 Found while measuring the bourbon on the deployed build: the brand's

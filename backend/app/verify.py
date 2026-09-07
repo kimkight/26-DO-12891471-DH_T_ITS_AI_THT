@@ -1116,6 +1116,10 @@ def build_result(
                 WarningDiffSegment(kind=segment.kind, text=segment.text)
                 for segment in parsed.warning.body_diff
             ],
+            prefix_legible=parsed.warning.prefix_legible,
+            differing_lines=parsed.warning.differing_lines,
+            illegible_lines=parsed.warning.illegible_lines,
+            not_certified=parsed.warning.uncertifiable,
         ),
         ocr_confidence=ocr_confidence,
         # **The recording wins where there is one, and the reason is the defect
@@ -1214,6 +1218,11 @@ def _warning_field(
         outcome = Outcome.MATCH
     elif warning.near_miss and warning.prefix_is_upper_case:
         outcome = Outcome.NEEDS_REVIEW
+    elif warning.uncertifiable:
+        # The statement is there and every line that differs was read badly
+        # (ADR 0022). Failing, like the two above it; what it asks of the
+        # agent is to look at the label rather than at a diff.
+        outcome = Outcome.NOT_CERTIFIED
     else:
         outcome = Outcome.MISMATCH
     return FieldResult(

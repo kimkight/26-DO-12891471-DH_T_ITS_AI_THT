@@ -263,6 +263,28 @@ exactly as it was.
   outcome is mismatch whatever the size of any difference in the body.
 - Given any difference at all, then the character-level difference is reported,
   because it is what an agent needs in order to judge either outcome.
+- **Given a statement whose prefix OCR damaged, so that `GOVERNMENT WARNING`
+  is not on the label text as read but `WARNING` followed by the body's
+  opening is, or the body's opening alone is, then the statement is located
+  and reported as found, with its prefix marked illegible rather than judged
+  (added 2026-09-06, [ADR 0022](adr/0022-warning-present-not-certified.md)).**
+  The capitalization check reads what was read; a prefix that was not read is
+  unchecked, not failed, and the row cannot pass without it.
+- Given a line with no letter in it inside or after the statement, a run of
+  digits from the printer's registration marks say, then it is not part of the
+  statement. No word of 27 CFR 16.21 is letterless, so leaving such a line out
+  cannot hide an altered, added or omitted word.
+- **Given a statement that is found and does not match, beyond the near-miss
+  threshold, and every line of it that is not a run of the regulation's text
+  was read below `TTB_WARNING_LEGIBLE_CONFIDENCE`, then the outcome is
+  `not_certified`: the statement is present and could not be read cleanly
+  enough to certify word for word.** It is a failing outcome, presented as
+  something a person acts on and never as a pass. Given any differing line
+  read at or above the floor, an altered word set in clean type, then the
+  outcome is mismatch exactly as before: a difference the engine read
+  confidently is the label's. Given no differing line at all, an omitted
+  clause, then the outcome is mismatch whatever the confidence, because
+  nothing about the read explains the omission.
 
 **The comparison is exact, and a near miss is routed to a person rather than
 auto-passed. This is not a fuzzy match, and the distinction has to be read as
@@ -303,6 +325,23 @@ and nothing else moves with it. An altered, added or omitted word fails in
 either case; `backend/tests/test_warning.py` asserts that in both. The
 difference an agent is shown is still the label's own text, because the fold is
 length-preserving and the diff segments are sliced from what was printed.
+
+**Why a third failing outcome, added 2026-09-06.** Measured on a real filing:
+the warning panel reads at 86.8 and the body comes back nearly complete, but
+printer registration marks run through the first word of the prefix and through
+one clause, so the prefix reads as a garble and the statement was reported as
+absent. "The label carries no warning" is the worst of the answers available
+about a label a person would pass, and "does not match word for word" is the
+next worst, because it is true of that read and of an altered clause alike. The
+tool cannot tell those two apart from the text. It can tell them apart from the
+reading: the lines that differ on that filing read at 64 and 69 where the lines
+that match read at 91 to 96, and an altered word set in clean type reads in the
+nineties. So a difference the engine read confidently is the label's and stays
+a mismatch; a difference the engine read badly, everywhere it differs, is the
+statement being present and not certified, and the agent is asked to look at
+the label. Nothing passes. A token filter was considered and rejected, because
+any token that cannot belong to the statement is exactly what an altered
+wording adds; the reasoning is in [ADR 0022](adr/0022-warning-present-not-certified.md).
 
 Jenny's constraint: "It has to be exact. Like, word-for-word." She also notes
 the failure modes she sees in practice: "people try to get creative with the
