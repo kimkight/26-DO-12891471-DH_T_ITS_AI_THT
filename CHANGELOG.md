@@ -221,6 +221,24 @@ wrong shape either way.
   docs/07 updated.
 
 
+### Real filings committed as evidence; fixtures stay synthetic (ADR 0021, OQ-22 closed)
+
+The two real filed COLAs every measurement in this repository was taken on,
+the mezcal and the bourbon, are committed unaltered to `samples/real/` so that
+a reviewer can run the tool against exactly what it was measured on. That
+reverses one line of the test data policy, and the documents that argued the
+old line now say so: section 8 of `docs/07_TEST_STRATEGY.md` restates the rule
+as the difference between a fixture, which a test asserts on and stays
+synthetic, and evidence, which a person opens, and keeps the paragraphs it
+replaced; `samples/README.md` points at `samples/real/` and keeps its
+git-ignore rationale for generated artwork; the README status row and the
+traceability matrix match. OQ-22 closes by measurement rather than assertion.
+Nothing automated reads the two files, no behaviour changes, and NFR-6 is
+unchanged. [ADR 0021](docs/adr/0021-real-filings-as-evidence-not-fixtures.md)
+records the decision and the three alternatives declined. `.gitignore` gains a
+trailing negation for `samples/real/` so a broader rule added later cannot
+shadow the files.
+
 ## [1.4.0] - 2026-09-03
 
 The bulk page becomes the same tool as the single-label page. The author,
