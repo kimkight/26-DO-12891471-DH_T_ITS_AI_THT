@@ -107,7 +107,7 @@ export function ResultCard({
   const isPresence = field.outcome === 'present'
   // Which photograph this value came from. Shown only when there was a choice
   // to make; on a one-photograph submission it says nothing new.
-  const source = sourceLabel(field.source_photo, photoCount)
+  const source = sourceLabel(field, photoCount)
 
   return (
     <article className={`card card--${tone}`} aria-labelledby={`${idPrefix}-${field.name}`}>

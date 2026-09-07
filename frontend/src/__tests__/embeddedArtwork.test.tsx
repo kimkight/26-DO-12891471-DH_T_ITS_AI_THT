@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ResultCard } from '../components/ResultCard'
 import { SingleLabelTab } from '../components/SingleLabelTab'
 import { ARTWORK_LABEL_LINE, sourceChipLabel } from '../lib/applicationSources'
-import { artworkNote, photoItemLabel, photoListHeading } from '../lib/photos'
+import { artworkNote, photoItemLabel, photoListHeading, sourceLabel } from '../lib/photos'
 import { PhotoNotes } from '../components/PhotoNotes'
 import {
   applicationDocument,
@@ -238,6 +238,29 @@ describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)'
     // Nothing to say is the ordinary case, and it says nothing.
     expect(artworkNote(applicationDocument())).toBeNull()
     expect(artworkNote(null)).toBeNull()
+  })
+
+  it('names the panel a value came off on the row, the way the artwork list names it', () => {
+    // On the deployed build the brand's source_photo read 5 against five
+    // pieces of artwork the list names by page and size, and nothing said
+    // which was "photo 5" (2026-09-06). The row carries the panel now.
+    const brand = field('brand_name', 'match', {
+      source_photo: 2,
+      source_panel: { page: 3, width: 1050, height: 309 },
+    })
+    expect(sourceLabel(brand, panels.length)).toBe(
+      'Read from the label artwork on page 3 of the application, 1050 by 309 pixels',
+    )
+    // An uploaded photograph is still numbered, because the photo list is.
+    expect(sourceLabel(field('brand_name', 'match', { source_photo: 2 }), 2)).toBe(
+      'Read from photo 2',
+    )
+    // And a single piece of artwork says nothing, as a single photo does.
+    expect(sourceLabel(brand, 1)).toBeNull()
+    render(<ResultCard field={brand} photoCount={panels.length} />)
+    expect(
+      screen.getByText(/read from the label artwork on page 3 of the application/i),
+    ).toBeInTheDocument()
   })
 
   it('renders the table under the artwork list, where the agent reads which panel was which', () => {

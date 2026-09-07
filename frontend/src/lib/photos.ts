@@ -7,7 +7,7 @@
  * should not need a render to check.
  */
 import { plainMessage } from './plainLanguage'
-import type { ApplicationDocumentResult, PhotoResult } from '../types'
+import type { ApplicationDocumentResult, FieldResult, PhotoResult } from '../types'
 
 /** What was done to one photograph, as a sentence, or null if nothing was. */
 export function photoNote(photo: PhotoResult): string | null {
@@ -126,12 +126,28 @@ const UNREAD_REASONS: Record<
 
 /**
  * "Read from photo 2", for a field card, when more than one photograph was
- * submitted.
+ * submitted; or, where the label side is the artwork inside the application,
+ * the panel itself: "Read from the label artwork on page 3 of the
+ * application, 1050 by 309 pixels".
+ *
+ * The panel is named rather than numbered because the artwork list names
+ * its entries that way (`photoItemLabel`), and a number here pointed an agent
+ * at a list with no numbers in it: on the author's bourbon the brand's
+ * `source_photo` read 5 against five pieces of artwork named by page and size
+ * (2026-09-06). The row now carries the panel, so the name comes from the row
+ * and no index is followed to produce it.
  *
  * Suppressed for a single photograph, where "read from photo 1" says nothing
  * an agent does not already know.
  */
-export function sourceLabel(sourcePhoto: number | null, photoCount: number): string | null {
-  if (photoCount < 2 || sourcePhoto === null) return null
-  return `Read from photo ${sourcePhoto}`
+export function sourceLabel(
+  field: Pick<FieldResult, 'source_photo' | 'source_panel'>,
+  photoCount: number,
+): string | null {
+  if (photoCount < 2 || field.source_photo === null) return null
+  const panel = field.source_panel
+  if (panel) {
+    return `Read from the label artwork on page ${panel.page} of the application, ${panel.width} by ${panel.height} pixels`
+  }
+  return `Read from photo ${field.source_photo}`
 }

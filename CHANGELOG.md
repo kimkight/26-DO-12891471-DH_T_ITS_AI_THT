@@ -255,6 +255,98 @@ match at 91 to 96.
   any token that cannot belong to the statement is what an altered wording
   adds (ADR 0022, alternative A).
 
+### `source_photo` addresses the `photos` it names, and the row names its panel (ADR 0010 as amended 2026-09-06)
+
+Found while measuring the bourbon on the deployed build: the brand's
+`source_photo` read 5 on a document whose `photos` array had five entries,
+and the artwork table listed the same five pictures in another order. The
+index was one-based and correct; the two lists disagreed about order, and
+nothing on screen said which picture "photo 5" was.
+
+#### Changed
+
+- The pooled panels are in reading order, largest first, which is the order
+  `application_document.artwork_images_accepted` already lists them in. The
+  page the label is said to come from is still the first panel that yielded
+  a value, found separately.
+- Every field row carries `source_panel`: the page and pixel size of the
+  embedded picture its value was read off, the same panel the addressed
+  `photos` entry carries. The interface reads "Read from the label artwork on
+  page 3 of the application, 1050 by 309 pixels" on such a row, the way the
+  artwork list names its entries; an uploaded photograph is still "Read from
+  photo 2". `source_photo`'s description says which array it addresses and in
+  what order.
+- `test_artwork_panels.py::TestTheSourcePhotoAddressesThePhotosList` pins the
+  join and the order, and a panel that yields nothing keeping its rank.
+
+### The alcohol and net contents statements labels actually print (FR-7, A-13)
+
+The bourbon filing's three missing values were taken apart on the committed
+evidence, and they are three different problems (`docs/09_DEPLOYMENT.md`
+section 9). The alcohol content is on the label in the slash form and the
+matcher already accepted it; what fails is reading one line of type off a
+full-colour painting, which is OQ-39. The net contents is on the same line,
+so the premise that its absence was the tool being right did not hold. The
+warning is on the label and reads well where it is not overprinted, and is
+its own change.
+
+#### Changed
+
+- **Every alcohol statement shape 27 CFR fixes is a named test.** 27 CFR
+  5.65(b)(2) to (b)(4), 7.65(b)(4) and (b)(5), and 4.36(b): the slash form
+  with and without periods, spaces and a proof in parentheses or brackets,
+  `ALC.` fused to the figure, the spelled-out forms with the figure first or
+  last, `ABV` either side, and the wine range, which is located and then
+  routed to review under A-12. Measured on the label artwork of nine approved
+  registry applications across six classes: five print the slash form and
+  exactly one prints `ALC BY VOL`, the filing the rule was calibrated to. The
+  rule is unchanged, a marker beside a number; the one addition is a slash
+  read as `I`, `l`, `1` or a bar, so `ALCIVOL` is still a marker.
+- **A decimal point misread inside the proof figure is repaired** before the
+  A-12 cross-check. Measured: `90.4 PROOF` came back as `90-4` and `90°4`, the
+  cross-check read `4` as the proof, and a label that agrees with itself was
+  reported as contradicting itself. One of four characters, exactly one digit
+  after it, PROOF after that; ranges are untouched.
+- **Net contents is located by the units 27 CFR 5.70(a), 7.70(a) and 4.37
+  use**: litres and centilitres, fluid ounces with or without `FL`, pints,
+  quarts and gallons and their abbreviations, and the six measured shapes,
+  including the estimated-quantity sign, a `CONT.` prefix, a value fused to a
+  lot code, and a value on the alcohol line. The unit spellings are defined
+  once, in `app.compare`, and the line rule in `app.parse` reads them from
+  there. Each is a named test. A number that is not against a unit is still
+  never a net contents.
+- The absence rows' copy says every panel read was searched, names 27 CFR
+  4.36(a)'s table wine allowance beside 7.63(a)(3), and cites 4.37(c) for
+  wine's own container carve-out.
+
+#### Recorded
+
+- OQ-38: the alcohol content presence check is calibrated to distilled
+  spirits; on a malt beverage (27 CFR 7.65(a)) or a table wine (27 CFR
+  4.36(a)) absence can be compliant. Logic unchanged.
+- OQ-39: a legible line of type on a painting is not isolated by the reader;
+  cropped to its band it reads at 88. Not tuned for.
+- Three registry labels the approach will not read, low contrast at small
+  type, recorded as a limit of the label rather than of the pipeline.
+
+### Real filings committed as evidence; fixtures stay synthetic (ADR 0021, OQ-22 closed)
+
+The two real filed COLAs every measurement in this repository was taken on,
+the mezcal and the bourbon, are committed unaltered to `samples/real/` so that
+a reviewer can run the tool against exactly what it was measured on. That
+reverses one line of the test data policy, and the documents that argued the
+old line now say so: section 8 of `docs/07_TEST_STRATEGY.md` restates the rule
+as the difference between a fixture, which a test asserts on and stays
+synthetic, and evidence, which a person opens, and keeps the paragraphs it
+replaced; `samples/README.md` points at `samples/real/` and keeps its
+git-ignore rationale for generated artwork; the README status row and the
+traceability matrix match. OQ-22 closes by measurement rather than assertion.
+Nothing automated reads the two files, no behaviour changes, and NFR-6 is
+unchanged. [ADR 0021](docs/adr/0021-real-filings-as-evidence-not-fixtures.md)
+records the decision and the three alternatives declined. `.gitignore` gains a
+trailing negation for `samples/real/` so a broader rule added later cannot
+shadow the files.
+
 ## [1.4.0] - 2026-09-03
 
 The bulk page becomes the same tool as the single-label page. The author,

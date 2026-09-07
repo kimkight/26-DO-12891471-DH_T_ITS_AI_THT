@@ -73,9 +73,17 @@ export interface FieldResult {
   label_region?: TextRegionDetail | null
   /**
    * Which submitted photograph this value was read from, numbered from 1
-   * (ADR 0007). Null where the field was not found on any of them.
+   * (ADR 0007): the `index` of a `photos` entry, which is in that order, so 5
+   * is `photos[4]`. Null where the field was not found on any of them.
    */
   source_photo: number | null
+  /**
+   * Where the label side is the application's artwork, the embedded picture
+   * the value was read from, by page and pixel size: the same panel the
+   * addressed `photos` entry carries, on the row so no index has to be
+   * followed. Optional so an older server's response still reads.
+   */
+  source_panel?: ArtworkPanelDetail | null
   /**
    * Whether the agent typed this application value or it was read off an
    * uploaded COLA document (FR-11). A typed value always wins over a parsed

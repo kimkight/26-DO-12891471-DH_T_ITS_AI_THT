@@ -51,7 +51,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -63,7 +63,12 @@ from samples.formmaker import (  # noqa: E402
     paper_form_lines,
     registry_printout_lines,
 )
-from samples.labelmaker import PanelSpec, render_panel_png_bytes, render_png_bytes  # noqa: E402
+from samples.labelmaker import (  # noqa: E402
+    PanelSpec,
+    available_fonts,
+    render_panel_png_bytes,
+    render_png_bytes,
+)
 from samples.specs import SAMPLE_LABEL  # noqa: E402
 
 from app.application_form import (  # noqa: E402
@@ -372,6 +377,100 @@ class TestTheBourbonFilingIsRead:
         ]
         assert parsed.values["alcohol_content"] is None
         assert parsed.values["net_contents"] is None
+
+
+@requires_tesseract
+@requires_fonts
+class TestTheSourcePhotoAddressesThePhotosList:
+    """``fields[].source_photo`` names an entry of ``photos``, and the row says which panel.
+
+    Found while measuring the bourbon on the deployed build, 2026-09-06: the
+    brand's ``source_photo`` read 5 on a document whose ``photos`` array had
+    five entries, and the artwork table on the application block listed the
+    same five pictures in a different order, largest first, so nothing on the
+    screen said which picture "photo 5" was. ``source_photo`` is one-based and
+    is the ``index`` of a ``photos`` entry, which is what ``found_on`` above
+    has always joined on; what was wrong was that ``photos`` was in one order
+    and ``artwork_images_accepted`` in another. There is one order now, and
+    the row carries the panel itself so the join is not needed to read it.
+    """
+
+    def test_every_source_photo_is_the_index_of_a_photos_entry(self, body):
+        indices = [photo["index"] for photo in body["photos"]]
+        assert indices == list(range(1, len(indices) + 1))
+        for entry in body["fields"]:
+            if entry["source_photo"] is not None:
+                assert body["photos"][entry["source_photo"] - 1]["index"] == entry["source_photo"]
+
+    def test_the_row_names_the_panel_the_photos_entry_carries(self, body):
+        """No index to follow: ``source_panel`` is the addressed entry's panel."""
+        for entry in body["fields"]:
+            if entry["source_photo"] is None:
+                assert entry["source_panel"] is None
+                continue
+            photo = body["photos"][entry["source_photo"] - 1]
+            assert entry["source_panel"] == photo["artwork_panel"]
+            assert entry["source_panel"] is not None
+
+    def test_photos_are_in_the_order_the_artwork_table_lists_them(self, body):
+        """One order: the read entries of the table, largest first."""
+        table = [
+            (image["page"], image["width"], image["height"])
+            for image in body["application_document"]["artwork_images_accepted"]
+            if image["status"] == "read"
+        ]
+        listed = [
+            (
+                photo["artwork_panel"]["page"],
+                photo["artwork_panel"]["width"],
+                photo["artwork_panel"]["height"],
+            )
+            for photo in body["photos"]
+        ]
+        assert listed == table
+
+    def test_each_value_is_attributed_to_the_page_it_is_printed_on(self, body):
+        pages = {
+            entry["name"]: (entry["source_panel"] or {}).get("page") for entry in body["fields"]
+        }
+        assert pages["brand_name"] == FRONT_PAGE
+        assert pages["alcohol_content"] == SIDE_PAGE
+        assert pages["net_contents"] == SIDE_PAGE
+        assert pages["government_warning"] == SIDE_PAGE
+
+    def test_a_panel_that_yields_nothing_keeps_its_rank_and_is_not_named_as_the_label(self):
+        """Rank order is not disturbed by which panel yielded a value.
+
+        A large sheet of prose ahead of a smaller front panel: the pool lists
+        the sheet first, because it is read first, and the page the label is
+        said to come from is the front, because that is the first panel that
+        yielded anything. The two used to be one list doing both jobs.
+        """
+        # Two lines of prose in one type size, so that the type-size ranking
+        # declines rather than naming one of them the brand (``_standout``),
+        # and nothing on the panel is a value. ``PanelSpec`` cannot draw that:
+        # it sets its first line largest on purpose.
+        fonts = available_fonts()
+        assert fonts is not None
+        sheet = Image.new("RGB", (1950, 862), (255, 255, 255))
+        draw = ImageDraw.Draw(sheet)
+        font = ImageFont.truetype(fonts[1], 48)
+        draw.text((60, 300), "Aged four years in new charred oak barrels", font=font, fill=0)
+        draw.text((60, 420), "Distilled and bottled in Anytown, Kentucky", font=font, fill=0)
+        prose = io.BytesIO()
+        sheet.save(prose, format="PNG")
+        document = as_pdf_bytes(
+            registry_printout_lines(
+                ApplicationSpec(class_type="Kentucky Straight Bourbon Whiskey")
+            ),
+            images=[prose.getvalue(), render_panel_png_bytes(FRONT)],
+        )
+
+        parsed = parse_application_document(document, "application/pdf")
+
+        assert [panel.artwork.page for panel in parsed.label_panels] == [2, 3]
+        assert parsed.label_artwork is not None
+        assert parsed.label_artwork.page == 3
 
 
 @requires_tesseract

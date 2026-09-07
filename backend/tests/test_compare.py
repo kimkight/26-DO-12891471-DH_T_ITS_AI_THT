@@ -86,12 +86,46 @@ class TestAlcoholContentParsing:
             ("45.0%", 45.0, None),
             ("ABV 12.5 percent", 12.5, None),
             ("40% alc. by vol.", 40.0, None),
+            ("38% ALC/VOL", 38.0, None),
+            ("43% ALC./VOL. [86 PROOF]", 43.0, 86.0),
+            ("47% ALC./VOL.- (94 PROOF)", 47.0, 94.0),
+            ("ALC.12% BY VOL", 12.0, None),
+            ("46.3% ALC/VOL (92.6 PROOF)", 46.3, 92.6),
         ],
     )
     def test_reads_the_percentage_and_any_proof(self, value, percent, proof):
         reading = parse_abv(value)
         assert reading.percent == percent
         assert reading.proof == proof
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("46.3% ALC/VOL (92-6 PROOF)", id="point_read_as_a_dash"),
+            pytest.param("46.3% ALC/VOL (92\u00b06 PROOF)", id="point_read_as_a_degree_sign"),
+            pytest.param("46.3% ALC/VOL (92\u00b76 PROOF)", id="point_read_as_a_middle_dot"),
+            pytest.param("46.3% ALC/VOL (92,6 PROOF)", id="point_read_as_a_comma"),
+        ],
+    )
+    def test_a_decimal_point_misread_inside_the_proof_figure_is_repaired(self, value):
+        """Measured on a real filing, 2026-09-06 (docs/09_DEPLOYMENT.md section 9).
+
+        A proof printed to one decimal place came back with its point read as
+        a dash by one segmentation mode and a degree sign by another. The proof
+        pattern then read the last digit as the whole proof, and a label that
+        agrees with itself was reported as contradicting itself under A-12.
+        """
+        reading = parse_abv(value)
+        assert (reading.percent, reading.proof) == (46.3, 92.6)
+
+    def test_the_repair_does_not_touch_a_range_of_percentages(self):
+        reading = parse_abv("12-14% alc/vol")
+        assert reading.is_range
+        assert (reading.range_low, reading.range_high) == (12.0, 14.0)
+
+    def test_the_repair_needs_exactly_one_digit_after_the_separator(self):
+        """A dash between two whole numbers before PROOF is left as it was."""
+        assert parse_abv("80-90 PROOF").proof == 90.0
 
     def test_a_range_is_recognized_as_a_range(self):
         reading = parse_abv("12 to 14% alc/vol")
@@ -117,6 +151,18 @@ class TestAlcoholContentComparison:
         assert "45" in result.reason
         assert "45.1" in result.reason
         assert "0.1" in result.reason
+
+    def test_a_repaired_proof_that_is_twice_the_abv_matches(self):
+        """The same label, read with its decimal point damaged, still agrees."""
+        comparison = compare_abv("46.3% ALC/VOL (92-6 PROOF)", "46.3")
+        assert comparison.outcome is Outcome.MATCH
+        assert "92.6 proof is twice" in comparison.reason
+
+    def test_a_proof_that_really_is_a_whole_number_is_still_cross_checked(self):
+        """The repair changes a misread, not the rule: 46.3 and 92 still disagree."""
+        comparison = compare_abv("46.3% ALC/VOL (92 PROOF)", "46.3")
+        assert comparison.outcome is Outcome.NEEDS_REVIEW
+        assert "contradicts itself" in comparison.reason
 
     def test_proof_that_is_not_twice_the_abv_needs_review(self):
         """UAT row 21: 92 proof against 45 percent is an internal inconsistency."""
@@ -150,11 +196,36 @@ class TestNetContents:
             ("1 L", 1.0, "L"),
             ("25.4 fl oz", 25.4, "fl oz"),
             ("25.4 fl. oz.", 25.4, "fl oz"),
+            # The six shapes measured on nine registry labels, 2026-09-06, as
+            # generic forms; see tests/test_parse.py for the shapes by name.
+            ("500ml e", 500.0, "mL"),
+            ("CONT.700ML.e", 700.0, "mL"),
+            ("700 ML. - L AB1234C", 700.0, "mL"),
+            ("1L", 1.0, "L"),
+            ("1 PINT", 1.0, "pint"),
+            ("1 PT.", 1.0, "pint"),
+            ("1 QUART", 1.0, "quart"),
+            ("1 GALLON", 1.0, "gallon"),
+            ("12 OZ", 12.0, "fl oz"),
+            ("50 CL", 50.0, "cL"),
+            ("44% ALC/VOL 700 ML", 700.0, "mL"),
         ],
     )
     def test_reads_the_quantity_and_folds_the_unit_spelling(self, value, quantity, unit):
         reading = parse_net_contents(value)
         assert (reading.value, reading.unit) == (quantity, unit)
+
+    def test_one_pint_matches_one_pt(self):
+        assert compare_net_contents("1 PINT", "1 pt").outcome is Outcome.MATCH
+
+    def test_a_pint_against_fluid_ounces_needs_review_and_is_not_converted(self):
+        """A-13: 16 fl oz is one pint, and the tool does not say so."""
+        comparison = compare_net_contents("1 PINT", "16 fl oz")
+        assert comparison.outcome is Outcome.NEEDS_REVIEW
+        assert "No conversion" in comparison.reason
+
+    def test_twelve_ounces_matches_twelve_fluid_ounces(self):
+        assert compare_net_contents("12 OZ", "12 fl. oz.").outcome is Outcome.MATCH
 
     def test_750_ml_matches_750ml(self):
         """UAT row 8."""

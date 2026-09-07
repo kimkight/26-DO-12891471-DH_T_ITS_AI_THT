@@ -269,9 +269,11 @@ class ParsedApplication:
     artwork_images_accepted: list[AcceptedImage] = field(default_factory=list)
     # For each value taken off the artwork, the panel it was read from.
     artwork_value_panels: dict[str, EmbeddedArtwork] = field(default_factory=dict)
-    # Every panel that read with text, in the order the label side takes them
-    # (ADR 0010 as amended). The check pools all of them: the brand may be on
-    # the front and the alcohol content on the back.
+    # Every panel that read with text, in rank order, largest first, which is
+    # the order the label side takes them and the order ``artwork_images_accepted``
+    # lists them (ADR 0010 as amended; one order since 2026-09-06). The check
+    # pools all of them: the brand may be on the front and the alcohol content
+    # on the back.
     label_panels: list[LabelPanel] = field(default_factory=list)
     # Whether the artwork pass ran at all on this reading (ADR 0017).
     #
@@ -682,10 +684,16 @@ class _ArtworkReading:
     accepted: list[AcceptedImage] = field(default_factory=list)
     # The panel each value in ``values`` was taken from.
     value_panels: dict[str, EmbeddedArtwork] = field(default_factory=dict)
-    # Every picture that read with text, in the order the label side takes
-    # them: the ones that yielded a label value first, then the rest, each
-    # group largest first. Empty when nothing was read.
+    # Every picture that read with text, in the order they were read, which
+    # is rank order, largest first: the same order ``accepted`` lists them
+    # in, so that "photo 3" on a row and the third read entry in the artwork
+    # table are one picture (2026-09-06). Empty when nothing was read.
     label_panels: list[LabelPanel] = field(default_factory=list)
+    # The first panel that yielded a label value, or None where none did. It
+    # is what the response names as the page the label came from; it used to
+    # be found by putting the valued panels first in ``label_panels``, which
+    # made that list's order mean two things at once.
+    first_valued: LabelPanel | None = None
     # Whether Tesseract was run over these pictures at all (ADR 0017). False
     # means they were located and counted and left unread.
     read: bool = True
@@ -911,11 +919,20 @@ def _read_artwork(
     value came from is recorded, so a value that was misread can be traced to
     the picture it was read off.
 
-    ``label_panels`` is every picture that read with text, the ones that yielded
-    a label value first and then the rest, each group largest first. Preferring
-    the ones that yielded values keeps a large scan of a page of prose from
-    being the first thing offered as the label when a smaller picture of the
-    label was there; nothing is dropped from the pool for it.
+    ``label_panels`` is every picture that read with text, in the order they
+    were read, which is rank order. **That order is the one the response
+    reports (2026-09-06).** The label side takes these panels as its
+    photographs, each field's ``source_photo`` counts them from one, and the
+    artwork table on the application block lists the same pictures largest
+    first; on the author's bourbon the list used to put the panels that
+    yielded a value first, so "read from photo 5" pointed at the fifth entry
+    of one list and the first of the other, and nothing on screen said which.
+    One order, and it is the one the table already shows.
+
+    ``first_valued`` keeps what that reordering used to buy: the panel named as
+    the page the label came from is still the first that yielded a value, so
+    a large scan of a page of prose is not named as the label when a smaller
+    picture of the label was there. Nothing is dropped from the pool for it.
 
     A picture that will not decode is skipped rather than fatal. It is a picture
     inside a document, and the document may have answered already.
@@ -970,7 +987,11 @@ def _read_artwork(
             break
 
     accepted.sort(key=lambda image: (-(image.width * image.height), image.page))
-    panels = with_values + without_values
+    valued = {id(panel) for panel in with_values}
+    panels = sorted(
+        with_values + without_values,
+        key=lambda panel: (-panel.artwork.pixels, panel.artwork.page),
+    )
     return _ArtworkReading(
         values=values,
         rejected=list(rejected or []),
@@ -979,6 +1000,7 @@ def _read_artwork(
         images_found=len(images),
         images_read=len(panels),
         label_panels=panels,
+        first_valued=next((panel for panel in panels if id(panel) in valued), None),
     )
 
 
@@ -1048,7 +1070,10 @@ def _merge_artwork(text_side: ParsedApplication, artwork: _ArtworkReading) -> Pa
             values[name] = value
             sources[name] = "embedded_artwork"
             value_panels[name] = artwork.value_panels[name]
-    first = artwork.label_panels[0] if artwork.label_panels else None
+    # The page the label came from is the first panel that yielded a value,
+    # and only when none did the first panel read; the pool itself stays in
+    # rank order (2026-09-06).
+    first = artwork.first_valued or (artwork.label_panels[0] if artwork.label_panels else None)
     return ParsedApplication(
         values=values,
         fanciful_name=text_side.fanciful_name,

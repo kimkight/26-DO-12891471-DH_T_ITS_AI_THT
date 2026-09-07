@@ -2,10 +2,41 @@
 
 | | |
 | --- | --- |
-| Status | Accepted; the size floor and the one-image label side amended 2026-09-03; the fixed read count replaced by a stopping rule 2026-09-04 |
+| Status | Accepted; the size floor and the one-image label side amended 2026-09-03; the fixed read count replaced by a stopping rule 2026-09-04; one order for the panels and the panel on the row 2026-09-06 |
 | Date | 2026-08-29 |
 | Author | Kimberly D. Kight |
 | Decision reference | Extends FR-11 and [ADR 0008](0008-cola-form-as-application-input.md); amends assumption A-17; supplies the label side the one-upload change that follows it depends on; leaves [ADR 0009](0009-batch-cola-documents.md) intact |
+
+## Amendment, 2026-09-06: one order for the panels, and the row names its panel
+
+**Found while measuring the bourbon on the deployed build.** The brand's
+`source_photo` read 5 on a document whose `photos` array had five entries, and
+the artwork table on the application block listed the same five pictures in a
+different order, largest first. `source_photo` was never off by one: it is
+one-based and is the `index` of a `photos` entry, which is what ADR 0007
+defined and what `test_artwork_panels.py` had always joined on. What was wrong
+is that `photos` was in one order and `artwork_images_accepted` in another,
+because the pool of panels put the ones that had yielded a value first, so
+that the first of them could be named as the page the label came from. A
+number pointing into one list on a screen that names the other list's entries
+by page and size told an agent nothing.
+
+**Decision.** One order: the panels are pooled in the order they were read,
+largest first, which is the order the table already shows, and the page the
+label is said to come from is found separately, as the first panel that
+yielded a value. Every field row carries `source_panel`, the page and pixel
+size of the picture it was read off, so the interface names the panel the way
+the artwork list names it and no index is followed to produce the name.
+`source_photo` stays, one-based, and its description now says which array it
+addresses and in what order. The test that would catch a drift asserts that
+every `source_photo` is the `index` of the entry at that position, that the
+row's `source_panel` is that entry's `artwork_panel`, and that `photos` is
+the read entries of the table in the table's order.
+
+**Consequence.** On a filing whose largest panel is a page of prose, the pool
+now lists that panel first and the label's page is still the front. Ties in
+the per-field merge go to the earlier photograph, which is now the larger
+panel, the same rule the artwork reader itself uses.
 
 ## Amendment, 2026-09-04: shape was the wrong discriminator, and a count was silently deciding correctness
 
