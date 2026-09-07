@@ -31,7 +31,7 @@ updates every artifact the answer affects.
 | [OQ-19](#oq-19) | Open | Triggering Dependabot commands from a session |
 | [OQ-20](#oq-20) | Open | Whether an all-capitals warning body passes FR-5 |
 | [OQ-21](#oq-21) | Open | How often real photographed labels need cylinder dewarping (SG-1) |
-| [OQ-22](#oq-22) | Open | Nothing in the prototype; it bounds any claim that the COLA parser works on real documents (FR-11, A-17), and now bounds the batch path too |
+| [OQ-22](#oq-22) | Closed 2026-09-06, by measurement on two real filings (ADR 0021) | Nothing; the two documents are committed as evidence in `samples/real/`, and what stays unmeasured, editions and routes, is carried by OQ-24 |
 | [OQ-23](#oq-23) | Open | Nothing; it would confirm or improve the ADR 0009 pairing rule |
 | [OQ-24](#oq-24) | Narrowed 2026-09-03 and again 2026-09-04: the size question is answered for three real documents and no code decision now rests on it; what stays open is which editions and routes embed the artwork at all | Nothing in the prototype; it bounds the coverage claim for the embedded artwork path (ADR 0010) and nothing else |
 | [OQ-25](#oq-25) | Decided 2026-08-30: stays needs human review | Nothing; the constant is unchanged and FR-7, A-12 and UAT row 21 all stand |
@@ -47,6 +47,8 @@ updates every artifact the answer affects.
 | [OQ-35](#oq-35) | Open; measured 2026-09-02, recommendation recorded, Terraform unchanged | Nothing; the task runs. It costs about 59 times the memory it uses |
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 | [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
+| [OQ-38](#oq-38) | Open; named 2026-09-06, logic unchanged | Nothing in the prototype; it bounds the alcohol content presence check to distilled spirits. On a malt beverage or a table wine the check can report a compliant label as a finding |
+| [OQ-39](#oq-39) | Open; measured 2026-09-06 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's alcohol content and net contents sit on one |
 
 ---
 
@@ -1130,7 +1132,56 @@ artwork, and it is the reason no such claim is made.
 **Which COLA document shapes and which form editions has the parser actually
 been verified against?**
 
-**Status: Open, 2026-08-27.**
+**Status: Closed 2026-09-06, by measurement.** The parser has been run against
+two real Public COLA Registry printouts, both now committed unaltered as
+evidence in `samples/real/` under
+[ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md), which also
+records why the no-personal-data rule below no longer forbids that and what it
+still forbids. Nothing automated reads either file.
+
+**What was measured, in one paragraph each.** The mezcal, TTB ID
+22118001000389, returns five of five: its declared values are read off the
+printout and its embedded artwork is read as the label side, all five fields
+matched, at the NFR-1 line on the application-document path. The figures are
+in the README's latency table and in [09_DEPLOYMENT.md](09_DEPLOYMENT.md)
+section 9, and the misread that preceded them is traceability source row 31.
+The bourbon, TTB ID 15309001000084, found three separate defects, and the
+record of them is [ADR 0021](adr/0021-real-filings-as-evidence-not-fixtures.md)
+and `samples/real/README.md` rather than a restatement here: an alcohol
+statement in a form the matcher did not handle, a government warning that
+reads well but is overprinted so that a word for word comparison fails on a
+label a human would pass, and a net contents statement absent from every
+panel, which is the tool being correct about the label as submitted. Before
+those three it had also found the two defects in the artwork floor, one of
+five on v1.4.0 and two of five on v1.5.0, which are source rows 42 and 43 and
+ADR 0010 as amended twice.
+
+**What the two documents answered about editions.** The question anticipated
+that an earlier edition might number its items differently, and both do. The
+bourbon's printout states TTB F 5100.31 (07/2012) and the mezcal's states
+(06-2016); neither is the 04/2023 edition the item map in A-17 was read off,
+and the telephone number, for one, is item 12 on the one and item 16 on the
+other. The values parser reads the Registry captions rather than item
+numbers, and it read both. So the caption path is measured on two editions.
+The item map itself, which serves the fillable-form path and item 5's radio
+group, is still measured on the 04/2023 form alone, because neither real
+document is a fillable form.
+
+**What stays unmeasured, and where it lives.** A filled-in fillable form of
+any edition, and which editions and submission routes embed the artwork at
+all. Both bound the coverage claim and neither blocks anything; OQ-24 already
+carries the editions and routes question, and it is not reopened here. A
+per-field extraction rate by document shape and edition, which the original
+entry named as the full answer, would need more than two documents and is
+not claimed.
+
+The original entry follows, unchanged, because the reasoning it records for
+keeping real records out of fixtures still holds; what changed is that
+evidence is no longer treated as a fixture.
+
+---
+
+**Original status, 2026-08-27: Open.**
 
 FR-11 accepts an uploaded label application and reads the values off it. Two
 things about that are verified and two are not, and the difference matters
@@ -2116,3 +2167,86 @@ left off. `frontend/src/__tests__/batchTable.test.tsx` asserts that no
 classify call is made for an image and that the line's sorting replaces the
 chip, including the case of a photographed form the server sorts to the other
 side.
+
+## OQ-38
+**Should "alcohol content not found" be a finding on a malt beverage or a
+table wine at all?**
+
+**Status: Open. Named and cited 2026-09-06; the checking logic is unchanged.**
+
+The alcohol content presence check (FR-14, FR-15, ADR 0013, ADR 0018) reports
+a label that carries no alcohol statement as a finding, citing 27 CFR
+5.63(a)(3) for spirits and 4.32(b)(3) for wine. Two things the regulation says
+are not accounted for in that design:
+
+- **27 CFR 7.65(a)**: on a malt beverage, alcohol content "may be stated on any
+  malt beverage label, unless prohibited by State law". It is optional unless
+  State law requires it. The row's copy already narrows 7.63(a)(3) to malt
+  beverages with alcohol from added nonbeverage ingredients; the general case
+  is that a beer label need not state it.
+- **27 CFR 4.36(a)**: for a wine of 14 percent alcohol or less, the alcohol
+  content "may be stated, but need not be stated if the type designation
+  'table' wine (or 'light' wine) appears on the brand label".
+
+So on a beer, or on a table wine, "not found" can be the correct reading of a
+fully compliant label, and a row that reports it as a finding is wrong about
+that label. The check is calibrated to distilled spirits, which is what the
+assignment's worked examples are and what both real filings are.
+
+**What was done instead of changing the logic.** The row's reason now names
+the 4.36(a) allowance beside the 7.63(a)(3) one, so an agent reading the
+finding sees when it is not a defect; the limit is recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 with the citations; and the
+tests, FR-14 and FR-15 are untouched. Changing the check touches two
+requirements, it needs the beverage type (ADR 0016) to be trusted as the input
+that decides whether absence is a finding, and for wine it needs the class or
+type designation read for the words "table" or "light", none of which belongs
+in the session that found it.
+
+**What would answer it:** a decision on whether the presence check consults
+the beverage type, and if so what it reports when the type is not determined;
+and for wine, whether "table" or "light" in the class or type designation
+stands in for the figure.
+
+**Who can answer:** Jenny Park or Sarah Chen, on whether an agent expects the
+tool to raise absence on a beer or a table wine, and on which they see more of.
+**Blocks:** nothing in the prototype. It bounds the claim the presence check
+makes: on distilled spirits it is a finding; on a malt beverage or a table wine
+it is a question for the agent, and the row says so.
+
+## OQ-39
+**How should a single line of legible type set over full-colour artwork be
+isolated before it is read?**
+
+**Status: Open. Measured 2026-09-06; not tuned for.**
+
+The bourbon filing committed as evidence in `samples/real/` carries its alcohol
+content and its net contents on one line of light type about 24 pixels tall
+along the bottom edge of a 1950 by 862 panel that is otherwise a painting. On
+the session's Tesseract 5.3.4 the whole panel reads as no text at all through
+every arm of the pipeline; the container's 5.3.0 read it at 45.3 confidence
+and found neither value. Every page segmentation mode Tesseract offers was
+tried on the whole panel, on the colour image, the 1600-pixel grayscale and
+the native grayscale, and the best recovered the percentage figure alone.
+Cropped to its own text band, the same line reads at 88.0 confidence,
+complete, and every rule downstream accepts it: the matcher, the proof
+cross-check, the net contents unit.
+
+So the type is legible and the pipeline reads it; what fails is the layout
+analysis, which does not find one line of text on a picture. That is a
+different limit from the low-contrast labels recorded in
+[09_DEPLOYMENT.md](09_DEPLOYMENT.md) section 9 alongside it, where the type
+itself is the problem and tuning is declined. Here the fix would be text-region
+detection before OCR: finding the bands of a panel that carry type and reading
+those on their own. It is real image-processing work, it would run only on a
+panel that read poorly, and it is not attempted in this session; the crop
+measurement is recorded so that whoever attempts it knows the line reads once
+it is found.
+
+**What would answer it:** a region detector measured on this panel and on the
+twelve synthetic labels, showing the line found here and nothing lost there,
+with its cost.
+
+**Who can answer:** measurement.
+**Blocks:** nothing in the prototype. On this filing the alcohol content and
+the net contents are reported not found, and the deployment notes say why.
