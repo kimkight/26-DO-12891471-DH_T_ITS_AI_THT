@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.0] - 2026-09-07
 
 The artwork floor rejected real label panels. A second real filed COLA, a
 bourbon, returned one of five on the deployed v1.4.0, and the reason was in
