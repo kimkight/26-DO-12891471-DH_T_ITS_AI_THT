@@ -250,8 +250,12 @@ section 2. Marks OQ-4 as closed by assumption A-12.
 normalization.**
 
 Compare numerically only when units match after normalization (`mL`/`ml`/
-`milliliters`, `L`/`liters`, `fl oz`/`fl. oz.`). Different units: **needs human
-review**, no conversion performed. Standards of fill are not validated.
+`milliliters`, `L`/`liters`/`litres`, `cL`/`centiliters`, `fl oz`/`fl. oz.`/`oz`,
+`pint`/`pt`, `quart`/`qt`, `gallon`/`gal`; the list was widened on 2026-09-06
+to the spellings 27 CFR 5.70(a), 7.70(a) and 4.37 use, after nine registry
+labels showed six shapes of net contents and a pint among them). Different
+units: **needs human review**, no conversion performed. A pint against sixteen
+fluid ounces is such a pair. Standards of fill are not validated.
 
 The reasoning is A-12's: a conversion the tool performs silently is a place a
 false match can be manufactured, and `750 mL` against `25.4 fl oz` is a question

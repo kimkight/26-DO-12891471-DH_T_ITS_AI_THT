@@ -1064,8 +1064,159 @@ This section is the record of the runs; the README is the summary of them.
       29.0, the count was never the problem and a low-contrast preprocessing
       change is the next fix. Which it is, the next request settles.
 
-- [ ] **The bourbon on the deployed build, once this is deployed.** The
-      manual step that settles which panel each of the three values is on.
+- [x] **The bourbon on the deployed build, with the stopping rule.** Measured
+      by the author against the deployed build once #141 landed: **all five
+      panels read**, the 187 by 1697 strip among them at 67.0; `elapsed_ms`
+      **7534**, `tesseract_reads` **19**, document confidence 63.6. And the
+      alcohol content, the net contents and the government warning were
+      **still all reported not found**. So it was not the count, and it was
+      not the 29.0 panel. What it was is the next entry.
+
+      | Page | Panel | Status | OCR confidence |
+      | --- | --- | --- | --- |
+      | 2 | 1950 x 862 | read | 45.3 |
+      | 4 | 1350 x 300 | read | 89.9 |
+      | 2 | 1103 x 340 | read | 29.0 |
+      | 3 | 1050 x 309 | read | 86.8 |
+      | 3 | 187 x 1697 | read | 67.0 |
+
+- [x] **The three missing values, taken apart, on a session container
+      (2026-09-06).** The same filing, now committed as evidence in
+      `samples/real/` (#142, ADR 0021), put through the pipeline panel by
+      panel on the session's Tesseract 5.3.4 rather than the container's
+      5.3.0, so the figures here are about the reading and not about the
+      deployed latency. **They are three different problems, and the premise
+      that one of them was the tool being right did not survive the
+      measurement.**
+
+      **The alcohol content is on the label, and the matcher already accepts
+      the way it is printed.** It sits on the 1950 by 862 panel, which is a
+      full-colour painting with one line of light type about 24 pixels tall
+      along its bottom edge. Through the whole pipeline that panel reads as
+      **no text at all** on this Tesseract, from every one of the three arms
+      (colour, preprocessed, plain), where the container's 5.3.0 read it at
+      45.3; and no page segmentation mode Tesseract offers reads the line off
+      the whole panel either (automatic, single block and sparse text were
+      each tried on the colour image, the 1600-pixel grayscale and the native
+      grayscale: the best recovered the percentage figure and nothing of the
+      marker). **Cropped to its own text band, the same line reads at 88.0
+      confidence, complete**: the class or type, the percentage in the slash
+      form, the proof to one decimal place in parentheses, and a net contents
+      after it. The line predicate accepts it as printed, and `parse_abv`
+      reads the percentage and the proof, which agree exactly. **So the gap
+      is not the slash form.** The nine-label survey below confirms the
+      predicate covers every shape labels use, and every shape is now a named
+      test; what the wide panel needs is for the reader to find the line,
+      which is OQ-39.
+
+      **One defect did come out of the read, and it is fixed.** The proof on
+      this label is printed to one decimal place, and the point came back as
+      a dash from one segmentation mode and a degree sign from another. The
+      proof pattern then read the last digit as the whole proof, and the A-12
+      cross-check would have reported a label that agrees with itself
+      exactly, 45.2 percent at 90.4 proof, as contradicting itself. The
+      repair is one of four characters between a run of digits and exactly
+      one digit, immediately before PROOF; a range of percentages is
+      untouched (`test_compare.py`).
+
+      **The net contents is on the label too, and the tool is not right about
+      it.** The prompt for this session recorded net contents as genuinely
+      absent from every panel. It is not: the same bottom line ends in a
+      litre figure fused to its unit, in a face whose figure one reads as a
+      capital I. So on this document "not found" is a reading failure twice
+      over, once for the whole panel and once for the glyph, and it is
+      recorded here as that rather than as the tool working. The row's copy
+      was read as asked and now says every panel read was searched, and cites
+      27 CFR 4.37(c) beside the spirits and malt beverage carve-outs, because
+      wine has one as well. Nothing was loosened to make the value appear.
+
+      **The government warning is on the 1050 by 309 panel and reads well
+      except where it is overprinted.** At 86.8 the body comes back almost
+      complete; what breaks is the prefix, where the registration marks run
+      through GOVERNMENT and it reads as a garble, so the statement is never
+      located and the row says the label has no warning. That is the worst of
+      the three answers for a label a person would pass, and it is the
+      subject of its own change and ADR.
+
+      **The nine-label survey.** Before this session the author pulled the
+      label artwork of nine approved applications from the Public COLA
+      Registry, across six beverage classes, and transcribed the alcohol and
+      net contents statements as printed. Counts only, here and in the tests:
+      five of nine alcohol statements use the slash form, two abbreviate
+      `ALC.` before the figure with `BY VOL` after it, one uses `ALC BY VOL`
+      and one the spelled-out form; three carry a proof, one in square
+      brackets and two in parentheses, one of those behind a dash. **Exactly
+      one uses `ALC BY VOL`, and it is the filing the matcher was built
+      against.** The regulation agrees: 27 CFR 5.65(b)(3) allows `alc`, `%`,
+      the slash and `vol`, and (b)(4)'s first example is `40% alc/vol`; 27 CFR
+      7.65(b)(4) and (b)(5) say the same for malt beverages; 27 CFR 4.36(b)
+      fixes `alc.` and `vol.` for wine and permits a range. Net contents comes
+      in six shapes across the nine: metric with and without a space, metric
+      with the estimated-quantity sign, metric behind `CONT.`, metric fused
+      to a lot code, and one pint; two print it on the alcohol line. The unit
+      list is widened to 27 CFR 5.70(a), 7.70(a) and 4.37, each shape is a
+      named test, and the rule is unchanged: a number has to sit against a
+      unit.
+
+      **Cost, on the session container**, one warm-up discarded, three
+      `POST /api/verify` requests with the document alone, before and after
+      this change on the same container minutes apart:
+
+      | Document | `elapsed_ms` before, median (min, max) | reads | outcome | `elapsed_ms` after, median (min, max) | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | the bourbon filing | 5554 (5480, 5610) | 19 | 1 of 5 | 5554 (5480, 5610) | 19 | 1 of 5 |
+      | the mezcal filing | 3016 (2966, 3026) | 4 | 5 of 5 | 3016 (2966, 3026) | 4 | 5 of 5 |
+
+      The same numbers on both sides, because on this Tesseract the wide
+      panel reads nothing, so there is no line for the widened rules to
+      accept and the stopping rule has nothing new to stop on. **On the
+      deployed build the alcohol fix cannot finish the stop rule earlier
+      either**, for the same reason one level up: the values are on a panel
+      whose line the reader does not isolate. Where a reader does isolate it
+      (OQ-39), the alcohol content and the net contents both come off the
+      largest panel, which is read first, and the rule then stops after the
+      fourth panel with the strip unread: about the strip's three reads
+      saved, and the correct answer. Stated as the expectation, not measured.
+
+- [x] **A limit of the current scope, named and cited: the alcohol content
+      check is calibrated to distilled spirits (2026-09-06).** Two things the
+      regulation says that the current design does not account for, found in
+      the same reading:
+
+      - **27 CFR 7.65(a)**: alcohol content "may be stated on any malt
+        beverage label, unless prohibited by State law"; it is optional
+        unless State law requires it.
+      - **27 CFR 4.36(a)**: for a wine of 14 percent alcohol or less, "the
+        alcohol content may be stated, but need not be stated if the type
+        designation 'table' wine (or 'light' wine) appears on the brand
+        label".
+
+      So on a beer, or on a table wine, "alcohol content not found" can be
+      the correct reading of a fully compliant label, and reporting it as a
+      finding would be wrong. **The checking logic is not changed in this
+      session**: it touches FR-14 and FR-15, the assignment's worked examples
+      are spirits, and the row already says that 7.63(a)(3) narrows the
+      requirement for malt beverages; it now says the same for table wine.
+      Applying the check unmodified to malt beverages and to table wine would
+      produce false findings, and that is recorded as OQ-38 rather than
+      discovered by a reviewer.
+
+- [x] **A limit of the approach, named: type the reader will not read
+      (2026-09-06).** Also in the nine: an approved vodka specialty label
+      printing its alcohol statement small, curved, in pale pink on deep
+      purple inside dense engraving; a wine label in gold on near-black; a
+      bourbon label in pale mint on white. Low contrast at small type is a
+      property of the label, not of the pipeline, and tuning against it costs
+      more than it returns. TTB's own registry states that it has not
+      reviewed labels for type size, characters per inch or contrasting
+      background, which is to say the registry does not certify the property
+      this reader depends on. Recorded, not tuned for. The wide bourbon panel
+      above is a different case, and a nearer one: its type is legible and
+      reads at 88 on its own, and what fails is finding it on the painting
+      (OQ-39).
+
+- [ ] **The bourbon on the deployed build, once the reader isolates the
+      line.** The manual step that settles which panel each of the three values is on.
       Submit the bourbon filing alone on the single-label tab and read
       `application_document.artwork_images_accepted`: the 187 by 1697 strip
       should now be `read` with a confidence beside it, and
