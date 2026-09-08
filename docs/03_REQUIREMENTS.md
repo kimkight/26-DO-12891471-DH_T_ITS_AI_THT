@@ -695,7 +695,19 @@ apply to a label image. The note under OOS-1 in
   text.
 - Given a scan or a photograph of a printed form, then it is read through the
   same local OCR pipeline label artwork is read through, and the response says
-  so.
+  so. **For a PDF with no text layer that read happens once, in the check**
+  ([ADR 0024](adr/0024-the-scanned-form-is-read-once.md), 2026-09-08): the
+  prefill pass counts its pages, reads none, and reports the path as
+  `not_read`, because reading three pages as pictures measured about ten
+  seconds in the upload step on the deployed v1.5.0 build and the check read
+  the same pages again. The values arrive with the result, as the artwork's
+  two do under ADR 0017.
+- Given any document, then reading it, pages and pictures together, costs at
+  most `TTB_MAX_DOCUMENT_READS` Tesseract invocations
+  ([ADR 0023](adr/0023-a-read-budget-per-document.md)), and every picture or
+  page the ceiling stopped short of is reported as `not_reached`, counted, and
+  said in the notes. A value reported not found on such a document is never
+  presented as a value looked for and absent.
 - Given a value that is not an item on the form, then it is reported as not
   found **with the reason**, rather than reported as a bare absence. On
   TTB F 5100.31 (04/2023) the class or type designation and the alcohol content
@@ -946,6 +958,14 @@ able to see which one at a glance.
   so it never takes focus and it is never counted as a gap in the check.
 - Given nothing uploaded yet, then the view is exactly what US-24 specified:
   one collapsed disclosure over the five fields, and no summary lines.
+- Given a PDF with no text layer, then no value goes quiet before the check
+  and none goes loud either ([ADR 0024](adr/0024-the-scanned-form-is-read-once.md),
+  2026-09-08): the upload card says the file has no text to read and that its
+  pages will be read when the label is checked, no box opens and focus stays
+  where it was, and the values arrive with the result. This is the same
+  treatment ADR 0017 gives the two values the artwork supplies, applied to
+  all five. What it costs the agent is stated in the ADR: on a scan a
+  misread value cannot be corrected before the first check.
 - The result panel is unchanged. This requirement is about the input side.
 
 **Three sources, not four.** A value on the application side comes from the
@@ -989,6 +1009,24 @@ Single-label verification returns in about 5 seconds.
   breach NFR-6, which is an acceptance criterion of this system and a promise
   printed on every screen of the interface. Recorded on FR-1 and NFR-1 alike so
   that it is not rediscovered as a good idea.
+- **No single document can run away, and what a ceiling stops is said.**
+  Added 2026-09-08 ([ADR 0023](adr/0023-a-read-budget-per-document.md)):
+  reading one document costs at most `TTB_MAX_DOCUMENT_READS` Tesseract
+  invocations, pages and pictures together, and every page or picture the
+  ceiling stopped short of is reported as `not_reached`, counted, and said in
+  the notes, in the response and on the screen. The ceiling is in reads rather
+  than milliseconds so that the same document gets the same answer on every
+  host, and the ADR records the alternative. It does not make a document that
+  needs 19 reads meet the target; the traceability matrix reports that
+  shortfall, as the criterion above requires.
+- **The upload step is timed too.** Added 2026-09-08: `POST /api/classify`
+  logs and returns `elapsed_ms` and the phase breakdown, because a scanned
+  form measured 10322 ms in that request on the deployed v1.5.0 build and the
+  route logged counts only, so nothing showed it. A duration is a number about
+  the request and not a word of its content; NFR-6 is untouched. The read
+  that cost those ten seconds is moved to the check
+  ([ADR 0024](adr/0024-the-scanned-form-is-read-once.md)), where this
+  requirement measures it and the ceiling above bounds it.
 
 This is the requirement that killed the previous pilot: "The system would take
 30, 40 seconds sometimes to process a single label... If we can't get results

@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; extended from the pictures to the pages of a file with no text layer by [ADR 0024](0024-the-scanned-form-is-read-once.md), 2026-09-08 |
 | Date | 2026-09-01 |
 | Author | Kimberly D. Kight |
 | Decision reference | Narrows [ADR 0010](0010-embedded-label-artwork.md), which put the artwork into the application side; keeps [ADR 0011](0011-one-upload.md)'s read-once rule and extends it across the two requests one submission makes; NFR-1, NFR-6 |

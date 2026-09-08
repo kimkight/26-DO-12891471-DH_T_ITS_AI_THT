@@ -5,6 +5,104 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+NFR-1 was measured on the deployed v1.5.0 build with three real filed COLAs,
+and it is breached on two of them. The mezcal in `samples/real/` checks in
+4816 ms; the bourbon beside it in 8064 ms, 7679 ms of that artwork OCR over
+five panels and nineteen Tesseract reads; a third filing with no text layer,
+not committed, cost 10322 ms in the upload step alone, before the agent had
+clicked anything, and the check was never reached. The traceability matrix
+said NFR-1 was met. That row was measured on the mezcal alone, and the
+requirement's own criteria say a shortfall is reported rather than omitted.
+This release bounds the reading, makes the upload step visible, and moves the
+one read that was being paid for twice; it does not make the bourbon fast,
+and says so.
+
+### One document's reading has a ceiling, and what it leaves is said (ADR 0023, NFR-1)
+
+#### Added
+
+- **`TTB_MAX_DOCUMENT_READS`, default 24**: the most Tesseract invocations
+  reading one document may cost, its rendered pages and its embedded pictures
+  together. Checked before each picture and each page, never inside one, so
+  a picture is read whole; the count can pass the ceiling by at most one
+  picture's reads. **In reads rather than milliseconds**, so that the same
+  document gets the same answer on every host and under any load; the ADR
+  records the milliseconds alternative and what would change the choice.
+  Twenty-four is the picture ceiling of eight times the least a picture costs
+  when its first read does not settle it, admits both committed filings in
+  full, and cuts the runaway case from 40 reads to 24.
+- **`not_reached`**, a new `artwork_images_accepted[].status`, for a picture
+  the ceiling stopped short of; kept apart from `not_read` and `not_needed`
+  because the values may be on it and nobody looked. `pages_not_reached`
+  counts the pages the OCR fallback did not get to. `tesseract_reads`,
+  `read_budget` and `read_budget_reached` on the document block show the
+  arithmetic, and a sentence in `notes` says how many pages and pictures were
+  left and at what count. The interface's note under the artwork list carries
+  the new status in the same voice as the others.
+- `OcrResult.tesseract_reads`: each read now counts its own engine
+  invocations, so the budget adds them up without a recording open.
+
+#### What was not changed, and why
+
+- **The reads per panel.** The rule asked for, no second pass on a panel
+  whose first pass read confidently, is `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE`
+  at 85 since v1.0.1, and on the bourbon it fires on no panel because no
+  first pass there reads above 67.0; the two panels that read well do so on
+  the second pass, which is where the brand match and the warning text come
+  from. The constant's comment now carries the per-panel table. The reads on
+  both committed filings are 4 and 19 before and after this release, and the
+  accuracy tier is identical.
+
+### The upload step is timed, and a scan is read once (ADR 0024, NFR-1, FR-11, FR-13)
+
+#### Changed
+
+- **`POST /api/classify` logs and returns `elapsed_ms` and the phase
+  breakdown.** The route logged counts only, so a ten-second prefill of a
+  scanned form was invisible. A duration is a number about the request and
+  not a word of its content; NFR-6 is untouched.
+- **A PDF with no text layer is not read in the upload step.** The prefill
+  pass counts its pages and pictures, reads none, and reports
+  `extraction_path: "not_read"`; the check renders and reads the pages once,
+  under the ceiling above. The interface treats every value on such a
+  document as on its way rather than as a gap, the way it already treats the
+  two artwork values under ADR 0017: no box opens, focus stays, and the
+  upload card says the file has no text to read and that its pages will be
+  read when the label is checked. **What it costs the agent**: on a scan the
+  five values arrive with the result instead of before it, and a misread
+  value cannot be corrected before the first check. The ADR weighs that
+  against FR-13 and states it in full. `POST /api/read-application` still
+  reads everything.
+
+#### Measured
+
+Session container, not production hardware, Tesseract 5.3.4, the two filings
+in `samples/real/` submitted alone to `POST /api/verify`, three runs each,
+medians, before and after every change in this release on the same container:
+
+| Document | `elapsed_ms` before | reads before | outcome before | `elapsed_ms` after | reads after | outcome after |
+| --- | --- | --- | --- | --- | --- | --- |
+| the mezcal filing | 4089 | 4 | 5 of 5 | 3809 | 4 | 5 of 5 |
+| the bourbon filing | 6966 | 19 | 2 of 5 | 6790 | 19 | 2 of 5 |
+
+Per-field outcomes are identical on both, the accuracy tier
+(`scripts/measure.py` over the twelve synthetic labels) is identical to the
+line, and the difference in milliseconds is run-to-run variation on a path
+no line of this release touches. `POST /api/classify` on the same two
+filings: 267 and 293 ms wall clock before, with no `elapsed_ms` in the
+response; 274 and 257 ms after, with `elapsed_ms` medians of 269 and 250. The full
+tables, and the deployed-build measurement that opened this work, are in
+[docs/09](docs/09_DEPLOYMENT.md) section 9.
+
+### Documents
+
+- ADR 0023 and ADR 0024; ADR 0017 marked as extended; NFR-1, FR-11 and FR-13
+  criteria amended; `TTB_MAX_DOCUMENT_READS` in the architecture's setting
+  table; `backend/tests/test_read_budget.py` and
+  `backend/tests/test_classify_timing.py`.
+
 ## [1.5.0] - 2026-09-07
 
 The artwork floor rejected real label panels. A second real filed COLA, a

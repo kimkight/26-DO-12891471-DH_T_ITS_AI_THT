@@ -66,6 +66,7 @@ from app.verify import (
     check_size,
     document_result,
 )
+from app.verify import _timings as _phase_timings
 
 __all__ = ["UploadSizeLimitMiddleware", "build_result", "router"]
 
@@ -553,26 +554,45 @@ async def classify_uploads(
     and reads each image once.
 
     **It reads the document's text layer and not the pictures inside it**
-    ([ADR 0017](../../docs/adr/0017-read-the-artwork-once.md)). The response
-    says so in `application_document.artwork_read`, and the values the artwork
-    would have supplied arrive with the check that reads it. A caller that wants
-    the artwork values without verifying has `POST /api/read-application`, which
-    still reads everything.
+    ([ADR 0017](../../docs/adr/0017-read-the-artwork-once.md)), **and not its
+    pages as images either**
+    ([ADR 0024](../../docs/adr/0024-the-scanned-form-is-read-once.md)). The
+    response says so in `application_document.artwork_read` and in
+    `extraction_path: "not_read"`, and the values either would have supplied
+    arrive with the check that reads them. A caller that wants everything
+    read without verifying has `POST /api/read-application`, which still
+    reads everything.
+
+    **It is timed, and the time is logged and returned** (NFR-1). This is the
+    request that runs the moment an agent picks a file, and until it was
+    measured a scanned form cost ten seconds here before the agent had clicked
+    anything, invisible because the route logged counts only. A duration is a
+    number about the request and not a word of its content, so NFR-6 is
+    untouched.
 
     Nothing is compared, nothing is kept (NFR-6), and no outbound call is
     made (NFR-3).
     """
-    try:
-        submitted = await _read_parts(files, [], None)
-    except VerificationError as exc:
-        return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
+    with timing.recording() as record:
+        try:
+            submitted = await _read_parts(files, [], None)
+        except VerificationError as exc:
+            return _error(exc.status_code, exc.code, exc.message, limit=exc.limit)
 
-    if not submitted:
-        return _error(422, "no_files", NO_FILES_MESSAGE)
+        if not submitted:
+            return _error(422, "no_files", NO_FILES_MESSAGE)
 
-    payload = await _off_the_loop(_sort_and_read, submitted)
+        payload = await _off_the_loop(_sort_and_read, submitted)
 
-    # NFR-6: counts only. No filename, no content, nothing any file said.
+        # Stamped last, so that building the payload is inside the number too,
+        # exactly as `POST /api/verify` does it. One reading of the clock, so
+        # the two figures cannot disagree by the width of a function call.
+        payload.timings = _phase_timings(record)
+        payload.elapsed_ms = payload.timings.total_ms if payload.timings else record.total_ms
+
+    # NFR-6: counts and durations only. No filename, no content, nothing any
+    # file said. The duration is what makes a slow prefill visible in the log
+    # at all; the phase that took it is in the response.
     logger.info(
         "uploads classified",
         extra={
@@ -581,6 +601,13 @@ async def classify_uploads(
                 1 for entry in payload.files if entry.classified_as == "application_document"
             ),
             "labels_classified": payload.label_images,
+            "elapsed_ms": payload.elapsed_ms,
+            "tesseract_reads": record.tesseract_reads,
+            "application_document_path": (
+                payload.application_document.extraction_path
+                if payload.application_document
+                else None
+            ),
         },
     )
     return JSONResponse(status_code=200, content=payload.model_dump())
@@ -609,6 +636,14 @@ def _sort_and_read(submitted: list[SubmittedFile]) -> ClassificationResult:
                 # two full Tesseract passes over the same artwork, in two
                 # requests the agent waits through one after the other.
                 read_artwork=False,
+                # **Nor are the pages, on a file with no text layer (ADR
+                # 0024).** The same shape one level up: a three-page scan cost
+                # about ten seconds of page OCR in this request on the deployed
+                # v1.5.0 build, and the check rendered and read the same three
+                # pages again. The response reports `extraction_path:
+                # "not_read"`, and the interface treats the values as on their
+                # way rather than as gaps, as it already does for the pictures.
+                read_pages=False,
             )
         except UnreadableDocumentError as exc:
             # The classification stands and is reported; what failed is reading

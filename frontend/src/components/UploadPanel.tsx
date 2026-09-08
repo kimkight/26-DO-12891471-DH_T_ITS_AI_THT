@@ -35,7 +35,7 @@ import { FilePreview, TileHeading } from './Ui'
 import { PHOTO_ONLY_NOTE, SIDES, announce } from '../lib/uploadAnnouncement'
 import { classifyUploads } from '../lib/api'
 import type { UiError } from '../lib/api'
-import { pendingFromArtwork } from '../lib/pendingArtwork'
+import { pendingFromDocument } from '../lib/pendingArtwork'
 import { plainMessage } from '../lib/plainLanguage'
 import type { ApplicationDocumentResult, ClassificationResult } from '../types'
 
@@ -47,6 +47,8 @@ const PATHS: Record<ApplicationDocumentResult['extraction_path'], string> = {
   form_fields: 'read from the boxes you filled in on the form',
   embedded_text: 'read from the text in the file',
   ocr: 'read by looking at the pages as pictures, the way we read a label image',
+  not_read:
+    'because this file has no text to read. Its pages will be read as pictures when you check the label, the way a label image is read',
 }
 
 interface Props {
@@ -163,9 +165,10 @@ export function UploadPanel({
   const found = document?.fields.filter((entry) => entry.found_on_document) ?? []
 
   // A value the artwork is about to supply is not a value the agent has to
-  // enter (ADR 0017), so it is not listed as one. The check reads the pictures
-  // and fills it in.
-  const pending = new Set<string>(pendingFromArtwork(document))
+  // enter (ADR 0017), so it is not listed as one, and neither is any value on
+  // a scan whose pages are read by the check (ADR 0024). The check reads the
+  // pictures, or the pages, and fills it in.
+  const pending = new Set<string>(pendingFromDocument(document))
   const missing =
     document?.fields.filter((entry) => !entry.found_on_document && !pending.has(entry.name)) ?? []
 

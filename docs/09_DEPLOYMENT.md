@@ -461,6 +461,14 @@ reading: the pictures were located, counted, and left for the check. False with 
 zero count means this document carries no artwork at all, which is a different
 thing and is why the two are reported separately.
 
+Since the release after v1.5.0 the same response carries `elapsed_ms` and
+`timings`, so the prefill's cost is read rather than inferred from the browser's
+clock, and a PDF with no text layer reports `extraction_path` `not_read` with
+`pages_not_reached` set to its page count: its pages are read by the check
+(ADR 0024). On such a file the prefill should be about the time PDFium takes to
+open it; a `page_ocr_ms` above zero here is the read that was moved out of this
+request coming back.
+
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
 reporting 3.2 s, 3.5 s against deploy #11 later the same day once the
@@ -1214,6 +1222,48 @@ This section is the record of the runs; the README is the summary of them.
       above is a different case, and a nearer one: its type is legible and
       reads at 88 on its own, and what fails is finding it on the painting
       (OQ-39).
+
+- [x] **Every change to the reading, measured on both committed filings
+      before and after, on a session container (2026-09-08; ADR 0023,
+      ADR 0024).** Not production hardware: the session's Tesseract 5.3.4,
+      in process through the FastAPI test client, the two filings in
+      `samples/real/` submitted alone, three `POST /api/verify` requests
+      each, medians, taken before the first change and again after the last
+      one on the same container. The rule this session was asked to add, no
+      second OCR pass on a panel whose first pass read confidently, turned
+      out to be `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` at 85 since v1.0.1,
+      and on the bourbon it fires on no panel: the highest first pass there
+      is 67.0, one word on the strip, and the two panels that read well do
+      so on the second pass. The per-panel table is beside the constant in
+      `backend/app/ocr.py`. So no read was cut, and the before and after
+      columns say the same thing on purpose:
+
+      | Document | `elapsed_ms` before, median (min, max) | reads | outcome | `elapsed_ms` after, median (min, max) | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | the mezcal filing | 4089 (3910, 4203) | 4 | 5 of 5 | 3809 (3670, 3939) | 4 | 5 of 5 |
+      | the bourbon filing | 6966 (6952, 7192) | 19 | 2 of 5 | 6790 (6745, 6968) | 19 | 2 of 5 |
+
+      Per-field outcomes are identical on both filings. The accuracy tier,
+      `scripts/measure.py` over the twelve synthetic labels, is identical
+      line for line: every field at 100 percent precision and recall, review
+      rate 1 of 12 on alcohol content and net contents, false match rate
+      zero. The lower "after" milliseconds are run-to-run variation on a
+      path nothing in the release touches. Where the bourbon's reads go, per
+      Tesseract call on this container: five orientation calls, 1579 ms;
+      the two-read second opinion on the 1050 by 309 panel, 816 ms; twelve
+      arm reads, about 4.4 s; and the largest panel, 1950 by 862, spends
+      2043 ms over four calls reading no words at all (OQ-39).
+
+      `POST /api/classify` on the same two filings: 267 and 293 ms wall
+      clock before, with no `elapsed_ms` in the response; 274 and 257 ms
+      after, with `elapsed_ms` medians of 269 and 250 and `tesseract_reads` 0.
+      Neither committed filing is a scan, so the ten seconds ADR 0024 moves
+      out of this request are not on this container's table; the one
+      document that showed them is not in the repository, and its
+      measurement is the deployed-build gate below. The bound on the read
+      that moved is `TTB_MAX_DOCUMENT_READS`, asserted in
+      `backend/tests/test_read_budget.py` against a fixture scan with the
+      ceiling at zero and against the five-panel fixture with it at two.
 
 - [ ] **The bourbon on the deployed build, once the reader isolates the
       line.** The manual step that settles which panel each of the three values is on.

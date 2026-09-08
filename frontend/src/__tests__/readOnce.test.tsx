@@ -21,7 +21,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SingleLabelTab } from '../components/SingleLabelTab'
-import { pendingFromArtwork } from '../lib/pendingArtwork'
+import { pendingFromArtwork, pendingFromDocument } from '../lib/pendingArtwork'
 import { applicationDocument, classification, fileClassification, parsedField } from './fixtures'
 
 /**
@@ -48,6 +48,37 @@ const PREFILL = applicationDocument({
 const DOCUMENT_ONLY = classification({
   files: [fileClassification('cola.pdf', 'application_document')],
   application_document: PREFILL,
+  label_images: 0,
+})
+
+/**
+ * The prefill reading of a scan: no text layer, so nothing was read at all
+ * (ADR 0024). Every value is on its way from the check, and none is a gap.
+ */
+const SCAN_PREFILL = applicationDocument({
+  extraction_path: 'not_read',
+  pages_read: 0,
+  pages_not_reached: 3,
+  fields: [
+    parsedField('brand_name', null),
+    parsedField('class_type', null),
+    parsedField('alcohol_content', null),
+    parsedField('net_contents', null),
+    parsedField('beverage_type', null),
+  ],
+  artwork_images_found: 0,
+  artwork_images_read: 0,
+  artwork_read: false,
+  label_artwork_page: null,
+  label_artwork_available: false,
+  notes: [
+    'This file has no text to read, so its pages will be read as pictures when the label is checked.',
+  ],
+})
+
+const SCAN_ONLY = classification({
+  files: [fileClassification('scan.pdf', 'application_document')],
+  application_document: SCAN_PREFILL,
   label_images: 0,
 })
 
@@ -100,6 +131,36 @@ describe('which fields the artwork still owes', () => {
     expect(
       pendingFromArtwork(applicationDocument({ artwork_read: false, artwork_images_found: 0 })),
     ).toEqual([])
+  })
+})
+
+describe('which fields a scan still owes (ADR 0024)', () => {
+  it('names every value on a document whose pages were not read', () => {
+    // Nothing was read, so nothing is absent yet: all five are on their way.
+    expect(pendingFromDocument(SCAN_PREFILL)).toEqual([
+      'brand_name',
+      'class_type',
+      'alcohol_content',
+      'net_contents',
+      'beverage_type',
+    ])
+  })
+
+  it('falls back to the artwork rule on a document that was read', () => {
+    expect(pendingFromDocument(PREFILL)).toEqual(['alcohol_content', 'net_contents'])
+    expect(pendingFromDocument(null)).toEqual([])
+  })
+})
+
+describe('the screen after a prefill that left the pages unread', () => {
+  it('says the file will be read when the label is checked, and asks for nothing', async () => {
+    stubClassify(SCAN_ONLY)
+    await upload()
+
+    expect(screen.getByText(/values were filled in/).textContent).toContain('has no text to read')
+    expect(screen.queryByText(/you will need to enter/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/values were not read/i)).not.toBeInTheDocument()
+    expect(document.activeElement).not.toBe(screen.getByLabelText('Brand name'))
   })
 })
 

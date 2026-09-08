@@ -200,6 +200,35 @@ _COLOUR_PIXEL_SHARE = 0.01
 # points below every case where it won, which is as much margin as the two
 # clusters allow. It is not a quality bar for the answer: a read scoring below
 # it is not discarded, it is compared.
+#
+# **What it does and does not fire on, measured on the two real filings in
+# samples/real/ on 2026-09-08 (session container, Tesseract 5.3.4).** The
+# question was whether the second pass could be skipped on a panel whose first
+# pass had already read confidently, and the answer is that it already is, and
+# that on the bourbon filing no first pass ever does. First pass is the colour
+# arm on a coloured panel and the preprocessed arm on a monochrome one:
+#
+# =========================  ========  ===============  =====================  ========
+# panel                      source    first pass       second pass            winner
+# =========================  ========  ===============  =====================  ========
+# mezcal, 1750 x 1150        colour    colour 89.6      not run                colour
+# bourbon, 1950 x 862        colour    colour 0.0       pre 0.0, plain 0.0     none read
+# bourbon, 1350 x 300        mono      pre 44.7         plain 89.9             plain
+# bourbon, 1103 x 340        colour    colour 41.2      pre 29.0, plain 36.6   colour
+# bourbon, 1050 x 309        mono      pre 56.3         plain 86.8             plain
+# bourbon, 187 x 1697        mono      pre 67.0         plain 23.6             preprocessed
+# =========================  ========  ===============  =====================  ========
+#
+# The mezcal's one panel clears the line on its first pass and costs one arm.
+# On the bourbon the highest first pass is 67.0, one word on the strip, and the
+# two panels that read well read well on the *second* pass: the plain arm is
+# where the brand name and the government warning come from. So there is no
+# second pass on that filing this rule could drop without changing the answer,
+# and the 12 arm reads its 19 Tesseract reads contain are each doing the work
+# v1.0.1 measured for. The other 7 are orientation: one OSD call per panel and
+# the two-read second opinion where OSD answered under the floor. What bounds
+# a document that carries more panels than these is `Settings.max_document_reads`,
+# not this constant.
 PREPROCESS_SHORT_CIRCUIT_CONFIDENCE = 85.0
 
 
@@ -513,6 +542,13 @@ class OcrResult:
     orientation: Orientation = Orientation()
     read_path: ReadPath = ReadPath()
     segmentation: Segmentation = Segmentation()
+    # How many times Tesseract was invoked to produce this result: the
+    # orientation call, the second opinion's scored rotations where it ran, and
+    # one per arm read. It is the same count ``app.timing`` tallies for the
+    # request, carried on the result so that a caller reading several pictures
+    # can add them up without a recording open, which is what the per-document
+    # read budget in ``app.application_form`` does.
+    tesseract_reads: int = 0
 
     @property
     def has_text(self) -> bool:
@@ -1004,6 +1040,7 @@ def extract_text(
         lines=winner.lines,
         orientation=prepared.orientation,
         segmentation=winner.segmentation,
+        tesseract_reads=_orientation_reads(prepared.orientation) + len(arms),
         read_path=ReadPath(
             variant=winner.variant,
             preprocessed_confidence=scored.get("preprocessed", 0.0),
@@ -1012,6 +1049,27 @@ def extract_text(
             decided_by=decided_by,
         ),
     )
+
+
+def _orientation_reads(orientation: Orientation) -> int:
+    """How many engine invocations turning the image upright cost.
+
+    One for the OSD call whenever it was attempted, which is every method but
+    ``disabled``: an OSD call that came back "too few characters" was still a
+    call, and ``detect_orientation`` tallies it as one. Two more where the
+    second opinion scored the OSD verdict against its opposite, and two more
+    again where that scoring read nothing at the reduced scale and was repeated
+    at full resolution. The same arithmetic ``timing.tesseract_read`` records
+    as it happens, restated here from the reported method so the two cannot
+    drift apart without ``tests/test_ocr.py`` noticing.
+    """
+    if orientation.method == "disabled":
+        return 0
+    if orientation.method == "osd_180_check":
+        return 3
+    if orientation.method == "osd_180_check_full_resolution":
+        return 5
+    return 1
 
 
 def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
