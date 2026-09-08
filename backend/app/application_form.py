@@ -108,7 +108,11 @@ APPLICATION_FIELDS = (
     "beverage_type",
 )
 
-ExtractionPath = Literal["form_fields", "embedded_text", "ocr"]
+# ``not_read`` is the prefill pass on a document with no text layer: its pages
+# were located and counted and deliberately not read, because reading them is
+# the most expensive thing this module does and the check a moment later reads
+# them anyway (ADR 0024, extending ADR 0017 from the pictures to the pages).
+ExtractionPath = Literal["form_fields", "embedded_text", "ocr", "not_read"]
 
 # Where one value came from, inside the document (ADR 0010). Reported per value
 # because a document can now answer from two different places at once, and a
@@ -297,6 +301,15 @@ class ParsedApplication:
     # a result already in memory. Handing the read on is the same trick ADR 0011
     # plays with the classifier's read, for the same reason.
     label_artwork_read: OcrResult | None = None
+    # What this reading cost against the per-document ceiling (NFR-1,
+    # ADR 0023): the Tesseract invocations spent on pages and pictures
+    # together, the ceiling itself, whether it was reached, and how many pages
+    # the OCR fallback did not get to because of it. Pictures it did not get
+    # to are in ``artwork_images_accepted`` as ``not_reached``.
+    tesseract_reads: int = 0
+    read_budget: int = 0
+    read_budget_reached: bool = False
+    pages_not_reached: int = 0
 
     @property
     def found_any(self) -> bool:
@@ -329,6 +342,7 @@ def parse_application_document(
     *,
     pre_read: OcrResult | None = None,
     read_artwork: bool = True,
+    read_pages: bool = True,
 ) -> ParsedApplication:
     """Read one uploaded COLA document. Never reaches the network (NFR-3).
 
@@ -345,6 +359,16 @@ def parse_application_document(
     it twice was the same picture through the same pipeline in two requests, for
     one submission. It has no effect on an image, which carries no objects to
     lift out.
+
+    ``read_pages`` is the same decision for a PDF that carries no text layer
+    ([ADR 0024](../../docs/adr/0024-the-scanned-form-is-read-once.md)). Reading
+    such a file means rendering every page and putting each through the label
+    pipeline, which on a three-page scan measured about ten seconds on the
+    deployed build, and the check re-read the same pages a moment later. The
+    prefill pass sets it False and reports the path as ``not_read``; the check
+    sets it True. It has no effect on a document with a text layer, whose
+    pages are never rendered for reading, and no effect on an image, which is
+    read the one way it can be.
     """
     if not content:
         raise UnreadableDocumentError(
@@ -352,7 +376,7 @@ def parse_application_document(
             "type the application values instead."
         )
     if _is_pdf(content, content_type):
-        return _parse_pdf(content, read_artwork=read_artwork)
+        return _parse_pdf(content, read_artwork=read_artwork, read_pages=read_pages)
     return _parse_image(content, pre_read=pre_read)
 
 
@@ -398,10 +422,24 @@ def _png_bytes(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplication:
-    """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``."""
+def _parse_pdf(
+    content: bytes, *, read_artwork: bool = True, read_pages: bool = True
+) -> ParsedApplication:
+    """Read one PDF. Every PDFium call is made under ``_PDFIUM_LOCK``.
+
+    **One budget for the whole document** (NFR-1, ADR 0023). ``budget`` counts
+    every Tesseract invocation this reading makes, on the embedded pictures and
+    on the rendered pages alike, against ``Settings.max_document_reads``. It is
+    consulted before each picture and before each page, never inside one, so a
+    picture is read whole or not at all; what it stops is listed on the result
+    as ``not_reached`` and counted in ``pages_not_reached``, and the notes say
+    so in words. A budget that cut silently would be worse than the slowness it
+    prevents, because an agent would read "not found" for a value nobody looked
+    for.
+    """
+    budget = _ReadBudget(limit=settings.max_document_reads)
     with _PDFIUM_LOCK, timing.phase("document_pdfium"):
-        contents = _read_pdf_with_pdfium(content)
+        contents = _read_pdf_with_pdfium(content, render_pages=read_pages)
 
     # The page renders are encoded here, after the lock, because encoding is
     # Pillow work that serialised every document in a batch for nothing
@@ -433,6 +471,7 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
             contents.artwork,
             contents.artwork_rejected,
             declared=None if contents.text_side is None else contents.text_side.values,
+            budget=budget,
         )
         if read_artwork
         else _unread_artwork(contents.artwork, contents.artwork_rejected)
@@ -440,15 +479,29 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # Item 5, sampled off the rendered page (ADR 0016). Outside the lock like
     # every other expensive step, and only where nothing has answered it already.
     # None here means no page's text layer named the item; the scan branch below
-    # gets a second chance at it from the pages it renders anyway.
+    # gets a second chance at it from the pages it renders anyway. Where the
+    # captions have to be recognized rather than read out of a text layer that
+    # is one Tesseract read, charged to the budget and never gated by it: it is
+    # one read of one page, and it is what settles the beverage type.
     item_five = read_item_five(item_five_page)
+    if item_five_page is not None and item_five_page[1] is None:
+        budget.charge(1)
 
     if contents.text_side is not None:
         return _with_notes(
             _with_product_type(_merge_artwork(contents.text_side, artwork), item_five),
             path=contents.text_side.path,
             pages_read=contents.pages,
+            budget=budget,
         )
+
+    # No text layer, and this is the prefill pass: the pages are not read here
+    # (ADR 0024). What comes back says that the file is a scan whose values
+    # are still to be read, which the interface treats as values on their way
+    # rather than as gaps, exactly as it treats the pictures ADR 0017 leaves
+    # to the check. Nothing is a value here and nothing claims to be.
+    if not read_pages:
+        return _deferred_reading(contents, artwork, budget)
 
     # Nothing in the file itself, so it is a scan: read the pages rendered
     # above.
@@ -456,9 +509,15 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
     # already the right way up, and the OSD pass costs about as much again as
     # the read it precedes (see app.ocr).
     ocr_lines: list[OcrLine] = []
+    pages_not_reached = 0
     for rendered in rendered_pages:
+        if not budget.allows():
+            pages_not_reached += 1
+            continue
         with timing.phase("page_ocr"):
-            ocr_lines.extend(extract_text(rendered, correct_orientation=False).lines)
+            page_read = extract_text(rendered, correct_orientation=False)
+        budget.charge(page_read.tesseract_reads)
+        ocr_lines.extend(page_read.lines)
     # Item 5 on a page with no text layer to search (ADR 0016). The captions have
     # to be recognized, so this is gated on the page OCR above having read the
     # item's own caption: a document that is not this form never pays for it, and
@@ -469,11 +528,19 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
         and _ITEM_FIVE_CAPTION.search("\n".join(line.text for line in ocr_lines))
     ):
         item_five = read_item_five((rendered_pages[0], None))
+        budget.charge(1)
 
     # A document whose pictures were deliberately left unread is not a document
-    # that could not be read (ADR 0017). Raising here would tell an agent their
-    # file is unreadable at prefill time and then verify it a moment later.
-    if not ocr_lines and not artwork.values and not (artwork.images_found and not artwork.read):
+    # that could not be read (ADR 0017), and neither is one whose pages the
+    # budget did not reach: both are documents that were not looked at, and
+    # the response says which. Raising here would tell an agent their file is
+    # unreadable at prefill time and then verify it a moment later.
+    if (
+        not ocr_lines
+        and not artwork.values
+        and not (artwork.images_found and not artwork.read)
+        and not pages_not_reached
+    ):
         raise UnreadableDocumentError(
             "No text could be read from the uploaded PDF, either from the file "
             "itself, or by reading its pages as images, or from any picture "
@@ -490,7 +557,67 @@ def _parse_pdf(content: bytes, *, read_artwork: bool = True) -> ParsedApplicatio
             _merge_artwork(_sourced(from_pages, "embedded_text"), artwork), item_five
         ),
         path="ocr",
-        pages_read=contents.pages,
+        pages_read=contents.pages - pages_not_reached,
+        budget=budget,
+        pages_not_reached=pages_not_reached,
+    )
+
+
+@dataclass
+class _ReadBudget:
+    """How many Tesseract invocations one document may still cost (ADR 0023).
+
+    ``limit`` is ``Settings.max_document_reads`` and ``spent`` is every read
+    made so far, taken from ``OcrResult.tesseract_reads`` after each picture or
+    page rather than from the request's recording, so that the same arithmetic
+    holds outside a recording: in a test, in ``scripts/measure.py``, and on the
+    batch path where each row has a recording of its own.
+
+    Checked, not enforced mid-read: ``allows`` is asked before a picture or a
+    page is started, and a picture is read whole. So the reads can pass the
+    limit by at most one picture's cost, which is eight at the very most, and
+    the last picture read is never a half-comparison with an arm missing.
+    """
+
+    limit: int
+    spent: int = 0
+
+    def allows(self) -> bool:
+        return self.spent < self.limit
+
+    def charge(self, reads: int) -> None:
+        self.spent += reads
+
+    @property
+    def reached(self) -> bool:
+        return self.spent >= self.limit
+
+
+def _deferred_reading(
+    contents: _PdfContents, artwork: _ArtworkReading, budget: _ReadBudget
+) -> ParsedApplication:
+    """A scan on the prefill pass: counted, not read (ADR 0024).
+
+    Every value is absent because nothing was read, not because the document
+    lacks it, and the one note says so. The absence notes ``_with_notes``
+    attaches are deliberately not attached: "the form has no box for this"
+    is true of the form and not of a reading that never happened, and the
+    check attaches them a moment later when it has read the pages.
+    """
+    return ParsedApplication(
+        values=dict.fromkeys(APPLICATION_FIELDS),
+        path="not_read",
+        pages_read=0,
+        notes=[DEFERRED_PAGES_NOTE],
+        artwork_images_found=artwork.images_found,
+        artwork_images_read=artwork.images_read,
+        artwork_images_rejected=artwork.rejected,
+        artwork_images_accepted=artwork.accepted,
+        artwork_read=artwork.read,
+        tesseract_reads=budget.spent,
+        read_budget=budget.limit,
+        read_budget_reached=budget.reached,
+        pages_not_reached=contents.pages,
     )
 
 
@@ -529,8 +656,12 @@ def _open_page(document: pdfium.PdfDocument, index: int) -> Iterator[pdfium.PdfP
         page.close()
 
 
-def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
+def _read_pdf_with_pdfium(content: bytes, *, render_pages: bool = True) -> _PdfContents:
     """Everything that touches PDFium, in one place, for one document.
+
+    ``render_pages`` is False on the prefill pass (ADR 0024): a document with
+    no text layer comes back with its pages counted and none rendered, because
+    a render nobody reads is PDFium time under the lock for nothing.
 
     Returns the reading taken from the file itself, when it carried values, plus
     the pages rendered to PNG bytes for the OCR fallback and every embedded
@@ -596,7 +727,7 @@ def _read_pdf_with_pdfium(content: bytes) -> _PdfContents:
             )
 
         rendered_pages: list[bytes] = []
-        for index in range(pages):
+        for index in range(pages if render_pages else 0):
             try:
                 rendered_pages.append(_render_page(document, index))
             except Exception as exc:
@@ -661,7 +792,12 @@ def _parse_image(content: bytes, *, pre_read: OcrResult | None = None) -> Parsed
     if parsed.values.get("beverage_type") is None and _ITEM_FIVE_CAPTION.search(result.text):
         parsed = _with_product_type(parsed, read_item_five((content, None)))
 
-    return _with_notes(parsed, path="ocr", pages_read=1)
+    # One picture, read once: its reads are reported against the ceiling for
+    # the same reason a PDF's are, and never gated by it, because a single
+    # image is the least a document can cost.
+    budget = _ReadBudget(limit=settings.max_document_reads)
+    budget.charge(result.tesseract_reads)
+    return _with_notes(parsed, path="ocr", pages_read=1, budget=budget)
 
 
 # --------------------------------------------------------------------------
@@ -789,7 +925,11 @@ RejectionReason = Literal["area", "unreadable"]
 # opposite things to the next person reading a response: ``not_needed`` says
 # the values were found without this picture, ``not_read`` says nothing about
 # whether they are on it.
-AcceptedStatus = Literal["read", "no_text", "not_needed", "not_read", "undecodable"]
+# ``not_reached`` (ADR 0023) means the document's read budget was spent
+# before the reader got to this picture. It is kept apart from ``not_read``
+# for the same reason ``not_needed`` is: an agent has to be able to see that
+# the values may be on a picture nobody looked at, and why nobody did.
+AcceptedStatus = Literal["read", "no_text", "not_needed", "not_read", "not_reached", "undecodable"]
 
 
 def _rejection(width: int, height: int) -> RejectionReason | None:
@@ -881,8 +1021,16 @@ def _read_artwork(
     rejected: list[RejectedImage] | None = None,
     *,
     declared: Mapping[str, str | None] | None = None,
+    budget: _ReadBudget | None = None,
 ) -> _ArtworkReading:
     """Read the surviving embedded pictures, largest first, until the values are in hand.
+
+    **And never past the document's read budget** (ADR 0023). Before each
+    picture ``budget.allows`` is asked; the first time it says no, that picture
+    and every one after it are listed as ``not_reached`` and the reading
+    stops. The check is between pictures, so the picture being read when the
+    line is crossed is read whole. A caller that passes no budget gets one at
+    the configured ceiling, so the rule holds wherever this is called from.
 
     **The pipeline is the one label artwork goes through, unchanged.**
     ``extract_text`` is called with its defaults, so the v1.0.1 orientation
@@ -948,8 +1096,12 @@ def _read_artwork(
 
     bound = settings.max_artwork_images
     accepted.extend(_accepted(image, "not_read") for image in images[bound:])
+    budget = _ReadBudget(limit=settings.max_document_reads) if budget is None else budget
 
     for position, image in enumerate(images[:bound]):
+        if not budget.allows():
+            accepted.extend(_accepted(rest, "not_reached") for rest in images[position:bound])
+            break
         try:
             with timing.phase("artwork_ocr"):
                 result = extract_text(image.content)
@@ -960,6 +1112,7 @@ def _read_artwork(
             )
             accepted.append(_accepted(image, "undecodable"))
             continue
+        budget.charge(result.tesseract_reads)
         if not result.has_text:
             accepted.append(_accepted(image, "no_text", result.mean_confidence))
             continue
@@ -1741,18 +1894,36 @@ SELF_CONSISTENCY_NOTE = (
 )
 
 
-def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: int):
+def _with_notes(
+    parsed: ParsedApplication,
+    *,
+    path: ExtractionPath,
+    pages_read: int,
+    budget: _ReadBudget | None = None,
+    pages_not_reached: int = 0,
+):
     """Attach the honest explanation for each value the document did not carry.
 
     A value the embedded artwork supplied gets no absence note, because it is no
     longer absent. What it gets instead is the self-consistency note, once, for
     the whole reading.
+
+    **What the read budget left unread is said in words here** (ADR 0023), as
+    well as in the statuses and counts, because the notes are what the
+    interface prints under the values and what a batch line carries: a value
+    reported not found on a document whose pages or pictures were never
+    looked at has to say so where the agent reads it.
     """
     notes = [
         _ABSENCE_NOTES[name]
         for name in APPLICATION_FIELDS
         if parsed.values.get(name) is None and name in _ABSENCE_NOTES
     ]
+    panels_not_reached = sum(
+        1 for image in parsed.artwork_images_accepted if image.status == "not_reached"
+    )
+    if budget is not None and (pages_not_reached or panels_not_reached):
+        notes.append(_budget_note(budget, pages_not_reached, panels_not_reached))
     # Notes a step upstream already attached, kept rather than rebuilt over.
     # The item 5 sampling reason is one of these, and it is the sentence that
     # says *why* the boxes did not settle it, which is a different thing for an
@@ -1761,4 +1932,37 @@ def _with_notes(parsed: ParsedApplication, *, path: ExtractionPath, pages_read: 
     from_artwork = "embedded_artwork" in parsed.value_sources.values()
     if from_artwork or parsed.label_artwork is not None:
         notes.append(SELF_CONSISTENCY_NOTE)
-    return replace(parsed, path=path, pages_read=pages_read, notes=notes)
+    return replace(
+        parsed,
+        path=path,
+        pages_read=pages_read,
+        notes=notes,
+        tesseract_reads=0 if budget is None else budget.spent,
+        read_budget=settings.max_document_reads if budget is None else budget.limit,
+        read_budget_reached=False if budget is None else budget.reached,
+        pages_not_reached=pages_not_reached,
+    )
+
+
+def _budget_note(budget: _ReadBudget, pages: int, panels: int) -> str:
+    """The sentence that says what the budget did not get to, in the voice of
+    the artwork table's own "not read" copy."""
+    left: list[str] = []
+    if pages:
+        left.append(f"{pages} page{'s' if pages != 1 else ''}")
+    if panels:
+        left.append(f"{panels} picture{'s' if panels != 1 else ''}")
+    return (
+        f"{' and '.join(left)} of this application {'were' if pages + panels != 1 else 'was'} "
+        f"not read: the limit on how much reading one application may cost, "
+        f"{budget.limit} reads, was reached after {budget.spent}. Any value reported "
+        "not found may be on what was not read."
+    )
+
+
+# What the prefill pass says about a document with no text layer (ADR 0024).
+DEFERRED_PAGES_NOTE = (
+    "This file has no text to read, so its pages will be read as pictures when "
+    "the label is checked, the way a label image is read. Nothing has been taken "
+    "from it yet."
+)

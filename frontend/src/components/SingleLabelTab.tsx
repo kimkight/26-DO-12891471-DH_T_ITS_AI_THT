@@ -109,7 +109,7 @@ import { typedValues } from '../lib/applicationFields'
 import type { Disagreements, SourceMap } from '../lib/applicationFields'
 import { documentSource } from '../lib/applicationSources'
 import { announcement } from '../lib/outcomes'
-import { pendingFromArtwork } from '../lib/pendingArtwork'
+import { pendingFromDocument } from '../lib/pendingArtwork'
 import { EMPTY_APPLICATION } from '../types'
 import type { ApplicationData, ApplicationDocumentResult, ClassificationResult } from '../types'
 
@@ -384,14 +384,16 @@ export function SingleLabelTab() {
     // A gap is a compared value neither the document nor the agent supplied.
     // Something already typed is not a gap: the agent answered it.
     //
-    // Nor is a value the artwork is about to supply (ADR 0017). The prefill
-    // pass reads the document's text layer and leaves the pictures to the
-    // check, so alcohol content and net contents are commonly still to come
-    // rather than absent. Opening a box and moving focus into it for a value
-    // the next click fills in would be the tool asking the agent to do its own
+    // Nor is a value the artwork is about to supply (ADR 0017), nor any value
+    // on a scan whose pages the check reads (ADR 0024). The prefill pass reads
+    // the document's text layer and leaves the pictures, and the pages of a
+    // file that has no text layer, to the check, so alcohol content and net
+    // contents are commonly still to come rather than absent, and on a scan
+    // all five are. Opening a box and moving focus into it for a value the
+    // next click fills in would be the tool asking the agent to do its own
     // work, one second before doing it.
     const supplied = new Set(found.map((entry) => entry.name))
-    const owed = pendingFromArtwork(document)
+    const owed = pendingFromDocument(document)
     const stillComing = new Set(owed)
     setPending(owed.filter((name) => !application[name].trim()))
     setGaps(

@@ -235,6 +235,24 @@ describe('a filing whose labels are separate panels (ADR 0010 as amended, #121)'
       'One picture cleared the size floor and was not read as label artwork: 1050 by 309 on ' +
         'page 3 (the pictures read before it already carried every value).',
     )
+    // A picture the read budget stopped short of says so, in the same voice,
+    // so that a value reported not found can be traced to a picture nobody
+    // looked at (ADR 0023).
+    expect(
+      artworkNote(
+        applicationDocument({
+          artwork_images_found: 2,
+          artwork_images_read: 1,
+          artwork_images_accepted: [
+            { page: 2, width: 1750, height: 1150, status: 'read', ocr_confidence: 89.6 },
+            { page: 3, width: 187, height: 1697, status: 'not_reached', ocr_confidence: null },
+          ],
+        }),
+      ),
+    ).toBe(
+      'One picture cleared the size floor and was not read as label artwork: 187 by 1697 on ' +
+        'page 3 (the limit on how much reading one application may cost was reached before it).',
+    )
     // Nothing to say is the ordinary case, and it says nothing.
     expect(artworkNote(applicationDocument())).toBeNull()
     expect(artworkNote(null)).toBeNull()

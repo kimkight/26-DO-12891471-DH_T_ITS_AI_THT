@@ -382,17 +382,56 @@ class ApplicationDocumentResult(BaseModel):
     agent's correction always wins (ADR 0008).
     """
 
-    extraction_path: Literal["form_fields", "embedded_text", "ocr"] = Field(
+    extraction_path: Literal["form_fields", "embedded_text", "ocr", "not_read"] = Field(
         description=(
             "How the values were read. 'form_fields' means the PDF's AcroForm "
             "fields, which is where a filled-in copy of the downloadable form "
             "keeps them; 'embedded_text' means the file's own text layer, which "
             "is deterministic; 'ocr' means the pages were read as images, which "
             "carries the same accuracy and failure modes as reading a label "
-            "photograph."
+            "photograph; 'not_read' means the file has no text layer and this "
+            "was the prefill pass, which does not read pages as images "
+            "(ADR 0024): every value is still to come, from the check, and none "
+            "is a gap yet."
         )
     )
     pages_read: int = Field(description="How many pages of the document were read.")
+    pages_not_reached: int = Field(
+        default=0,
+        description=(
+            "How many pages the OCR fallback did not get to: on the prefill "
+            "pass of a scan, all of them (ADR 0024); on the check, the pages "
+            "past the point where the document's read budget was spent "
+            "(ADR 0023). Zero on a document with a text layer, whose pages are "
+            "never read as images."
+        ),
+    )
+    tesseract_reads: int = Field(
+        default=0,
+        description=(
+            "How many times the OCR engine was invoked to read this document, "
+            "its pages and its pictures together. The number the read budget "
+            "counts (ADR 0023)."
+        ),
+    )
+    read_budget: int = Field(
+        default=0,
+        description=(
+            "The ceiling on tesseract_reads for one document, "
+            "TTB_MAX_DOCUMENT_READS. Checked before each page and each "
+            "picture, never inside one, so the count above can pass it by at "
+            "most one picture's reads."
+        ),
+    )
+    read_budget_reached: bool = Field(
+        default=False,
+        description=(
+            "Whether the ceiling was reached. When true, look for 'not_reached' "
+            "in artwork_images_accepted and at pages_not_reached: a value "
+            "reported not found may be on something nobody read, and notes "
+            "says so in words."
+        ),
+    )
     fields: list[ParsedApplicationField] = Field(
         description="One entry per application value, whether or not it was found."
     )
@@ -530,17 +569,22 @@ class AcceptedImageDetail(BaseModel):
     page: int = Field(description="The page the image sat on, numbered from 1.")
     width: int = Field(description="Its width in pixels, as the file stores it.")
     height: int = Field(description="Its height in pixels, as the file stores it.")
-    status: Literal["read", "no_text", "not_needed", "not_read", "undecodable"] = Field(
-        description=(
-            "What happened to it. 'read' means it went through OCR and text came "
-            "back; 'no_text' means it went through and nothing did; "
-            "'undecodable' means it would not decode; 'not_needed' means the "
-            "pictures read before it, largest first, already carried all five "
-            "values, so reading stopped there (ADR 0010 as amended); 'not_read' "
-            "means it was never put through the engine for some other reason, "
-            "either because this was the prefill pass that reads no picture "
-            "(ADR 0017) or because it fell past the ceiling on how many "
-            "pictures are read (TTB_MAX_ARTWORK_IMAGES)."
+    status: Literal["read", "no_text", "not_needed", "not_read", "not_reached", "undecodable"] = (
+        Field(
+            description=(
+                "What happened to it. 'read' means it went through OCR and text came "
+                "back; 'no_text' means it went through and nothing did; "
+                "'undecodable' means it would not decode; 'not_needed' means the "
+                "pictures read before it, largest first, already carried all five "
+                "values, so reading stopped there (ADR 0010 as amended); 'not_read' "
+                "means it was never put through the engine for some other reason, "
+                "either because this was the prefill pass that reads no picture "
+                "(ADR 0017) or because it fell past the ceiling on how many "
+                "pictures are read (TTB_MAX_ARTWORK_IMAGES); 'not_reached' means "
+                "the document's read budget (TTB_MAX_DOCUMENT_READS) was spent on "
+                "the pages and pictures before it, so the reader stopped there "
+                "(ADR 0023). Any value reported not found may be on it."
+            )
         )
     )
     ocr_confidence: float | None = Field(
@@ -617,6 +661,25 @@ class ClassificationResult(BaseModel):
             "Set when a file classified as the application side could not be "
             "read (FR-9). The classification still stands and is reported; what "
             "failed is the reading of it."
+        ),
+    )
+    elapsed_ms: float = Field(
+        default=0.0,
+        description=(
+            "Wall time inside the handler, from the parts being in memory to "
+            "this response being built (NFR-1). Reported because this request "
+            "runs the moment an agent picks a file, before anything they "
+            "click, and until it was measured a ten-second prefill of a "
+            "scanned form was invisible: the route logged counts only."
+        ),
+    )
+    timings: PhaseTimings | None = Field(
+        default=None,
+        description=(
+            "Where that time went, in the same phases the check reports. "
+            "document_pdfium_ms is the ordinary cost of this request; any OCR "
+            "phase above zero here is a picture submitted as the application "
+            "side, which has to be read to be sorted (ADR 0011)."
         ),
     )
 

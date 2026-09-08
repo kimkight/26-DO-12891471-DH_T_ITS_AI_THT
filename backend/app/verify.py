@@ -263,6 +263,10 @@ def document_result(parsed: ParsedApplication) -> ApplicationDocumentResult:
     return ApplicationDocumentResult(
         extraction_path=parsed.path,
         pages_read=parsed.pages_read,
+        pages_not_reached=parsed.pages_not_reached,
+        tesseract_reads=parsed.tesseract_reads,
+        read_budget=parsed.read_budget,
+        read_budget_reached=parsed.read_budget_reached,
         fields=[
             ParsedApplicationField(
                 name=name,

@@ -130,6 +130,47 @@ class Settings(BaseSettings):
     # not_read rather than dropped.
     max_artwork_images: int = 8
 
+    # The ceiling on how many Tesseract invocations reading one document may
+    # cost, its rendered pages and its embedded pictures together (NFR-1).
+    #
+    # **Why a second ceiling, when the count above already bounds the
+    # pictures.** A count of pictures bounds nothing about what each one costs.
+    # One picture is one to eight engine invocations: the orientation call, up
+    # to four more where the orientation check runs and has to be repeated at
+    # full resolution, and one per arm compared. The bourbon filing in
+    # samples/real/, measured 2026-09-08 on a session container, cost 19 reads
+    # over its five panels, 3 to 5 each, for 6.7 seconds of artwork OCR; on the
+    # deployed v1.5.0 build the same document measured 8064 ms end to end, of
+    # which 7679 ms was artwork OCR. NFR-1 is about five seconds. A document
+    # that carried the eight pictures the count admits, each costing what the
+    # worst of these five cost, would run to 40 reads and well past fifteen
+    # seconds with nothing stopping it. This is the stop.
+    #
+    # **Reads, not milliseconds, and the choice is deliberate.** A budget in
+    # milliseconds would make NFR-1 true by construction and it would make the
+    # answer depend on the host: the same filing would be read in full on a
+    # fast task and cut short on a slow one, or on the same task while a batch
+    # is saturating its one vCPU, and no test could pin which pictures get
+    # read. A budget in reads gives the same document the same answer on every
+    # machine, is asserted exactly in tests, and only approximates the time: a
+    # read measured between 117 ms (a 187 by 1697 strip) and 1485 ms (a 1750
+    # by 1150 sheet at full resolution) on the same container, so the bound
+    # this puts on the clock is loose by that ratio. The alternative is
+    # recorded in ADR 0023 with what would change the choice.
+    #
+    # **Twenty-four**, which is the picture count above times the least a
+    # picture costs when its first read does not settle it: the orientation
+    # call, the preprocessed arm and the plain arm. It admits both real filings
+    # in full, the bourbon's 19 with one worst-case panel of margin, and cuts
+    # the runaway case from 40 to 24. At the bourbon's measured 404 ms per
+    # read that is about ten seconds of OCR, which is over NFR-1 and is said
+    # so: this ceiling does not make the bourbon meet the target, it stops a
+    # document that carries more than the bourbon from running away. An
+    # operator can lower it; the budget is checked before each picture and each
+    # page, never in the middle of one, and what it cuts is listed as
+    # `not_reached` in the response rather than dropped.
+    max_document_reads: int = 24
+
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95
     review_threshold: int = 80
