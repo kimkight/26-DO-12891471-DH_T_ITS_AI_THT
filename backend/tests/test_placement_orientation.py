@@ -85,6 +85,12 @@ def stored_turned(label_png: bytes, clockwise_degrees: int) -> bytes:
     return png_bytes(Image.fromarray(cv2.cvtColor(turned, cv2.COLOR_BGR2RGB)))
 
 
+@pytest.fixture(scope="module")
+def label() -> bytes:
+    """The sample label, rendered once for the module."""
+    return render_png_bytes(SAMPLE_LABEL)
+
+
 class _Matrix:
     def __init__(self, values):
         self._values = values
@@ -179,10 +185,6 @@ class TestTheTurnIsTheOneThePageShows:
     has to be the one that matches the render. Sixteen cases, no engine.
     """
 
-    @pytest.fixture(scope="class")
-    def label(self) -> bytes:
-        return render_png_bytes(SAMPLE_LABEL)
-
     @staticmethod
     def displayed(pdf: bytes) -> np.ndarray:
         """The picture page as PDFium renders it, cropped to its ink."""
@@ -234,10 +236,6 @@ class TestTheTurnIsTheOneThePageShows:
 @requires_fonts
 class TestAPlacedPictureMakesNoOrientationCall:
     """The reads, and what the response says about them."""
-
-    @pytest.fixture(scope="class")
-    def label(self) -> bytes:
-        return render_png_bytes(SAMPLE_LABEL)
 
     def test_the_turn_is_applied_and_reported_and_costs_nothing(self, label):
         """The same pixels stored sideways and given the turn that undoes it
