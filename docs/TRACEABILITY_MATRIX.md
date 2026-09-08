@@ -114,7 +114,7 @@ Every requirement maps to at least one story. No orphans.
 | Requirements defined | 26 (15 functional, 11 non-functional) |
 | Requirements traced to a story | 26 of 26 |
 | Requirements traced to a GitHub issue | 26 of 26 |
-| Requirements fully implemented | 25 of 26 |
+| Requirements fully implemented | 24 of 26 |
 | Requirements with an automated test | 23 of 26 |
 | User stories | 30 |
 | Stories with acceptance criteria | 30 of 30 |
@@ -124,8 +124,10 @@ The two counts are read off the section 2 table by one rule each, so they can be
 checked rather than taken, and `backend/tests/test_release_metadata.py` checks
 the first three rows and the ADR row against the headings in the documents on
 every run, because the v1.2.0 code review found every one of them stale. "Fully implemented" counts rows whose Implemented
-column says **Yes**; the one that does not is NFR-10, which is portability
-argued rather than demonstrated. "With an automated test" counts rows whose
+column says **Yes**; the two that do not are NFR-10, which is portability
+argued rather than demonstrated, and NFR-1 on the application-document path,
+which is partial since 2026-09-08: measured on three real filings against the
+deployed v1.5.0 build, one is inside the target and two breach it. "With an automated test" counts rows whose
 Tested column names a test or a CI job; the three that do not are NFR-2, which
 is covered only in part, and NFR-10 and NFR-11, which have none.
 
