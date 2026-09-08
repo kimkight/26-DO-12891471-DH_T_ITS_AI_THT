@@ -1019,6 +1019,15 @@ Single-label verification returns in about 5 seconds.
   host, and the ADR records the alternative. It does not make a document that
   needs 19 reads meet the target; the traceability matrix reports that
   shortfall, as the criterion above requires.
+- **Measured on the deployed v1.5.0 build with three real filings, and
+  partially met.** Recorded 2026-09-08 in `docs/09_DEPLOYMENT.md` section 9
+  and in the traceability matrix: the mezcal in `samples/real/` checks in
+  4816 ms, the bourbon beside it in 8064 ms over five panels and nineteen
+  Tesseract reads, and a third filing with no text layer cost 10322 ms in
+  the upload step alone. One of three is inside the target. The original
+  evidence for this requirement was one document, the mezcal, and the row
+  that said "met" is corrected to partial with the numbers, per the third
+  criterion above.
 - **The upload step is timed too.** Added 2026-09-08: `POST /api/classify`
   logs and returns `elapsed_ms` and the phase breakdown, because a scanned
   form measured 10322 ms in that request on the deployed v1.5.0 build and the
