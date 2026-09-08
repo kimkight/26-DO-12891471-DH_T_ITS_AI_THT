@@ -38,6 +38,7 @@ development. See docs/adr/0008-cola-form-as-application-input.md.
 from __future__ import annotations
 
 import io
+import math
 from dataclasses import dataclass
 
 from PIL import Image, ImageDraw, ImageFont
@@ -353,9 +354,23 @@ def as_png_with_product_type_boxes(
 
 
 def as_pdf_bytes(
-    lines: list[str], *, font_size: int = 9, images: list[bytes] | None = None
+    lines: list[str],
+    *,
+    font_size: int = 9,
+    images: list[bytes] | None = None,
+    image_placement_degrees: float = 0.0,
+    page_rotate: int = 0,
 ) -> bytes:
     """Write the lines into a PDF with a real text layer, plus any images given.
+
+    ``image_placement_degrees`` turns every embedded picture on its page by
+    that angle, counter-clockwise, through the placement matrix the page draws
+    it with, and ``page_rotate`` sets ``/Rotate`` on the picture pages, which
+    is the clockwise turn a viewer applies to the whole page. Both default to
+    the upright placement every real filing measured so far uses. They exist
+    so that tests/test_placement_orientation.py can build the case a real
+    filing has not yet shown, a picture the page turns, and a picture the page
+    slants, which is the case the orientation call is kept for (ADR 0025).
 
     Helvetica is one of the fourteen fonts every PDF reader carries, so nothing
     has to be embedded and the file has no dependency on a font being installed.
@@ -393,13 +408,18 @@ def as_pdf_bytes(
             resources = f"<< /Font << /F1 {font_number} 0 R >> >>"
         else:
             resources = f"<< /XObject << /Im0 {first_image + index - 1} 0 R >> >>"
+        rotate = f" /Rotate {int(page_rotate) % 360}" if index and page_rotate else ""
         objects.append(
             (
                 f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
-                f"/Resources {resources} /Contents {content_number} 0 R >>"
+                f"/Resources {resources} /Contents {content_number} 0 R{rotate} >>"
             ).encode("ascii")
         )
-        objects.append(_stream_object(pages[index] if index == 0 else _image_page_content()))
+        objects.append(
+            _stream_object(
+                pages[index] if index == 0 else _image_page_content(image_placement_degrees)
+            )
+        )
 
     for jpeg, width, height in embedded:
         objects.append(
@@ -427,9 +447,25 @@ def _as_jpeg(png: bytes) -> tuple[bytes, int, int]:
     return buffer.getvalue(), image.width, image.height
 
 
-def _image_page_content() -> bytes:
-    """Draw the page's single image XObject across the whole page."""
-    return (f"q\n{PAGE_WIDTH} 0 0 {PAGE_HEIGHT} 0 0 cm\n/Im0 Do\nQ").encode("ascii")
+def _image_page_content(degrees: float = 0.0) -> bytes:
+    """Draw the page's single image XObject across the whole page.
+
+    With ``degrees`` the picture is turned counter-clockwise by that angle
+    about the centre of the page: the matrix carries the angle's cosine and
+    sine the way any PDF writer's rotate operator does, and the translation
+    keeps the picture's centre on the page's. A turned picture is drawn into
+    a square that fits the page rather than across the whole of it, so that a
+    render of the page shows all of it and a test can compare the two.
+    """
+    if not degrees:
+        return (f"q\n{PAGE_WIDTH} 0 0 {PAGE_HEIGHT} 0 0 cm\n/Im0 Do\nQ").encode("ascii")
+    side = min(PAGE_WIDTH, PAGE_HEIGHT)
+    radians = math.radians(degrees)
+    cos, sin = math.cos(radians), math.sin(radians)
+    a, b, c, d = side * cos, side * sin, -side * sin, side * cos
+    e, f = PAGE_WIDTH / 2 - (a + c) / 2, PAGE_HEIGHT / 2 - (b + d) / 2
+    matrix = " ".join(f"{value:.6f}" for value in (a, b, c, d, e, f))
+    return f"q\n{matrix} cm\n/Im0 Do\nQ".encode("ascii")
 
 
 def _stream_object(content: bytes) -> bytes:

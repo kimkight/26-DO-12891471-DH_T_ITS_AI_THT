@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| Status | Accepted |
+| Status | Accepted; the ceiling amended to 16 by [ADR 0025](0025-orientation-from-the-placement.md) on 2026-09-08, which removed the orientation call from the arithmetic below |
 | Date | 2026-09-08 |
 | Author | Kimberly D. Kight |
 | Decision reference | NFR-1; bounds [ADR 0010](0010-embedded-label-artwork.md) as amended and the OCR fallback of [ADR 0008](0008-cola-form-as-application-input.md); keeps [ADR 0017](0017-read-the-artwork-once.md)'s refusal of a cache |

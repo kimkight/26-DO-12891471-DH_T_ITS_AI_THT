@@ -327,9 +327,14 @@ filed COLAs, the clock started when the file is picked:
 | A third filing with no text layer, not in the repository | **10322 ms** | not reached | 0 | brand and class wrong, beverage type undetermined |
 
 One of three is inside the target. The bourbon's eight seconds are 7679 ms of
-artwork OCR, nineteen Tesseract reads over five panels, which cannot be cut
-without changing its answer, because on that document the confident reads are
-the second pass on each panel; the third filing's ten seconds were the pages
+artwork OCR, nineteen Tesseract reads over five panels, of which the confident
+reads are the second pass on each panel and could not be cut; seven were
+orientation calls on pictures whose page already says which way up they are,
+and one a third arm on a panel that had read nothing twice, and those eight
+are gone ([ADR 0025](docs/adr/0025-orientation-from-the-placement.md),
+[ADR 0026](docs/adr/0026-nothing-twice-is-not-read-a-third-time.md)): eleven
+reads and about 4.3 seconds on a session container, with identical outcomes,
+and not yet re-measured on the deployed build; the third filing's ten seconds were the pages
 of a scan being read as images in the upload step, which now happens once, in
 the check, under a ceiling on how much reading one document may cost
 ([ADR 0023](docs/adr/0023-a-read-budget-per-document.md),

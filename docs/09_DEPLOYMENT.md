@@ -1265,6 +1265,60 @@ This section is the record of the runs; the README is the summary of them.
       `backend/tests/test_read_budget.py` against a fixture scan with the
       ceiling at zero and against the five-panel fixture with it at two.
 
+- [x] **The two cuts, on the same session container (2026-09-08, later the
+      same day; ADR 0025, ADR 0026).** Same method as the entry above:
+      Tesseract 5.3.4, in process through the test client, each committed
+      filing submitted alone, one warm-up discarded, three runs, medians,
+      before and after on one container. Before, the bourbon's nineteen
+      reads were, per panel: the 1950 by 862 painting 4 (orientation call,
+      colour, preprocessed, plain, every arm reading no words), the 1350 by
+      300 panel 3, the 1103 by 340 panel 4, the 1050 by 309 panel 5 (the
+      orientation call, the two-read second opinion, two arms) and the
+      187 by 1697 strip 3; the mezcal's four were the orientation call, the
+      second opinion and one arm. Seven of the bourbon's and three of the
+      mezcal's were orientation, and the turn applied was 0 on every panel,
+      because every picture on both filings is placed upright by its page.
+      The page's placement now decides the turn (ADR 0025), and the plain
+      arm is not read on the painting after the other two arms returned
+      nothing (ADR 0026):
+
+      | Document | `elapsed_ms` before, median (min, max) | `artwork_ocr_ms` | reads | outcome | `elapsed_ms` after, median (min, max) | `artwork_ocr_ms` | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | the mezcal filing | 3728 (3673, 3810) | 3543 | 4 | 5 of 5 | **2152** (2107, 2247) | 1945 | **1** | 5 of 5 |
+      | the bourbon filing | 6714 (6580, 6767) | 6474 | 19 | 1 of 5 | **4267** (4127, 4277) | 4018 | **11** | 1 of 5 |
+
+      `ocr_passes` 1 and 5 on every run. The bourbon's eleven: painting 2,
+      the three horizontal panels 2, 3 and 2, the strip 2. Field outcomes,
+      panel statuses and confidences, winning arms and arm scores are
+      identical before and after on both filings, compared from the
+      response bodies, and the accuracy tier over the twelve synthetic
+      labels is identical line for line. **The bourbon is 1 of 5 on this
+      container in both columns**, where the entry above and the deployed
+      table below say 2 of 5: the class or type is on the painting's bottom
+      line with the two values, and this Tesseract reads nothing off that
+      panel; the deployed 5.3.0 read it at 45.3. Nothing in this session
+      moved that outcome in either direction.
+
+      **What was found about the panels.** No panel on either filing is
+      stored rotated: the placement matrices are axis-aligned and positive
+      on unrotated pages, the panels that read well read well at 0 degrees
+      and badly at 180, and by eye every one is upright. The 187 by 1697
+      strip, which the synthetic fixture and the session brief took to
+      carry the alcohol content and the net contents, carries neither: two
+      script signatures set along it, a logo and a placeholder serial
+      number, stored upright. The three values are on the painting's bottom
+      line (OQ-39), and `samples/real/README.md` is corrected on the net
+      contents.
+
+      **These are a session container's figures and not the deployed
+      build's.** The 8064 ms below was measured through the browser against
+      the deployed target, on a task that ran the same code about 1.2 times
+      slower than this container (6790 ms here on the previous entry's
+      code). Whether the bourbon is inside about five seconds on the
+      deployed build is the gate below, repeated by the author against a
+      deploy carrying these two changes; until it is, the NFR-1 row stays
+      partial and says which figure is which.
+
 - [x] **NFR-1 on the deployed v1.5.0 build, with three real filings: the
       gate the v1.5.0 release notes promised and did not deliver (reported
       2026-09-08).** The v1.5.0 notes promised "the manual step against the
@@ -1298,10 +1352,14 @@ This section is the record of the runs; the README is the summary of them.
       brand match. The stopping rule of #141 fires only once all five values
       are in hand, and on this document two never are (OQ-39), so it never
       fires: the document that fails the checks is the one that does the
-      most work. The reads cannot be cut without changing the answer; the
-      entry above and `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` say why. What
-      bounds a document that carries more is `TTB_MAX_DOCUMENT_READS`
-      (ADR 0023), and it does not make this one fast.
+      most work. The reads could not be cut by the short circuit without
+      changing the answer; `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` says why.
+      They were cut by other means later the same day, from nineteen to
+      eleven with every remaining read unchanged (the entry above, ADR
+      0025, ADR 0026), on a session container; this table is the deployed
+      build's and stands until the gate is repeated. What bounds a document
+      that carries more is `TTB_MAX_DOCUMENT_READS` (ADR 0023, 16 since
+      ADR 0025).
 
       **Where the third document's ten seconds go.** `extraction_path` came
       back `ocr`: the file has no text layer, so all three pages were
@@ -1331,6 +1389,11 @@ This section is the record of the runs; the README is the summary of them.
       response's `elapsed_ms`, `ocr_passes` and `tesseract_reads`; add the
       third document from your own copy, since it is not in the repository.
       Replace this table if the figures move, and say what moved them.
+      **Pending against a deploy carrying ADR 0025 and ADR 0026**: the
+      expected reads are 1 and 11, `orientation.method` `placement` on
+      every panel, and the question the row cannot answer from a session
+      container is whether the bourbon's `elapsed_ms` lands inside about
+      five seconds on the deployed task.
 
 - [ ] **The bourbon on the deployed build, once the reader isolates the
       line.** The manual step that settles which panel each of the three values is on.

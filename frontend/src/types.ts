@@ -235,9 +235,17 @@ export interface OrientationDetail {
   /**
    * `osd_180_check_full_resolution` is the second opinion repeated at full
    * resolution because the reduced-scale pass read no words either way
-   * (v1.3.0); `check` then carries the full-resolution scores.
+   * (v1.3.0); `check` then carries the full-resolution scores. `placement`
+   * is a picture lifted out of a PDF and turned the way the page draws it,
+   * with no orientation call made (ADR 0025); `confidence` is then null.
    */
-  method: 'osd' | 'osd_180_check' | 'osd_180_check_full_resolution' | 'unavailable' | 'disabled'
+  method:
+    | 'osd'
+    | 'osd_180_check'
+    | 'osd_180_check_full_resolution'
+    | 'unavailable'
+    | 'disabled'
+    | 'placement'
   confidence: number | null
   /**
    * The second opinion taken when Tesseract's own confidence in the turn fell

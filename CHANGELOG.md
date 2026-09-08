@@ -16,8 +16,129 @@ clicked anything, and the check was never reached. The traceability matrix
 said NFR-1 was met. That row was measured on the mezcal alone, and the
 requirement's own criteria say a shortfall is reported rather than omitted.
 This release bounds the reading, makes the upload step visible, and moves the
-one read that was being paid for twice; it does not make the bourbon fast,
-and says so.
+one read that was being paid for twice. A second session then cut the
+bourbon's reads from nineteen to eleven, and the mezcal's from four to one,
+without changing a single read that remains: the orientation call is not made
+on a picture whose page already says which way up it is, and the plain arm is
+not read on a coloured panel that has read nothing twice. On a session
+container the bourbon went from about 6.7 seconds to about 4.3; the deployed
+build has not been re-measured, and the NFR-1 row says so.
+
+### A picture lifted out of a PDF is turned the way the page places it (ADR 0025, NFR-1, FR-1)
+
+#### Changed
+
+- **No orientation call on a picture the document places.** A PDF states
+  how it draws each picture, in the placement matrix composed with the
+  page's rotation; the reader now takes that quarter-turn, applies it,
+  reports the method as `placement` with no confidence and no check, and
+  does not ask Tesseract. On the two committed filings every picture is
+  placed upright and the call bought no turn on any of them: it was wrong
+  on two panels, caught both times by the second opinion, unable to answer
+  on three, and right on one, for seven of the bourbon's nineteen reads and
+  three of the mezcal's four. Whether any panel is stored rotated was
+  established three ways before deciding, from the placement matrices,
+  from the reads at all four rotations and by eye, and the answer is no.
+  The composition of matrix and page rotation is checked against PDFium's
+  own render of every quarter-turn under every page rotation in
+  `backend/tests/test_placement_orientation.py`, not argued from
+  conventions.
+- **Tesseract is still asked about a picture whose type runs along it.**
+  A placement cannot say which way the type runs, and a side strip printed
+  to be read along its length is placed upright and reads sideways. Where
+  the reading taken at the placement turn shows sideways type and nothing
+  upright, by the word boxes it already returned and for no read, the
+  picture goes through the photograph path as before and is read again at
+  the turn Tesseract names. The gate fires on the five-panel fixture's
+  vertical strip and on no real panel; the ADR records the two wider gates
+  rejected and what each would have cost. A placement that is not a
+  quarter-turn, a slant or a mirror, is left to Tesseract as before.
+- **`TTB_MAX_DOCUMENT_READS` is 16, down from 24.** The same arithmetic as
+  ADR 0023, eight pictures times the least a picture costs when its first
+  arm does not settle it, with the orientation call no longer in that least:
+  two arms, not three. It admits the bourbon's eleven with five reads of
+  margin and cuts the runaway case from 24 to 16.
+- `orientation.method` on the response gains the value `placement`; the
+  frontend type carries it. Nothing on screen changes.
+
+### A coloured panel that read nothing twice is not read a third time (ADR 0026, NFR-1)
+
+#### Changed
+
+- **The plain arm is not read on a coloured source whose colour arm and
+  preprocessed arm both returned no words at all.** The rule is on words,
+  never on confidence: a read of nothing scores 0.0, and so does a read of
+  something scored badly, and the bourbon's 1350 by 300 panel, preprocessed
+  44.7 and then plain 89.9 with the brand name on the plain read, is why no
+  confidence floor would do. The plain arm on a coloured source exists to
+  compete with a confident read of a transformed image; where the
+  transformed read found nothing there is nothing to compete with, and a
+  grayscale cannot carry more contrast between two inks than the best of
+  the three channels the colour arm already gave Tesseract. Measured over
+  thirty low-contrast and photograph-like cases before choosing: the colour
+  arm read every case the plain arm read, and the one case where the colour
+  arm read nothing, the bourbon's 1950 by 862 painting, every arm read
+  nothing. The preprocessed arm is untouched, and so is the monochrome
+  path, where v1.0.1's own finding still stands: the thresholded read of a
+  photograph-like fixture reads zero words and the plain read reads them all.
+  The ADR records the cheaper rule rejected, skipping both transforms, and
+  the reduced-scale probe rejected, and why.
+- **What it does not do.** The painting is still reported `no_text` and the
+  three values on its bottom line, the class or type, the alcohol content
+  and the net contents, are still not found by any arm; OQ-39 is open and
+  this makes that outcome cheaper, not better.
+
+#### Fixed
+
+- **The item 5 render's encode and box sample were outside every timing
+  phase**, about 80 ms on a session container, invisible while the artwork
+  OCR beside them was ten times that and visible once it was halved. They
+  are attributed to `document_pdfium_ms`, whose description now says so.
+- The read-budget note said "1 reads" at a ceiling of one.
+
+#### Corrected
+
+- `samples/real/README.md` said the bourbon label carries no net contents
+  statement. The 1950 by 862 painting's bottom line ends in `1L`; it is the
+  reader that does not find it. The README also now says where the three
+  missing values are and that the 187 by 1697 strip carries none of them:
+  two script signatures, a logo and a placeholder serial number.
+
+#### Measured
+
+Session container, not production hardware, Tesseract 5.3.4, the two
+filings in `samples/real/` submitted alone to `POST /api/verify` in process
+through the test client, one warm-up discarded, three runs each, medians,
+before and after ADR 0025 and ADR 0026 on the same container:
+
+| Document | `elapsed_ms` before | `artwork_ocr_ms` before | reads before | outcome before | `elapsed_ms` after | `artwork_ocr_ms` after | reads after | outcome after |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| the mezcal filing | 3728 | 3543 | 4 | 5 of 5 | **2152** | 1945 | **1** | 5 of 5 |
+| the bourbon filing | 6714 | 6474 | 19 | 1 of 5 | **4267** | 4018 | **11** | 1 of 5 |
+
+`ocr_passes` is 1 and 5 before and after. Every field outcome, every
+panel's status and confidence, every winning arm and every arm's score is
+identical before and after on both filings, compared from the response
+bodies; only `orientation.method` changed, from `osd`, `osd_180_check` or
+`unavailable` to `placement`, at a turn of 0 on every panel. The accuracy
+tier, `scripts/measure.py` over the twelve synthetic labels, is identical
+line for line: 100 percent precision and recall on every field. **The
+bourbon is 1 of 5 on this container, before and after**, not the 2 of 5 the
+tables of the previous session record: the class or type is on the same
+painted line as the two values and reads nothing on this Tesseract; the
+2 of 5 is the deployed 5.3.0 build's figure, on an engine that read the
+panel at 45.3. **The deployed build has not been re-measured.** The
+session container ran the same code 1.2 times faster than the deployed
+task on the previous session's numbers; what the deployed build returns is
+the author's gate in [docs/09](docs/09_DEPLOYMENT.md) section 9, and NFR-1
+stays partial until it is run.
+
+### Documents
+
+- ADR 0025 and ADR 0026; ADR 0023's ceiling amended; the traceability
+  matrix's NFR-1 row and coverage summary; `TTB_MAX_DOCUMENT_READS` in the
+  architecture's setting table; OQ-39; `samples/real/README.md`;
+  `backend/tests/test_placement_orientation.py`.
 
 ### One document's reading has a ceiling, and what it leaves is said (ADR 0023, NFR-1)
 

@@ -70,6 +70,7 @@ from __future__ import annotations
 import ctypes
 import io
 import logging
+import math
 import re
 import threading
 from collections.abc import Iterator, Mapping
@@ -179,6 +180,13 @@ class EmbeddedArtwork:
     width: int
     height: int
     image: Image.Image = field(repr=False, compare=False)
+    # The clockwise quarter-turn the page applies when it draws this picture,
+    # composed from the image's placement matrix and the page's own rotation
+    # (ADR 0025), or None when the placement is not a quarter-turn. It is
+    # what ``extract_text`` is given instead of an orientation call: a PDF
+    # states which way up its pictures are, and a photograph does not. See
+    # ``_placement_rotation``.
+    placement_rotation: int | None = None
 
     @property
     def pixels(self) -> int:
@@ -446,12 +454,19 @@ def _parse_pdf(
     # (finding 25). The embedded artwork encodes itself on first use, inside
     # the artwork read below, so a picture the prefill pass never reads is
     # never encoded.
-    rendered_pages = [_png_bytes(page) for page in contents.rendered_pages]
-    item_five_page = (
-        None
-        if contents.item_five is None
-        else (_png_bytes(contents.item_five[0]), contents.item_five[1])
-    )
+    # Attributed to the PDFium phase, though outside the lock: it is PDF work
+    # without recognition, which is what that phase names. Until ADR 0025 the
+    # encode of the item 5 render and the sampling of its boxes below sat
+    # outside every phase, about 80 ms on a session container, invisible
+    # while the artwork OCR beside them was ten times that and visible once
+    # ADR 0025 and ADR 0026 halved it.
+    with timing.phase("document_pdfium"):
+        rendered_pages = [_png_bytes(page) for page in contents.rendered_pages]
+        item_five_page = (
+            None
+            if contents.item_five is None
+            else (_png_bytes(contents.item_five[0]), contents.item_five[1])
+        )
 
     # The artwork read happens here, outside the lock, for the reason the page
     # OCR below does: Tesseract is the expensive part and there is no reason for
@@ -483,9 +498,15 @@ def _parse_pdf(
     # captions have to be recognized rather than read out of a text layer that
     # is one Tesseract read, charged to the budget and never gated by it: it is
     # one read of one page, and it is what settles the beverage type.
-    item_five = read_item_five(item_five_page)
-    if item_five_page is not None and item_five_page[1] is None:
-        budget.charge(1)
+    if item_five_page is not None and item_five_page[1] is not None:
+        # Captions from the text layer, so no read inside: the sample is PDF
+        # work without recognition and is attributed with the encode above.
+        with timing.phase("document_pdfium"):
+            item_five = read_item_five(item_five_page)
+    else:
+        item_five = read_item_five(item_five_page)
+        if item_five_page is not None:
+            budget.charge(1)
 
     if contents.text_side is not None:
         return _with_notes(
@@ -575,8 +596,10 @@ class _ReadBudget:
 
     Checked, not enforced mid-read: ``allows`` is asked before a picture or a
     page is started, and a picture is read whole. So the reads can pass the
-    limit by at most one picture's cost, which is eight at the very most, and
-    the last picture read is never a half-comparison with an arm missing.
+    limit by at most one picture's cost, which is three arms for a picture
+    the document places (ADR 0025) and eight at the very most for one it does
+    not, and the last picture read is never a half-comparison with an arm
+    missing.
     """
 
     limit: int
@@ -898,7 +921,13 @@ def _embedded_images(
                     )
                     continue
                 candidates.append(
-                    EmbeddedArtwork(page=index + 1, width=width, height=height, image=picture)
+                    EmbeddedArtwork(
+                        page=index + 1,
+                        width=width,
+                        height=height,
+                        image=picture,
+                        placement_rotation=_placement_rotation(obj, page),
+                    )
                 )
 
     candidates.sort(key=lambda art: (-art.pixels, art.page))
@@ -955,6 +984,64 @@ def _rejection(width: int, height: int) -> RejectionReason | None:
     if width * height < settings.min_artwork_pixels:
         return "area"
     return None
+
+
+# How far from a quarter-turn a placement may be and still be read as one.
+# A page that draws a picture with a rotation matrix writes cos and sin of the
+# angle into it, and a quarter-turn arrives as 0 and 1 to floating-point
+# precision, not to the degree; the tolerance exists for that rounding, and a
+# picture placed at a real slant falls outside it and is left to Tesseract.
+_PLACEMENT_TOLERANCE_DEGREES = 1.0
+
+
+def _placement_rotation(image: pdfium.PdfImage, page: pdfium.PdfPage) -> int | None:
+    """The clockwise quarter-turn the page applies when it draws this picture.
+
+    **A PDF says which way up its pictures are, and a photograph does not
+    (ADR 0025).** The raster ``_artwork_bitmap`` lifts out is the picture in
+    its own coordinate space; how it appears to anyone who opens the file is
+    that raster under the placement matrix the page draws it with, composed
+    with the page's own ``/Rotate``. Both are in the file, both are exact, and
+    neither costs a Tesseract call. The eight pictures on the two filings in
+    samples/real/ are all placed with an axis-aligned, positive-scale matrix
+    on an unrotated page, so the answer is 0 for every one of them, and it was
+    0 for every one of them after the orientation call as well, at the cost
+    of that call.
+
+    The matrix is ``[a b c d e f]`` in PDF user space, where y runs upward. A
+    picture drawn upright has ``b`` and ``c`` at zero and ``a`` and ``d``
+    positive; one drawn turned by an angle has that angle's cosine and sine in
+    the first column and the same angle in the second. The angle is read from
+    both columns and the two have to agree, so a skewed placement is not
+    mistaken for a turned one, and the determinant has to be positive, so a
+    mirrored one is not either. ``/Rotate`` is clockwise by the PDF's own
+    convention and the placement angle is counter-clockwise, which is why one
+    is subtracted from the other. Whether the composed turn is the right one
+    is not argued from those conventions: tests/test_placement_orientation.py
+    renders the page and checks that the raster, turned by this figure, is
+    the picture the page shows.
+
+    Returns None wherever the placement is not a quarter-turn, or cannot be
+    read: a slant, a mirror, a degenerate matrix. That is not a failure; it
+    is the case the orientation call exists for, and the caller passes None
+    on to ``extract_text`` and Tesseract is asked as it always was.
+    """
+    try:
+        a, b, c, d, _, _ = image.get_matrix().get()
+        page_turn = int(page.get_rotation()) % 360
+    except Exception:
+        return None
+    if a * d - b * c <= 0:
+        return None
+    turns: list[int] = []
+    for angle in (math.degrees(math.atan2(b, a)), math.degrees(math.atan2(-c, d))):
+        nearest = round(angle / 90) * 90
+        if abs(angle - nearest) > _PLACEMENT_TOLERANCE_DEGREES:
+            return None
+        turns.append(int(nearest) % 360)
+    if turns[0] != turns[1]:
+        return None
+    return (page_turn - turns[0]) % 360
 
 
 def _artwork_bitmap(image: pdfium.PdfImage, page_index: int) -> Image.Image | None:
@@ -1032,11 +1119,14 @@ def _read_artwork(
     line is crossed is read whole. A caller that passes no budget gets one at
     the configured ceiling, so the rule holds wherever this is called from.
 
-    **The pipeline is the one label artwork goes through, unchanged.**
-    ``extract_text`` is called with its defaults, so the v1.0.1 orientation
-    decision and the preprocessed-against-plain best-of both apply exactly as
-    they do to a photograph. The artwork is flat, which is the input that
-    pipeline handles well; that is the whole reason this is worth doing.
+    **The pipeline is the one label artwork goes through, with one thing
+    known that a photograph cannot tell it.** ``extract_text`` is given the
+    turn the document itself applies to the picture, ``placement_rotation``
+    (ADR 0025), and makes no orientation call; the preprocessed-against-plain
+    best-of and the colour arm apply exactly as they do to a photograph. The
+    artwork is flat, which is the input that pipeline handles well; that is
+    the whole reason this is worth doing. A picture whose placement is not a
+    quarter-turn carries None and is turned by Tesseract as before.
 
     **Panels are read in rank order, and reading stops when the panels read
     so far carry all five values** (ADR 0010 as amended a second time). After
@@ -1104,7 +1194,7 @@ def _read_artwork(
             break
         try:
             with timing.phase("artwork_ocr"):
-                result = extract_text(image.content)
+                result = extract_text(image.content, placement_rotation=image.placement_rotation)
         except UndecodableImageError as exc:
             logger.warning(
                 "embedded image could not be decoded",
@@ -1955,7 +2045,8 @@ def _budget_note(budget: _ReadBudget, pages: int, panels: int) -> str:
     return (
         f"{' and '.join(left)} of this application {'were' if pages + panels != 1 else 'was'} "
         f"not read: the limit on how much reading one application may cost, "
-        f"{budget.limit} reads, was reached after {budget.spent}. Any value reported "
+        f"{budget.limit} read{'s' if budget.limit != 1 else ''}, was reached after "
+        f"{budget.spent}. Any value reported "
         "not found may be on what was not read."
     )
 

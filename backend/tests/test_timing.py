@@ -226,8 +226,12 @@ class TestThePictureIsReadOnce:
 
         timings = body["timings"]
         assert timings["tesseract_reads"] >= timings["ocr_passes"]
-        # The orientation call plus at least one image read, per picture read.
-        assert timings["tesseract_reads"] >= 2
+        # Exactly one read for the one pass: a picture the document places
+        # makes no orientation call (ADR 0025), and the clean rendering
+        # settles on its first arm. Until ADR 0025 this was the orientation
+        # call plus that arm, two; the number is pinned rather than bounded so
+        # that a release which quietly put a call back is seen here.
+        assert timings["tesseract_reads"] == 1
 
     def test_the_reused_read_produces_the_same_answers(self, artwork):
         """Reuse is only worth having if it changes nothing but the clock."""
