@@ -1265,6 +1265,73 @@ This section is the record of the runs; the README is the summary of them.
       `backend/tests/test_read_budget.py` against a fixture scan with the
       ceiling at zero and against the five-panel fixture with it at two.
 
+- [x] **NFR-1 on the deployed v1.5.0 build, with three real filings: the
+      gate the v1.5.0 release notes promised and did not deliver (reported
+      2026-09-08).** The v1.5.0 notes promised "the manual step against the
+      deployed build that settles which panel the bourbon's three values are
+      on"; what was delivered before this entry was one measurement of one
+      document. Measured by the author through the browser against the
+      deployed v1.5.0 build, 1 vCPU and 8 GiB on Fargate behind the ALB, with
+      a hook on `fetch` so the clock starts when the file is picked and each
+      figure is the actual HTTP call:
+
+      | Document | Text layer | Upload, `POST /api/classify` | Check, `POST /api/verify` | Panels read | Result |
+      | --- | --- | --- | --- | --- | --- |
+      | the mezcal, `samples/real/22118001000389` | yes | 305 to 470 ms | **4816 ms** | 1 | 5 of 5 |
+      | the bourbon, `samples/real/15309001000084` | yes | 414 to 694 ms | **8064 ms** | 5 | 2 of 5 |
+      | a third filing, not committed | none | **10322 ms** | not reached | 0 | brand and class wrong, beverage type undetermined |
+
+      **NFR-1's original evidence was one document, and two of the next three
+      breach it.** The 5.0 s of deploy #12 and the 4.7 s of deploy #19 above
+      were the mezcal, alone. The traceability matrix said NFR-1 was met on
+      that row until this entry; it now says partial, with these three
+      numbers and the documents named, because the requirement's own
+      criteria say a shortfall is reported rather than omitted.
+
+      **Where the bourbon's eight seconds go**, from its own response body:
+      `elapsed_ms` 7937.7, of which `artwork_ocr_ms` 7678.9 (97 percent),
+      `document_pdfium_ms` 130.8, `compare_ms` 0.7; `ocr_passes` 5,
+      `tesseract_reads` 19. Nineteen reads over five panels, about 3.8 per
+      panel. The v1.4.0 build read the same document at 7534 ms with the same
+      19 reads, so v1.5.0 did not add this; #140 and #141 did, by reading
+      five panels where the old floor had left one, and that trade bought the
+      brand match. The stopping rule of #141 fires only once all five values
+      are in hand, and on this document two never are (OQ-39), so it never
+      fires: the document that fails the checks is the one that does the
+      most work. The reads cannot be cut without changing the answer; the
+      entry above and `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` say why. What
+      bounds a document that carries more is `TTB_MAX_DOCUMENT_READS`
+      (ADR 0023), and it does not make this one fast.
+
+      **Where the third document's ten seconds go.** `extraction_path` came
+      back `ocr`: the file has no text layer, so all three pages were
+      rasterised and read through the label pipeline in the upload step,
+      before the agent clicked anything, and the route logged no duration.
+      That read now happens once, in the check (ADR 0024), and the upload
+      step logs and returns `elapsed_ms`. On that document the check will
+      carry the ten seconds instead, bounded by the same ceiling; the total
+      the agent waits falls by one full page read and NFR-1 is still
+      breached on it, which is the honest shape of it.
+
+      **Three further findings on the third document, recorded rather than
+      fixed**, shapes and measurements only, nothing read from it:
+      twenty-three embedded pictures rejected, all on `area`, two of them
+      label panels at 580 by 293 and 772 by 189, so no artwork was read at
+      all ([OQ-40](OPEN_QUESTIONS.md#oq-40)); the OCR path filled the brand
+      name with the form's own field caption and ran the class or type into
+      the next item's instruction, both confident and both wrong
+      ([OQ-41](OPEN_QUESTIONS.md#oq-41)); and item 5's darkest box sat 10.4
+      luminance points under the next inside the 12-point margin, so no
+      beverage type was determined, the third document and the third way the
+      single-document calibration has failed ([OQ-42](OPEN_QUESTIONS.md#oq-42)).
+
+      **Repeating the gate.** Submit each of the two committed filings alone
+      on the single-label tab against the deployed URL with the browser's
+      network panel open, and record both requests' wall clock and the
+      response's `elapsed_ms`, `ocr_passes` and `tesseract_reads`; add the
+      third document from your own copy, since it is not in the repository.
+      Replace this table if the figures move, and say what moved them.
+
 - [ ] **The bourbon on the deployed build, once the reader isolates the
       line.** The manual step that settles which panel each of the three values is on.
       Submit the bourbon filing alone on the single-label tab and read
