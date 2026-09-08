@@ -118,7 +118,7 @@ Every requirement maps to at least one story. No orphans.
 | Requirements with an automated test | 23 of 26 |
 | User stories | 30 |
 | Stories with acceptance criteria | 30 of 30 |
-| ADRs | 22 |
+| ADRs | 24 |
 
 The two counts are read off the section 2 table by one rule each, so they can be
 checked rather than taken, and `backend/tests/test_release_metadata.py` checks
