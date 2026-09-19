@@ -8,7 +8,12 @@ because on that document no panel's first read settles it and every panel
 pays for both arms. Nothing bounded that but the count of pictures, and a
 count of pictures bounds nothing about what each one costs. The ceiling is
 in reads rather than milliseconds so that the same document gets the same
-answer on every host; the setting's comment and the ADR say why.
+answer on every host; the setting's comment and the ADR say why. Since
+ADR 0025 and ADR 0026 the same filing costs eleven reads on the same
+container, seven of the nineteen having been orientation calls the page's
+own placement now answers for nothing and one the plain arm on a panel that
+had read nothing twice; the ceiling came down with it, from 24 to 16, on the
+same arithmetic.
 
 The other half of the decision is that a budget which cut silently would be
 worse than the slowness: every picture and page the reader did not get to is
@@ -63,15 +68,23 @@ def artwork() -> bytes:
     return render_png_bytes(SAMPLE_LABEL)
 
 
+# The ceiling the runaway case is made small with. One, not two: a picture the
+# document places makes no orientation call (ADR 0025), and each panel of the
+# fixture is a clean rendering that settles on its first arm, so the first
+# picture costs exactly one read and a ceiling of one is spent by it. Two would
+# now admit a second picture and the case would no longer be the runaway one.
+SMALL_CEILING = 1
+
+
 @pytest.fixture(scope="module")
 def parsed():
-    """The five-panel fixture under a ceiling of two reads, once for the module.
+    """The five-panel fixture under a ceiling of one read, once for the module.
 
     A module-scoped fixture cannot take ``monkeypatch``, which is
     function-scoped, so the setting is put back by hand.
     """
     before = settings.max_document_reads
-    settings.max_document_reads = 2
+    settings.max_document_reads = SMALL_CEILING
     try:
         return parse_application_document(bourbon_document(), "application/pdf")
     finally:
@@ -120,8 +133,12 @@ class TestTheDefaultAdmitsTheMeasuredFilings:
     """The ceiling sits above what any measured filing costs, so it decides
     nothing on them; what it decides is the runaway case."""
 
-    def test_the_setting_is_above_the_bourbons_nineteen_reads(self):
-        assert settings.max_document_reads > 19
+    def test_the_setting_is_above_the_bourbons_eleven_reads(self):
+        """Eleven since ADR 0025 and ADR 0026, nineteen before them; the
+        setting's comment carries the arithmetic. The margin over eleven is
+        more than one worst-case panel, three arms on a coloured panel that
+        settles on none of them."""
+        assert settings.max_document_reads > 11 + 3
 
     def test_the_five_panel_fixture_is_read_in_full(self):
         parsed = parse_application_document(bourbon_document(), "application/pdf")
@@ -137,7 +154,7 @@ class TestTheDefaultAdmitsTheMeasuredFilings:
 @requires_tesseract
 @requires_fonts
 class TestTheBudgetStopsTheReaderAndSaysSo:
-    """The runaway case, made small: a ceiling of two reads on a five-panel filing."""
+    """The runaway case, made small: a ceiling of one read on a five-panel filing."""
 
     def test_the_first_picture_is_read_whole_and_the_rest_are_not_reached(self, parsed):
         """Checked between pictures, never inside one: the picture being read
@@ -148,11 +165,12 @@ class TestTheBudgetStopsTheReaderAndSaysSo:
         assert parsed.artwork_images_read == 1
 
     def test_the_reads_spent_are_reported_against_the_ceiling(self, parsed):
-        assert parsed.read_budget == 2
+        assert parsed.read_budget == SMALL_CEILING
         assert parsed.read_budget_reached is True
-        # The one picture read cost at least the orientation call and one arm,
-        # which is how a budget of two is passed by one picture's reads.
-        assert parsed.tesseract_reads >= 2
+        # The one picture read cost exactly one read: no orientation call on a
+        # picture the document places (ADR 0025), and one arm on a clean
+        # rendering. That one read is what spends a ceiling of one.
+        assert parsed.tesseract_reads == 1
 
     def test_the_values_on_the_unread_strip_are_absent_and_the_note_says_why(self, parsed):
         """The strip carries the alcohol content and the net contents. Absent
@@ -163,16 +181,16 @@ class TestTheBudgetStopsTheReaderAndSaysSo:
         note = next((note for note in parsed.notes if "was reached" in note), None)
         assert note is not None, parsed.notes
         assert f"{len(PANELS) - 1} pictures" in note
-        assert "2 reads" in note
+        assert f"{SMALL_CEILING} read, was reached after 1" in note
         assert "may be on what was not read" in note
 
     def test_the_response_carries_it_and_the_check_still_runs(self, monkeypatch):
-        monkeypatch.setattr(settings, "max_document_reads", 2)
+        monkeypatch.setattr(settings, "max_document_reads", SMALL_CEILING)
 
         body = verify(bourbon_document())
 
         document = body["application_document"]
-        assert document["read_budget"] == 2
+        assert document["read_budget"] == SMALL_CEILING
         assert document["read_budget_reached"] is True
         assert [image["status"] for image in document["artwork_images_accepted"]][1:] == [
             "not_reached"

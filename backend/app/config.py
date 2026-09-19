@@ -135,16 +135,20 @@ class Settings(BaseSettings):
     #
     # **Why a second ceiling, when the count above already bounds the
     # pictures.** A count of pictures bounds nothing about what each one costs.
-    # One picture is one to eight engine invocations: the orientation call, up
-    # to four more where the orientation check runs and has to be repeated at
-    # full resolution, and one per arm compared. The bourbon filing in
-    # samples/real/, measured 2026-09-08 on a session container, cost 19 reads
-    # over its five panels, 3 to 5 each, for 6.7 seconds of artwork OCR; on the
-    # deployed v1.5.0 build the same document measured 8064 ms end to end, of
-    # which 7679 ms was artwork OCR. NFR-1 is about five seconds. A document
-    # that carried the eight pictures the count admits, each costing what the
-    # worst of these five cost, would run to 40 reads and well past fifteen
-    # seconds with nothing stopping it. This is the stop.
+    # One picture lifted out of a PDF is one to three engine invocations, one
+    # per arm compared, since ADR 0025 took its orientation from the page's
+    # own placement of it and stopped asking Tesseract; a picture whose
+    # placement is not a quarter-turn still pays the orientation call and up
+    # to four more where the check runs and is repeated at full resolution,
+    # eight at the very most. The bourbon filing in samples/real/, measured
+    # 2026-09-08 on a session container, cost 19 reads over its five panels
+    # before ADR 0025 and ADR 0026, 3 to 5 each, for 6.5 seconds of artwork
+    # OCR, and 11 after, 2 to 3 each; on the deployed v1.5.0 build the same
+    # document measured 8064 ms end to end at 19 reads, of which 7679 ms was
+    # artwork OCR. NFR-1 is about five seconds. A document that carried the
+    # eight pictures the count admits, each costing what the worst of these
+    # five cost, would run to 24 reads with nothing stopping it. This is the
+    # stop.
     #
     # **Reads, not milliseconds, and the choice is deliberate.** A budget in
     # milliseconds would make NFR-1 true by construction and it would make the
@@ -158,18 +162,23 @@ class Settings(BaseSettings):
     # this puts on the clock is loose by that ratio. The alternative is
     # recorded in ADR 0023 with what would change the choice.
     #
-    # **Twenty-four**, which is the picture count above times the least a
-    # picture costs when its first read does not settle it: the orientation
-    # call, the preprocessed arm and the plain arm. It admits both real filings
-    # in full, the bourbon's 19 with one worst-case panel of margin, and cuts
-    # the runaway case from 40 to 24. At the bourbon's measured 404 ms per
-    # read that is about ten seconds of OCR, which is over NFR-1 and is said
-    # so: this ceiling does not make the bourbon meet the target, it stops a
-    # document that carries more than the bourbon from running away. An
-    # operator can lower it; the budget is checked before each picture and each
-    # page, never in the middle of one, and what it cuts is listed as
-    # `not_reached` in the response rather than dropped.
-    max_document_reads: int = 24
+    # **Sixteen**, which is the picture count above times the least a picture
+    # costs when its first arm does not settle it: the preprocessed arm and
+    # the plain arm, two, now that a placed picture makes no orientation call.
+    # It was 24 until ADR 0025, eight times three with the orientation call
+    # counted in, and a ceiling whose stated reasoning no longer holds is not
+    # left standing. Sixteen admits both real filings in full, the bourbon's
+    # 11 with five reads of margin, which is more than one worst-case panel
+    # (three arms on a coloured panel that settles on none of them), and cuts
+    # the runaway case, eight pictures at that worst, from 24 to 16. At the
+    # bourbon's measured 404 ms per read that is about six and a half seconds
+    # of OCR, which is over NFR-1 and is said so: this ceiling does not make a
+    # document meet the target, it stops a document that carries more than
+    # the bourbon from running away. An operator can lower it; the budget is
+    # checked before each picture and each page, never in the middle of one,
+    # and what it cuts is listed as `not_reached` in the response rather than
+    # dropped.
+    max_document_reads: int = 16
 
     # Matching thresholds. See docs/adr/0004-fuzzy-matching-with-review-band.md.
     match_threshold: int = 95

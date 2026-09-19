@@ -1028,6 +1028,16 @@ Single-label verification returns in about 5 seconds.
   evidence for this requirement was one document, the mezcal, and the row
   that said "met" is corrected to partial with the numbers, per the third
   criterion above.
+- **The bourbon's reads cut from nineteen to eleven without changing one
+  that remains.** Added 2026-09-08 ([ADR 0025](adr/0025-orientation-from-the-placement.md),
+  [ADR 0026](adr/0026-nothing-twice-is-not-read-a-third-time.md)): a
+  picture lifted out of a PDF is turned the way the page places it and
+  Tesseract is not asked, unless the reading shows sideways type and
+  nothing else; and a coloured panel whose colour and preprocessed arms
+  both returned no words is not read a third time. On a session container
+  the bourbon went from about 6.7 seconds to about 4.3 and the mezcal from
+  3.7 to 2.2, with identical outcomes; the deployed build is not yet
+  re-measured and the row stays partial until it is.
 - **The upload step is timed too.** Added 2026-09-08: `POST /api/classify`
   logs and returns `elapsed_ms` and the phase breakdown, because a scanned
   form measured 10322 ms in that request on the deployed v1.5.0 build and the

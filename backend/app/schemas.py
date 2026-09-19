@@ -775,7 +775,12 @@ class OrientationDetail(BaseModel):
         )
     )
     method: Literal[
-        "osd", "osd_180_check", "osd_180_check_full_resolution", "unavailable", "disabled"
+        "osd",
+        "osd_180_check",
+        "osd_180_check_full_resolution",
+        "unavailable",
+        "disabled",
+        "placement",
     ] = Field(
         description=(
             "Where the rotation came from. 'osd' is Tesseract's orientation and "
@@ -787,7 +792,10 @@ class OrientationDetail(BaseModel):
             "resolution before deciding, and `check` carries the full-resolution "
             "scores; 'unavailable' means it could not judge, usually too little "
             "text, and the image was left as it arrived; 'disabled' means "
-            "TTB_CORRECT_ORIENTATION is off."
+            "TTB_CORRECT_ORIENTATION is off; 'placement' means the picture was "
+            "lifted out of a PDF and turned the way the page draws it, from the "
+            "placement matrix and the page rotation, and Tesseract was not asked "
+            "(ADR 0025). A placement turn costs no read and carries no confidence."
         )
     )
     confidence: float | None = Field(
@@ -959,8 +967,11 @@ class PhaseTimings(BaseModel):
         description=(
             "Everything the uploaded PDF gives up without recognition: its text "
             "layer, its AcroForm fields, the embedded images lifted out of it, "
-            "and any page rendered for the OCR fallback. Serialized behind one "
-            "lock, because PDFium is not thread-safe."
+            "any page rendered for the OCR fallback, and, on a document whose "
+            "text layer states the item 5 captions, the encoding of the item 5 "
+            "render and the sampling of its boxes. The PDFium calls are "
+            "serialized behind one lock, because PDFium is not thread-safe; the "
+            "encode and the sample follow outside it."
         ),
     )
     document_ocr_ms: float = Field(

@@ -48,7 +48,7 @@ updates every artifact the answer affects.
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 | [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
 | [OQ-38](#oq-38) | Open; named 2026-09-06, logic unchanged | Nothing in the prototype; it bounds the alcohol content presence check to distilled spirits. On a malt beverage or a table wine the check can report a compliant label as a finding |
-| [OQ-39](#oq-39) | Open; measured 2026-09-06 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's alcohol content and net contents sit on one |
+| [OQ-39](#oq-39) | Open; measured 2026-09-06; the arms that read nothing on that panel no longer paid for, 2026-09-08 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's class or type, alcohol content and net contents sit on one |
 | [OQ-40](#oq-40) | Open; found 2026-09-08 on a third real filing, not fixed | Nothing in the prototype; on that filing the area floor rejects both label panels, no artwork is read, and a document-only check is refused for want of a label side |
 | [OQ-41](#oq-41) | Open; found 2026-09-08 on the same filing, not fixed | Nothing in the prototype; on a scanned form the OCR path can fill the brand name with the form's own caption and the class or type with the next item's instruction, and the check then reports a confident mismatch against a correct application |
 | [OQ-42](#oq-42) | Open; the third failure of a single-document calibration, number not moved | Nothing; where the item 5 margin is not cleared the agent chooses the beverage type, which is never compared |
@@ -2250,9 +2250,24 @@ it is found.
 twelve synthetic labels, showing the line found here and nothing lost there,
 with its cost.
 
+**Added 2026-09-08 (ADR 0025, ADR 0026).** Three things settled while the
+bourbon's reads were being cut, none of which closes this. The line carries
+the class or type as well as the two values: it reads `KENTUCKY STRAIGHT
+BOURBON WHISKEY 45.2% ALC/VOL (90.4 PROOF) 1L`, so on a Tesseract that reads
+nothing off the panel the bourbon returns one of five, and that is what the
+session container returns; the two of five recorded for the deployed 5.3.0
+build is the same document on an engine that read the panel at 45.3. The
+187 by 1697 strip, which the synthetic fixture and the session brief took to
+carry the two values, carries none: two script signatures set along it, a
+logo and a placeholder serial number. And the panel now costs two reads
+rather than four, the orientation call and the plain arm both being reads
+that could not have found the line either; what would find it is unchanged
+from the paragraph above.
+
 **Who can answer:** measurement.
-**Blocks:** nothing in the prototype. On this filing the alcohol content and
-the net contents are reported not found, and the deployment notes say why.
+**Blocks:** nothing in the prototype. On this filing the class or type, the
+alcohol content and the net contents are reported not found, and the
+deployment notes say why.
 
 ---
 

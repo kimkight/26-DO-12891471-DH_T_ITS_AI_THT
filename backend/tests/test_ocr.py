@@ -16,10 +16,13 @@ from PIL import Image
 from samples.labelmaker import render_png_bytes
 from samples.specs import SAMPLE_LABEL
 
+from app import timing
 from app.ocr import (
     PREPROCESS_SHORT_CIRCUIT_CONFIDENCE,
     DecodedImage,
+    Orientation,
     UndecodableImageError,
+    _orientation_reads,
     decode,
     deskew,
     detect_orientation,
@@ -282,6 +285,77 @@ class TestCardinalOrientation:
         degrees, _, method = detect_orientation(blank)
         assert method == "unavailable"
         assert degrees == 0
+
+
+class TestTheOrientationArithmeticFollowsTheMethod:
+    """``_orientation_reads`` restates from the reported method what
+    ``timing.tesseract_read`` tallied as it happened, and this table is what
+    keeps the two from drifting: one method, one number, all six of them.
+
+    ``disabled`` and ``placement`` are the two that cost nothing, for
+    different reasons: the first because the call was switched off, the
+    second because the document itself said which way up the picture is and
+    the call was never needed (ADR 0025). ``unavailable`` still costs one,
+    because an OSD call that came back "too few characters" was still made.
+    """
+
+    @pytest.mark.parametrize(
+        ("method", "reads"),
+        [
+            ("disabled", 0),
+            ("placement", 0),
+            ("unavailable", 1),
+            ("osd", 1),
+            ("osd_180_check", 3),
+            ("osd_180_check_full_resolution", 5),
+        ],
+    )
+    def test_each_method_costs_what_the_table_says(self, method, reads):
+        assert _orientation_reads(Orientation(method=method)) == reads
+
+
+@requires_tesseract
+@requires_fonts
+class TestAPlacementTurnCostsNoRead:
+    """A picture whose document says which way up it is (ADR 0025).
+
+    The same fixture ``TestCardinalOrientation`` turns and asks Tesseract
+    about, turned the same way and told instead. The fields come back the
+    same and the orientation call is not made: the count on the result is the
+    count the recording saw, and it is the arms alone.
+    """
+
+    @pytest.mark.parametrize("turns", [0, 1, 2, 3])
+    def test_a_sideways_label_told_its_turn_reads_its_fields_with_no_call(self, turns):
+        png = render_png_bytes(SAMPLE_LABEL)
+        sideways = np.ascontiguousarray(np.rot90(decode(png).pixels, turns))
+        buffer = io.BytesIO()
+        Image.fromarray(cv2.cvtColor(sideways, cv2.COLOR_BGR2RGB)).save(buffer, format="PNG")
+
+        with timing.recording() as recorded:
+            result = extract_text(buffer.getvalue(), placement_rotation=turns * 90)
+
+        assert result.orientation.method == "placement"
+        assert result.orientation.rotation_degrees == turns * 90
+        assert result.orientation.confidence is None
+        assert "STONE'S" in result.text
+        assert "THROW" in result.text
+        assert "750 mL" in result.text
+        arms = 1 + sum(
+            score is not None
+            for score in (result.read_path.plain_confidence, result.read_path.colour_confidence)
+        )
+        assert result.tesseract_reads == recorded.tesseract_reads == arms
+
+    def test_a_photograph_is_still_asked_about(self, sample_label_png):
+        """Nothing changes for a picture that carries no placement: the
+        orientation call is made and counted exactly as it was."""
+        with timing.recording() as recorded:
+            result = extract_text(sample_label_png)
+
+        assert result.orientation.method == "osd"
+        assert recorded.tesseract_reads == result.tesseract_reads
+        assert _orientation_reads(result.orientation) == 1
 
 
 @requires_tesseract
