@@ -461,6 +461,14 @@ reading: the pictures were located, counted, and left for the check. False with 
 zero count means this document carries no artwork at all, which is a different
 thing and is why the two are reported separately.
 
+Since the release after v1.5.0 the same response carries `elapsed_ms` and
+`timings`, so the prefill's cost is read rather than inferred from the browser's
+clock, and a PDF with no text layer reports `extraction_path` `not_read` with
+`pages_not_reached` set to its page count: its pages are read by the check
+(ADR 0024). On such a file the prefill should be about the time PDFium takes to
+open it; a `page_ocr_ms` above zero here is the read that was moved out of this
+request coming back.
+
 One file and nothing else, so the artwork embedded in it is the label side
 (ADR 0010). This is the submission that measured 6.8 s on 2026-08-30 while
 reporting 3.2 s, 3.5 s against deploy #11 later the same day once the
@@ -1214,6 +1222,178 @@ This section is the record of the runs; the README is the summary of them.
       above is a different case, and a nearer one: its type is legible and
       reads at 88 on its own, and what fails is finding it on the painting
       (OQ-39).
+
+- [x] **Every change to the reading, measured on both committed filings
+      before and after, on a session container (2026-09-08; ADR 0023,
+      ADR 0024).** Not production hardware: the session's Tesseract 5.3.4,
+      in process through the FastAPI test client, the two filings in
+      `samples/real/` submitted alone, three `POST /api/verify` requests
+      each, medians, taken before the first change and again after the last
+      one on the same container. The rule this session was asked to add, no
+      second OCR pass on a panel whose first pass read confidently, turned
+      out to be `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` at 85 since v1.0.1,
+      and on the bourbon it fires on no panel: the highest first pass there
+      is 67.0, one word on the strip, and the two panels that read well do
+      so on the second pass. The per-panel table is beside the constant in
+      `backend/app/ocr.py`. So no read was cut, and the before and after
+      columns say the same thing on purpose:
+
+      | Document | `elapsed_ms` before, median (min, max) | reads | outcome | `elapsed_ms` after, median (min, max) | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- |
+      | the mezcal filing | 4089 (3910, 4203) | 4 | 5 of 5 | 3809 (3670, 3939) | 4 | 5 of 5 |
+      | the bourbon filing | 6966 (6952, 7192) | 19 | 2 of 5 | 6790 (6745, 6968) | 19 | 2 of 5 |
+
+      Per-field outcomes are identical on both filings. The accuracy tier,
+      `scripts/measure.py` over the twelve synthetic labels, is identical
+      line for line: every field at 100 percent precision and recall, review
+      rate 1 of 12 on alcohol content and net contents, false match rate
+      zero. The lower "after" milliseconds are run-to-run variation on a
+      path nothing in the release touches. Where the bourbon's reads go, per
+      Tesseract call on this container: five orientation calls, 1579 ms;
+      the two-read second opinion on the 1050 by 309 panel, 816 ms; twelve
+      arm reads, about 4.4 s; and the largest panel, 1950 by 862, spends
+      2043 ms over four calls reading no words at all (OQ-39).
+
+      `POST /api/classify` on the same two filings: 267 and 293 ms wall
+      clock before, with no `elapsed_ms` in the response; 274 and 257 ms
+      after, with `elapsed_ms` medians of 269 and 250 and `tesseract_reads` 0.
+      Neither committed filing is a scan, so the ten seconds ADR 0024 moves
+      out of this request are not on this container's table; the one
+      document that showed them is not in the repository, and its
+      measurement is the deployed-build gate below. The bound on the read
+      that moved is `TTB_MAX_DOCUMENT_READS`, asserted in
+      `backend/tests/test_read_budget.py` against a fixture scan with the
+      ceiling at zero and against the five-panel fixture with it at two.
+
+- [x] **The two cuts, on the same session container (2026-09-08, later the
+      same day; ADR 0025, ADR 0026).** Same method as the entry above:
+      Tesseract 5.3.4, in process through the test client, each committed
+      filing submitted alone, one warm-up discarded, three runs, medians,
+      before and after on one container. Before, the bourbon's nineteen
+      reads were, per panel: the 1950 by 862 painting 4 (orientation call,
+      colour, preprocessed, plain, every arm reading no words), the 1350 by
+      300 panel 3, the 1103 by 340 panel 4, the 1050 by 309 panel 5 (the
+      orientation call, the two-read second opinion, two arms) and the
+      187 by 1697 strip 3; the mezcal's four were the orientation call, the
+      second opinion and one arm. Seven of the bourbon's and three of the
+      mezcal's were orientation, and the turn applied was 0 on every panel,
+      because every picture on both filings is placed upright by its page.
+      The page's placement now decides the turn (ADR 0025), and the plain
+      arm is not read on the painting after the other two arms returned
+      nothing (ADR 0026):
+
+      | Document | `elapsed_ms` before, median (min, max) | `artwork_ocr_ms` | reads | outcome | `elapsed_ms` after, median (min, max) | `artwork_ocr_ms` | reads | outcome |
+      | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+      | the mezcal filing | 3728 (3673, 3810) | 3543 | 4 | 5 of 5 | **2152** (2107, 2247) | 1945 | **1** | 5 of 5 |
+      | the bourbon filing | 6714 (6580, 6767) | 6474 | 19 | 1 of 5 | **4267** (4127, 4277) | 4018 | **11** | 1 of 5 |
+
+      `ocr_passes` 1 and 5 on every run. The bourbon's eleven: painting 2,
+      the three horizontal panels 2, 3 and 2, the strip 2. Field outcomes,
+      panel statuses and confidences, winning arms and arm scores are
+      identical before and after on both filings, compared from the
+      response bodies, and the accuracy tier over the twelve synthetic
+      labels is identical line for line. **The bourbon is 1 of 5 on this
+      container in both columns**, where the entry above and the deployed
+      table below say 2 of 5: the class or type is on the painting's bottom
+      line with the two values, and this Tesseract reads nothing off that
+      panel; the deployed 5.3.0 read it at 45.3. Nothing in this session
+      moved that outcome in either direction.
+
+      **What was found about the panels.** No panel on either filing is
+      stored rotated: the placement matrices are axis-aligned and positive
+      on unrotated pages, the panels that read well read well at 0 degrees
+      and badly at 180, and by eye every one is upright. The 187 by 1697
+      strip, which the synthetic fixture and the session brief took to
+      carry the alcohol content and the net contents, carries neither: two
+      script signatures set along it, a logo and a placeholder serial
+      number, stored upright. The three values are on the painting's bottom
+      line (OQ-39), and `samples/real/README.md` is corrected on the net
+      contents.
+
+      **These are a session container's figures and not the deployed
+      build's.** The 8064 ms below was measured through the browser against
+      the deployed target, on a task that ran the same code about 1.2 times
+      slower than this container (6790 ms here on the previous entry's
+      code). Whether the bourbon is inside about five seconds on the
+      deployed build is the gate below, repeated by the author against a
+      deploy carrying these two changes; until it is, the NFR-1 row stays
+      partial and says which figure is which.
+
+- [x] **NFR-1 on the deployed v1.5.0 build, with three real filings: the
+      gate the v1.5.0 release notes promised and did not deliver (reported
+      2026-09-08).** The v1.5.0 notes promised "the manual step against the
+      deployed build that settles which panel the bourbon's three values are
+      on"; what was delivered before this entry was one measurement of one
+      document. Measured by the author through the browser against the
+      deployed v1.5.0 build, 1 vCPU and 8 GiB on Fargate behind the ALB, with
+      a hook on `fetch` so the clock starts when the file is picked and each
+      figure is the actual HTTP call:
+
+      | Document | Text layer | Upload, `POST /api/classify` | Check, `POST /api/verify` | Panels read | Result |
+      | --- | --- | --- | --- | --- | --- |
+      | the mezcal, `samples/real/22118001000389` | yes | 305 to 470 ms | **4816 ms** | 1 | 5 of 5 |
+      | the bourbon, `samples/real/15309001000084` | yes | 414 to 694 ms | **8064 ms** | 5 | 2 of 5 |
+      | a third filing, not committed | none | **10322 ms** | not reached | 0 | brand and class wrong, beverage type undetermined |
+
+      **NFR-1's original evidence was one document, and two of the next three
+      breach it.** The 5.0 s of deploy #12 and the 4.7 s of deploy #19 above
+      were the mezcal, alone. The traceability matrix said NFR-1 was met on
+      that row until this entry; it now says partial, with these three
+      numbers and the documents named, because the requirement's own
+      criteria say a shortfall is reported rather than omitted.
+
+      **Where the bourbon's eight seconds go**, from its own response body:
+      `elapsed_ms` 7937.7, of which `artwork_ocr_ms` 7678.9 (97 percent),
+      `document_pdfium_ms` 130.8, `compare_ms` 0.7; `ocr_passes` 5,
+      `tesseract_reads` 19. Nineteen reads over five panels, about 3.8 per
+      panel. The v1.4.0 build read the same document at 7534 ms with the same
+      19 reads, so v1.5.0 did not add this; #140 and #141 did, by reading
+      five panels where the old floor had left one, and that trade bought the
+      brand match. The stopping rule of #141 fires only once all five values
+      are in hand, and on this document two never are (OQ-39), so it never
+      fires: the document that fails the checks is the one that does the
+      most work. The reads could not be cut by the short circuit without
+      changing the answer; `PREPROCESS_SHORT_CIRCUIT_CONFIDENCE` says why.
+      They were cut by other means later the same day, from nineteen to
+      eleven with every remaining read unchanged (the entry above, ADR
+      0025, ADR 0026), on a session container; this table is the deployed
+      build's and stands until the gate is repeated. What bounds a document
+      that carries more is `TTB_MAX_DOCUMENT_READS` (ADR 0023, 16 since
+      ADR 0025).
+
+      **Where the third document's ten seconds go.** `extraction_path` came
+      back `ocr`: the file has no text layer, so all three pages were
+      rasterised and read through the label pipeline in the upload step,
+      before the agent clicked anything, and the route logged no duration.
+      That read now happens once, in the check (ADR 0024), and the upload
+      step logs and returns `elapsed_ms`. On that document the check will
+      carry the ten seconds instead, bounded by the same ceiling; the total
+      the agent waits falls by one full page read and NFR-1 is still
+      breached on it, which is the honest shape of it.
+
+      **Three further findings on the third document, recorded rather than
+      fixed**, shapes and measurements only, nothing read from it:
+      twenty-three embedded pictures rejected, all on `area`, two of them
+      label panels at 580 by 293 and 772 by 189, so no artwork was read at
+      all ([OQ-40](OPEN_QUESTIONS.md#oq-40)); the OCR path filled the brand
+      name with the form's own field caption and ran the class or type into
+      the next item's instruction, both confident and both wrong
+      ([OQ-41](OPEN_QUESTIONS.md#oq-41)); and item 5's darkest box sat 10.4
+      luminance points under the next inside the 12-point margin, so no
+      beverage type was determined, the third document and the third way the
+      single-document calibration has failed ([OQ-42](OPEN_QUESTIONS.md#oq-42)).
+
+      **Repeating the gate.** Submit each of the two committed filings alone
+      on the single-label tab against the deployed URL with the browser's
+      network panel open, and record both requests' wall clock and the
+      response's `elapsed_ms`, `ocr_passes` and `tesseract_reads`; add the
+      third document from your own copy, since it is not in the repository.
+      Replace this table if the figures move, and say what moved them.
+      **Pending against a deploy carrying ADR 0025 and ADR 0026**: the
+      expected reads are 1 and 11, `orientation.method` `placement` on
+      every panel, and the question the row cannot answer from a session
+      container is whether the bourbon's `elapsed_ms` lands inside about
+      five seconds on the deployed task.
 
 - [ ] **The bourbon on the deployed build, once the reader isolates the
       line.** The manual step that settles which panel each of the three values is on.

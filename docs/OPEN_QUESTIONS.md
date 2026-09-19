@@ -48,7 +48,10 @@ updates every artifact the answer affects.
 | [OQ-36](#oq-36) | Open; found 2026-09-02, inert, fix named | Nothing; the three dead subjects admit nothing and the three live ones do the work |
 | [OQ-37](#oq-37) | Open; measured 2026-09-02 | Nothing; the check does not wait for the chips. A twenty-image drop reads each image twice, once to classify and once to check |
 | [OQ-38](#oq-38) | Open; named 2026-09-06, logic unchanged | Nothing in the prototype; it bounds the alcohol content presence check to distilled spirits. On a malt beverage or a table wine the check can report a compliant label as a finding |
-| [OQ-39](#oq-39) | Open; measured 2026-09-06 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's alcohol content and net contents sit on one |
+| [OQ-39](#oq-39) | Open; measured 2026-09-06; the arms that read nothing on that panel no longer paid for, 2026-09-08 | Nothing; a line of legible type set over full-colour artwork is not isolated by the reader, and a real filing's class or type, alcohol content and net contents sit on one |
+| [OQ-40](#oq-40) | Open; found 2026-09-08 on a third real filing, not fixed | Nothing in the prototype; on that filing the area floor rejects both label panels, no artwork is read, and a document-only check is refused for want of a label side |
+| [OQ-41](#oq-41) | Open; found 2026-09-08 on the same filing, not fixed | Nothing in the prototype; on a scanned form the OCR path can fill the brand name with the form's own caption and the class or type with the next item's instruction, and the check then reports a confident mismatch against a correct application |
+| [OQ-42](#oq-42) | Open; the third failure of a single-document calibration, number not moved | Nothing; where the item 5 margin is not cleared the agent chooses the beverage type, which is never compared |
 
 ---
 
@@ -2247,6 +2250,170 @@ it is found.
 twelve synthetic labels, showing the line found here and nothing lost there,
 with its cost.
 
+**Added 2026-09-08 (ADR 0025, ADR 0026).** Three things settled while the
+bourbon's reads were being cut, none of which closes this. The line carries
+the class or type as well as the two values: it reads `KENTUCKY STRAIGHT
+BOURBON WHISKEY 45.2% ALC/VOL (90.4 PROOF) 1L`, so on a Tesseract that reads
+nothing off the panel the bourbon returns one of five, and that is what the
+session container returns; the two of five recorded for the deployed 5.3.0
+build is the same document on an engine that read the panel at 45.3. The
+187 by 1697 strip, which the synthetic fixture and the session brief took to
+carry the two values, carries none: two script signatures set along it, a
+logo and a placeholder serial number. And the panel now costs two reads
+rather than four, the orientation call and the plain arm both being reads
+that could not have found the line either; what would find it is unchanged
+from the paragraph above.
+
 **Who can answer:** measurement.
-**Blocks:** nothing in the prototype. On this filing the alcohol content and
-the net contents are reported not found, and the deployment notes say why.
+**Blocks:** nothing in the prototype. On this filing the class or type, the
+alcohol content and the net contents are reported not found, and the
+deployment notes say why.
+
+---
+
+## OQ-40
+**The area floor rejects real label panels. What separates a label panel from
+a logo or a signature, if not absolute area?**
+
+**Status: Open. Found 2026-09-08 on a third real filing; not fixed.**
+
+A third real filed COLA, with no text layer and not committed to this
+repository, was put through the deployed v1.5.0 build. It carries
+twenty-three embedded pictures and every one was rejected, all twenty-three
+on `area`. Two of them are label panels: **580 by 293** (169,940 pixels) and
+**772 by 189** (145,908 pixels), both under the 250,000-pixel floor.
+`label_artwork_available` came back false, no artwork was read at all, and a
+document-only check is refused with `no_label_to_check`.
+
+**This is the defect class #140 addressed, one rule further in.** #140
+removed the short-edge and aspect-ratio rules because they rejected five of
+the six pictures on the bourbon filing, and kept the area floor because area
+was what separated that filing's panels (the smallest 317,339 pixels) from
+the author's signature (133,965 pixels) with margin on both sides. On this
+third filing the area floor is the rule rejecting real labels, and the
+margin has closed from the other side: a 772 by 189 panel here sits at
+almost exactly the size of the 772 by 194 picture the bourbon filing carries
+and the floor was set to exclude.
+
+**The floor's purpose is to skip logos and signatures, and these are
+neither.** A floor on absolute pixels answers "is this picture big" and the
+question is "is this picture a label". Small artwork is ordinary: a neck
+band, a back strip, a miniature's front. Two other shapes of the same test
+are on the table, neither measured: a floor relative to the page (a
+signature is a fixed fraction of a form; a label panel is not a fixed
+fraction of anything) and a rank rule (read the largest pictures, since the
+signature is never the largest, and let the read budget of ADR 0023 bound
+the cost). Both would have admitted these two panels; what neither has been
+measured against is a filing whose signature is scanned large, which is the
+case the floor was set for. The lever that exists today is
+`TTB_MIN_ARTWORK_PIXELS`, and lowering it to 140,000 would admit both
+panels here and the bourbon's 772 by 194 picture and, on the author's
+filing, still exclude the 133,965-pixel signature by about 6,000 pixels,
+which is no margin at all.
+
+**What would answer it:** the sizes of every label panel and every signature
+across more real filings than three, with each picture labelled by a person,
+so that the rule is set from a distribution rather than from whichever
+document was measured last. The three measured so far are in the deployment
+notes and in this entry: the two committed filings by page and size in
+`samples/real/README.md`, and this one by the two sizes above, which is all
+of it that enters the repository.
+
+**Who can answer:** measurement on more filings.
+**Blocks:** nothing in the prototype. On this filing no label side exists,
+the check refuses with a message that says so, and an agent supplies a
+photograph.
+
+---
+
+## OQ-41
+**On a scanned form the OCR path captures the wrong text for the brand name
+and the class or type. How should a value be separated from the caption
+beside it and the instruction after it?**
+
+**Status: Open. Found 2026-09-08 on the third real filing; not fixed.**
+
+Shapes, not strings: nothing read from that document enters the repository.
+The same filing as OQ-40, read through the `ocr` path because it has no
+text layer, came back with the **brand name filled with the form's own field
+caption**, the printed words that label the box rather than what is written
+in it, and the **class or type running past its own value into the
+instruction printed for the following item**. Both are confident readings,
+and both would produce a confident mismatch against a correct application:
+a brand that is the words "brand name" matches no label, and a class or type
+with a sentence of form instruction appended matches none either. That is
+worse than reporting nothing, because a mismatch tells the agent the label
+is wrong when the reading is.
+
+**Why the synthetic scan does not show it.** The paper-form fixture prints
+each caption and its value on one line, `CAPTION: value`, and
+`app/parse.py`'s caption rules were written and tested against that shape.
+On the real form the caption sits in its own box above the value, the value
+is set in a different face, and the next item's caption and instruction
+follow within the same column, so a line-based reader that takes "the text
+after the caption" takes the caption's own remainder on one line and reads
+on into the next item on another. The rules are right for the fixture and
+the fixture is not the form.
+
+**What a fix looks like, and why it is not done here.** Reading the scanned
+form by layout rather than by line: a value is the text inside the box the
+caption names, bounded by the box, not the text that follows the caption
+until the next caption is recognised. That is the same class of work OQ-39
+names for the artwork, region detection before recognition, and it needs a
+fixture that renders the form's boxes as the form prints them. Until then the
+value arrives on the result, where the agent sees it beside the label's and
+retypes it (FR-11's precedence), which costs a second check; ADR 0024 records
+that cost.
+
+**What would answer it:** a scanned-form fixture with boxed captions and
+values in the form's own layout, showing the current reader capturing the
+caption and a layout reader capturing the value, with per-field results on
+the twelve synthetic filings unchanged.
+
+**Who can answer:** measurement.
+**Blocks:** nothing in the prototype. A wrong value from a scan is visible on
+the result with its source named, and a typed value wins.
+
+---
+
+## OQ-42
+**Item 5's twelve-point margin has now failed on a third document, in a third
+way. What should the margin be set from?**
+
+**Status: Open. The number is not moved.**
+
+On the third real filing (OQ-40, OQ-41) the darkest of item 5's three boxes
+measured **10.4 luminance points** darker than the next darkest, inside the
+12-point margin `PRODUCT_TYPE_MARGIN` requires, so no beverage type was
+determined and the agent chooses. The margin was calibrated on one document:
+the author's own mezcal filing, whose ticked box cleared it by **0.1**, 12.1
+against 12.0.
+
+**Three documents, three different ways the single-document calibration has
+failed.** The document it was set from clears it by a tenth of a point, so
+the floor sits at the edge of its own evidence. The synthetic forms
+`samples/formmaker.py` builds swing about seven points with the render scale
+alone, 27.6 at scale 1.0 against about 20 at 2.0 and 3.0 on the same drawn
+tick, so a reading a few points either side of the line is a property of the
+render as much as of the ink (OQ-32). And now a real ticked box on a real
+filing sits 1.6 points under it and is read as nothing. One calibration
+document cannot say which of those three the next filing will be.
+
+**The number is not moved, and this is why.** Lowering it to 10 would admit
+this filing and, by the swing OQ-32 measured, would admit an empty box on a
+form rendered at a scale that happens to darken it; the empty-box noise
+measured 0.0 to 2.8 on the synthetic forms and 1.9 on the author's, which
+says a floor of 10 is probably safe and says nothing about a floor of 10 on
+the fourth document. Raising it would fail the calibration document itself.
+A margin set from one document has been wrong three ways; setting it from a
+second document, this one, is the same mistake with a different number.
+
+**What would answer it:** the separation the module's own window reports,
+on real filings with the ticked box known, enough of them that the ticked and
+empty distributions can be seen and the margin set between them with a
+stated error rate. The author's half of OQ-32, the table on the two real
+documents at three scales, is the first four rows of that.
+
+**Who can answer:** measurement on more filings.
+**Blocks:** nothing. Where the margin is not cleared the beverage type is
+not determined and the agent chooses it; it is never compared.

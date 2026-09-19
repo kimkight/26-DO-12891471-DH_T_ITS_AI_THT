@@ -29,7 +29,13 @@ seconds, or agents go back to doing it manually.
 > finishes in under seven minutes, both through the load balancer. A COLA
 > document submitted alone came back in **5.0 seconds** on 2026-08-30 against
 > deploy #12, which is NFR-1's roughly five seconds **at the line rather than
-> under it**. The extra second and a half over the 3.5 s the same document
+> under it**. **Re-measured on the deployed v1.5.0 build with three real
+> filings, NFR-1 is partially met and reported as such**: the mezcal in
+> `samples/real/` checks in 4.8 s, the bourbon beside it in 8.1 s over five
+> label panels, and a third filing with no text layer cost 10.3 s in the
+> upload step alone. The row that said "met" was one document; two of the
+> next three breach it, and the [traceability matrix](docs/TRACEABILITY_MATRIX.md)
+> now says so with the numbers. The extra second and a half over the 3.5 s the same document
 > measured against deploy #11 is the 180-degree orientation check, and it is
 > the reason the readings are right at all: it is a real trade and the section
 > below states it rather than smoothing it over. v1.2.0 buys margin back on
@@ -73,7 +79,7 @@ curl http://localhost:8000/api/health
 Expected response:
 
 ```json
-{"status":"ok","service":"TTB Label Verifier","version":"1.5.0","environment":"local"}
+{"status":"ok","service":"TTB Label Verifier","version":"1.6.0","environment":"local"}
 ```
 
 The interface is at <http://localhost:8000/>. The first tab checks one label:
@@ -309,8 +315,32 @@ values against its checklist.
 | One label: the author's own mezcal COLA document (382 KB PDF) submitted **alone**, so its embedded artwork is the label side | **5.0 s** | 4.9 s, and this figure measures the request | All five fields returned, and this time read correctly. Re-measured 2026-08-30 against **deploy #12**, build 1.1.0, two runs: 4999 and 4992 ms wall clock; `elapsed_ms` 4928 and 4918 ms; `ocr_passes` 1; `tesseract_reads` 4. This supersedes the 3468 / 3505 / 3543 ms taken against deploy #11 earlier the same day, which were the cost of reading this document wrongly. |
 | A batch at the configured cap: 300 label images with their 300 paired COLA documents in one submission | **Approximately 6.5 to 7 minutes**, roughly **1.3 s per label** | Not recorded separately | 300 of 300 rows returned. Results streamed progressively through the load balancer: 83 labels complete at the 109 second mark, observed live. |
 
-**NFR-1 is met on both single-label paths.** They are different paths and the
-honest statement names both:
+**NFR-1 is met on the image path and partially met on the application-document
+path, and the second of those is the current statement.** Measured by the
+author through the browser against the deployed v1.5.0 build with three real
+filed COLAs, the clock started when the file is picked:
+
+| Document | `POST /api/classify` | `POST /api/verify` | Panels read | Result |
+| --- | --- | --- | --- | --- |
+| The mezcal, `samples/real/22118001000389` | 305 to 470 ms | **4816 ms** | 1 | 5 of 5 |
+| The bourbon, `samples/real/15309001000084` | 414 to 694 ms | **8064 ms** | 5 | 2 of 5 |
+| A third filing with no text layer, not in the repository | **10322 ms** | not reached | 0 | brand and class wrong, beverage type undetermined |
+
+One of three is inside the target. The bourbon's eight seconds are 7679 ms of
+artwork OCR, nineteen Tesseract reads over five panels, of which the confident
+reads are the second pass on each panel and could not be cut; seven were
+orientation calls on pictures whose page already says which way up they are,
+and one a third arm on a panel that had read nothing twice, and those eight
+are gone ([ADR 0025](docs/adr/0025-orientation-from-the-placement.md),
+[ADR 0026](docs/adr/0026-nothing-twice-is-not-read-a-third-time.md)): eleven
+reads and about 4.3 seconds on a session container, with identical outcomes,
+and not yet re-measured on the deployed build; the third filing's ten seconds were the pages
+of a scan being read as images in the upload step, which now happens once, in
+the check, under a ceiling on how much reading one document may cost
+([ADR 0023](docs/adr/0023-a-read-budget-per-document.md),
+[ADR 0024](docs/adr/0024-the-scanned-form-is-read-once.md)). The 5.0 s below
+was measured on the mezcal alone and stands as history. The paths, as first
+measured:
 
 - **The image path meets NFR-1 at 1.5 s.** One photograph and its application
   document came back in 1.5 seconds end to end through the load balancer,
@@ -540,8 +570,12 @@ five fields did not come back at all.
   for that window, the last box open, was retrieved on 2026-09-02: a 139 MiB
   peak against 8192 MiB, recorded in section 9 with the sizing recommendation
   it leads to in OQ-35.
-- **NFR-1 is met on both single-label paths and is still missed on the
-  three-photograph case, and the miss is published rather than redefined.** One
+- **NFR-1 is met on the image path, partially met on the application-document
+  path, and still missed on the three-photograph case, and every miss is
+  published rather than redefined.** On the deployed v1.5.0 build three real
+  filings measured 4.8 s, 8.1 s and 10.3 s of upload alone; one of three is
+  inside the target, the traceability matrix row reads partial with those
+  numbers, and `docs/09_DEPLOYMENT.md` section 9 carries the run. One
   label image with its application document measures 1.5 seconds against
   NFR-1's roughly five. A COLA document submitted alone measures 5.0 seconds,
   re-measured against deploy #12 on 2026-08-30, which is at the line rather

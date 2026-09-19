@@ -636,7 +636,20 @@ class TestTheCheckPoolsThePanels:
         timings = body["timings"]
         assert timings["ocr_passes"] == 5
         assert timings["label_ocr_ms"] == 0.0
-        assert timings["tesseract_reads"] >= 5
+        # Eleven reads for five passes, and the arithmetic is worth stating.
+        # Four panels cost one read each: placed upright by the document, so
+        # no orientation call (ADR 0025), and clean renderings that settle on
+        # their first arm. The side strip costs seven. Its type is set
+        # vertically, so at the placement turn it reads as sideways type and
+        # nothing else, two arms; that is the one case the placement cannot
+        # settle, so Tesseract is asked, one; it answers 270 at 0.71, under
+        # the floor, and the second opinion scores 270 against 90 at half
+        # scale, two, and picks 90; the strip is read again at 90, two arms,
+        # and the values come off the plain one at 93. Before ADR 0025 the
+        # same fixture cost thirteen: an orientation call on every panel and
+        # no reading set aside. The number is pinned so that a release which
+        # changed any of those steps is seen here.
+        assert timings["tesseract_reads"] == 11
 
     def test_the_self_consistency_note_still_stands(self, body):
         assert body["self_consistency_note"]

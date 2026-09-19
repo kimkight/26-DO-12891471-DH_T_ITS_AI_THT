@@ -39,6 +39,34 @@ EXIF-corrected grayscale too and keeps whichever scored higher. Which one won
 is on the result, for the same reason the rotation is: an agent cannot see it
 otherwise. The measurement is in docs/07_TEST_STRATEGY.md section 2.
 
+**A picture lifted out of a PDF is turned the way the page places it, and
+Tesseract is not asked (ADR 0025).** The orientation call above exists for a
+photograph, which carries no statement of which way up it is beyond an EXIF
+tag that may lie. A picture inside a PDF carries one: the placement matrix
+the page draws it with, composed with the page's own rotation, says exactly
+how the picture appears to anyone who opens the file. ``extract_text`` takes
+that turn as ``placement_rotation``, applies it, reports the method as
+``placement`` and makes no orientation call at all. Measured on the two
+filings in samples/real/, every one of the eight pictures is placed upright,
+the OSD call was wrong or unable to answer on five of the six panels it was
+asked about, and the reads it cost bought no turn on any of them. Where the
+placement is not a quarter-turn, a skew or a mirror, the caller passes None
+and the photograph path above runs unchanged. And where the reading taken
+at the placement turn shows only type set at a quarter-turn and nothing
+upright, which is a side strip whose type runs along it, affixed the way it
+is, Tesseract is asked after all and the picture is read again the way it
+answers; ``_reads_as_sideways`` is the gate and carries the evidence.
+
+**A colour source that read nothing twice is not read a third time (ADR
+0026).** On a coloured image the plain grayscale is read to compete with a
+confident read of a transformed image that may have lost an ink class. When
+the colour arm and the preprocessed arm have both returned no words at all
+there is no such read to compete with, and the grayscale cannot carry more
+contrast than the best of the three channels Tesseract has already
+thresholded; see ``_needs_the_plain_read``. The rule is written on "nothing
+came back", never on a confidence, because a low confidence is a read that
+has to be compared and a read of nothing is not.
+
 Nothing in this module opens a socket. ``pytesseract`` runs the Tesseract binary
 that ships in the container image, and OpenCV works on the decoded array in
 memory. That is what makes the default path work with egress blocked, which is
@@ -200,6 +228,41 @@ _COLOUR_PIXEL_SHARE = 0.01
 # points below every case where it won, which is as much margin as the two
 # clusters allow. It is not a quality bar for the answer: a read scoring below
 # it is not discarded, it is compared.
+#
+# **What it does and does not fire on, measured on the two real filings in
+# samples/real/ on 2026-09-08 (session container, Tesseract 5.3.4).** The
+# question was whether the second pass could be skipped on a panel whose first
+# pass had already read confidently, and the answer is that it already is, and
+# that on the bourbon filing no first pass ever does. First pass is the colour
+# arm on a coloured panel and the preprocessed arm on a monochrome one:
+#
+# =========================  ========  ===============  =====================  ========
+# panel                      source    first pass       second pass            winner
+# =========================  ========  ===============  =====================  ========
+# mezcal, 1750 x 1150        colour    colour 89.6      not run                colour
+# bourbon, 1950 x 862        colour    colour 0.0       pre 0.0, plain 0.0     none read
+# bourbon, 1350 x 300        mono      pre 44.7         plain 89.9             plain
+# bourbon, 1103 x 340        colour    colour 41.2      pre 29.0, plain 36.6   colour
+# bourbon, 1050 x 309        mono      pre 56.3         plain 86.8             plain
+# bourbon, 187 x 1697        mono      pre 67.0         plain 23.6             preprocessed
+# =========================  ========  ===============  =====================  ========
+#
+# The mezcal's one panel clears the line on its first pass and costs one arm.
+# On the bourbon the highest first pass is 67.0, one word on the strip, and the
+# two panels that read well read well on the *second* pass: the plain arm is
+# where the brand name and the government warning come from. So there is no
+# second pass on that filing this rule could drop without changing the answer,
+# and 11 of the 12 arm reads its 19 Tesseract reads contained are each doing
+# the work v1.0.1 measured for. The twelfth was the plain arm on the 1950 by
+# 862 panel, read after the colour arm and the preprocessed arm had both
+# returned no words at all; ADR 0026 stops that one, on the evidence in
+# ``_needs_the_plain_read``. The other 7 were orientation: one OSD call per
+# panel and the two-read second opinion where OSD answered under the floor,
+# and on a picture lifted out of a PDF the page's own placement now answers
+# that question for nothing (ADR 0025). The same filings after both: the
+# mezcal 1 read, the bourbon 11, with every winning arm and every score in the
+# table unchanged. What bounds a document that carries more panels than these
+# is `Settings.max_document_reads`, not this constant.
 PREPROCESS_SHORT_CIRCUIT_CONFIDENCE = 85.0
 
 
@@ -331,7 +394,12 @@ class OcrLine:
 
 
 OrientationMethod = Literal[
-    "osd", "osd_180_check", "osd_180_check_full_resolution", "unavailable", "disabled"
+    "osd",
+    "osd_180_check",
+    "osd_180_check_full_resolution",
+    "unavailable",
+    "disabled",
+    "placement",
 ]
 
 
@@ -390,8 +458,12 @@ class Orientation:
     ``osd_180_check_full_resolution`` when that second opinion read no words
     either way at the reduced scale and was taken again at full resolution
     before deciding (v1.3.0), ``unavailable`` when it could not answer (too
-    little text to judge, or no ``osd`` training data installed), and
-    ``disabled`` when ``TTB_CORRECT_ORIENTATION`` is off.
+    little text to judge, or no ``osd`` training data installed),
+    ``disabled`` when ``TTB_CORRECT_ORIENTATION`` is off, and ``placement``
+    when the turn came from the document the picture was lifted out of, the
+    page's placement matrix composed with its own rotation, and Tesseract was
+    not asked (ADR 0025). A placement turn costs no read and carries no
+    confidence, because it is a fact about the file rather than a verdict.
 
     ``confidence`` is always Tesseract's own figure for its own verdict, not a
     score from the second opinion. The second opinion's scores are in ``check``,
@@ -459,8 +531,9 @@ class ReadPath:
     ``variant`` is the one whose words were kept. ``preprocessed_confidence`` is
     always present because the preprocessed read always runs. The other two are
     null when their read never ran: ``plain_confidence`` when the comparison was
-    already settled, and ``colour_confidence`` on a source that carries no
-    colour at all.
+    already settled, or when the colour arm and the preprocessed arm had both
+    returned no words at all (ADR 0026), and ``colour_confidence`` on a source
+    that carries no colour at all.
 
     ``decided_by`` says how the winner was picked, because on this evidence the
     three cases are not the same claim. ``short_circuit`` means the preprocessed
@@ -513,6 +586,13 @@ class OcrResult:
     orientation: Orientation = Orientation()
     read_path: ReadPath = ReadPath()
     segmentation: Segmentation = Segmentation()
+    # How many times Tesseract was invoked to produce this result: the
+    # orientation call, the second opinion's scored rotations where it ran, and
+    # one per arm read. It is the same count ``app.timing`` tallies for the
+    # request, carried on the result so that a caller reading several pictures
+    # can add them up without a recording open, which is what the per-document
+    # read budget in ``app.application_form`` does.
+    tesseract_reads: int = 0
 
     @property
     def has_text(self) -> bool:
@@ -711,8 +791,18 @@ def preprocess(
     *,
     deskew_image: bool = True,
     correct_orientation: bool | None = None,
+    placement_rotation: int | None = None,
 ) -> Prepared:
     """Scale and turn upright, then produce both the plain and the binary image.
+
+    ``placement_rotation`` is the clockwise quarter-turn the document the
+    picture came out of applies when it draws it (ADR 0025). When it is given
+    it is the whole answer to the orientation question: it is applied, the
+    method is reported as ``placement``, and Tesseract's orientation detection
+    is not run whatever ``correct_orientation`` says, because the setting
+    governs the OSD call and a placement turn is not one. It is None for a
+    photograph, and for a picture whose placement is not a quarter-turn, and
+    then everything below runs exactly as it did before the argument existed.
 
     Two images come back. ``gray`` is the scaled, upright grayscale and nothing
     else; ``binary`` is that same image adaptively thresholded and deskewed.
@@ -740,22 +830,28 @@ def preprocess(
     no tag at all.
     """
     correct = settings.correct_orientation if correct_orientation is None else correct_orientation
+    if placement_rotation is not None and placement_rotation % 360 not in CARDINAL_ROTATIONS:
+        raise ValueError(f"A placement turn is a quarter-turn; got {placement_rotation}.")
 
     resized = resize_long_edge(decoded.pixels)
     gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY) if resized.ndim == 3 else resized
     colour = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB) if has_colour(resized) else None
 
     check: OrientationCheck | None = None
-    if correct:
+    confidence: float | None
+    method: OrientationMethod
+    if placement_rotation is not None:
+        degrees, confidence, method = placement_rotation % 360, None, "placement"
+    elif correct:
         degrees, confidence, method = detect_orientation(gray)
         if method == "osd" and confidence is not None and confidence < LOW_ORIENTATION_CONFIDENCE:
             degrees, check, rescored = _second_opinion_on_180(gray, degrees, confidence)
             method = "osd_180_check_full_resolution" if rescored else "osd_180_check"
-        gray = rotate_cardinal(gray, degrees)
-        if colour is not None:
-            colour = rotate_cardinal(colour, degrees)
     else:
         degrees, confidence, method = 0, None, "disabled"
+    gray = rotate_cardinal(gray, degrees)
+    if colour is not None:
+        colour = rotate_cardinal(colour, degrees)
 
     binary = cv2.adaptiveThreshold(
         cv2.medianBlur(gray, 3), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 15
@@ -927,8 +1023,21 @@ def extract_text(
     *,
     deskew_image: bool = True,
     correct_orientation: bool | None = None,
+    placement_rotation: int | None = None,
 ) -> OcrResult:
     """Run the full local extraction path and time it.
+
+    ``placement_rotation`` is for a picture lifted out of a document that
+    states how it is placed; see ``preprocess``. A photograph passes nothing
+    and is turned the way it always was. **A placed picture whose reading
+    comes back as sideways type and nothing else is put to Tesseract after
+    all** (ADR 0025): ``_reads_as_sideways`` decides that on the word boxes of
+    the reading, for no read, and where Tesseract then names a different turn
+    the picture is read again at that turn and that reading is kept. Where it
+    names the same turn, or cannot answer, the first reading stands and only
+    the orientation call was spent. The reported orientation is then
+    Tesseract's, method and confidence and check, exactly as for a
+    photograph, so that a turn taken on its verdict can be audited as one.
 
     **Preprocessing has to earn the read it is given.** The preprocessed image is
     read first. On a monochrome source, if it comes back at or above
@@ -963,6 +1072,11 @@ def extract_text(
     survived a transform, so a confident read from a transform is not evidence
     that nothing was lost.
 
+    * except that when the colour read and the preprocessed read have both
+      returned no words at all, the plain read is not made (ADR 0026). Two
+      passes, on an image that is a picture and not a label, or a label whose
+      type no arm can find; ``_needs_the_plain_read`` has the evidence.
+
     Ranking is by mean word confidence, with ties inside
     ``EQUAL_CONFIDENCE_BAND`` broken by how much text the arm recovered. The
     band exists because this comparison has to detect omission and mean
@@ -977,9 +1091,52 @@ def extract_text(
     started = time.perf_counter()
     decoded = decode(image_bytes)
     prepared = preprocess(
-        decoded, deskew_image=deskew_image, correct_orientation=correct_orientation
+        decoded,
+        deskew_image=deskew_image,
+        correct_orientation=correct_orientation,
+        placement_rotation=placement_rotation,
+    )
+    arms = _read_arms(prepared)
+    winner, decided_by = _rank(arms)
+
+    # A placed picture that reads as sideways type and nothing else is the
+    # one case the placement cannot settle: a strip whose type runs along it,
+    # affixed the way it is. Tesseract is asked, as it is for a photograph,
+    # and only if it names another turn is the picture read again. The reads
+    # of a reading set aside are still reads, and are counted.
+    set_aside = 0
+    correct = settings.correct_orientation if correct_orientation is None else correct_orientation
+    if placement_rotation is not None and correct and _reads_as_sideways(winner.lines):
+        asked = preprocess(decoded, deskew_image=deskew_image, correct_orientation=True)
+        if asked.orientation.rotation_degrees != prepared.orientation.rotation_degrees:
+            set_aside = len(arms)
+            arms = _read_arms(asked)
+            winner, decided_by = _rank(arms)
+        prepared = asked
+
+    scored = {arm.variant: round(arm.confidence, 1) for arm in arms}
+
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    return OcrResult(
+        text="\n".join(line.text for line in winner.lines),
+        mean_confidence=round(winner.confidence, 1),
+        elapsed_ms=round(elapsed_ms, 1),
+        lines=winner.lines,
+        orientation=prepared.orientation,
+        segmentation=winner.segmentation,
+        tesseract_reads=_orientation_reads(prepared.orientation) + len(arms) + set_aside,
+        read_path=ReadPath(
+            variant=winner.variant,
+            preprocessed_confidence=scored.get("preprocessed", 0.0),
+            plain_confidence=scored.get("plain"),
+            colour_confidence=scored.get("colour"),
+            decided_by=decided_by,
+        ),
     )
 
+
+def _read_arms(prepared: Prepared) -> list[_Arm]:
+    """Read the arms ``extract_text`` describes, in its order, and no more."""
     arms: list[_Arm] = []
     if prepared.colour is not None:
         lines, confidence, segmentation = _read(prepared.colour)
@@ -992,26 +1149,83 @@ def extract_text(
     if _needs_the_plain_read(arms, colour_read=prepared.colour is not None):
         lines, confidence, segmentation = _read(prepared.gray)
         arms.append(_Arm("plain", lines, confidence, segmentation))
+    return arms
 
-    winner, decided_by = _rank(arms)
-    scored = {arm.variant: round(arm.confidence, 1) for arm in arms}
 
-    elapsed_ms = (time.perf_counter() - started) * 1000
-    return OcrResult(
-        text="\n".join(line.text for line in winner.lines),
-        mean_confidence=round(winner.confidence, 1),
-        elapsed_ms=round(elapsed_ms, 1),
-        lines=winner.lines,
-        orientation=prepared.orientation,
-        segmentation=winner.segmentation,
-        read_path=ReadPath(
-            variant=winner.variant,
-            preprocessed_confidence=scored.get("preprocessed", 0.0),
-            plain_confidence=scored.get("plain"),
-            colour_confidence=scored.get("colour"),
-            decided_by=decided_by,
-        ),
-    )
+def _reads_as_sideways(lines: list[OcrLine]) -> bool:
+    """Whether a reading shows type set at a quarter-turn and nothing upright.
+
+    **The one thing a placement cannot tell (ADR 0025).** The page says which
+    way up it draws the picture; it does not say which way the type on the
+    picture runs. A side strip printed to be read along its length, affixed
+    to the form the way it is, is placed upright and reads sideways, and the
+    orientation call was what turned it. This is the gate that keeps that
+    call for exactly that picture, and it costs no read: it is arithmetic on
+    the word boxes the reading already returned, through ``OcrLine.sideways``,
+    which is the same test ``app.parse`` uses to keep a rotated strip out of
+    the brand ranking.
+
+    Two conditions, and both have to hold. **No upright word at all**: a
+    picture with any upright type on it is placed the right way up for that
+    type, and the sideways words beside it are the arced lettering, the
+    vertical strip and the single tall glyph that every real panel carries
+    some of. **And at least one sideways line of two or more words**: a lone
+    glyph has no direction to speak of, ``i`` and ``1`` and ``|`` are taller
+    than they are wide whichever way up the page is, and one of them is what
+    the bourbon's strip reads as.
+
+    Measured 2026-09-08 at the placement turn, on every panel of the two
+    filings in samples/real/ and on the five-panel fixture in
+    tests/test_artwork_panels.py, whose side strip is set vertically:
+
+    ==============================  ======  ==========  ========  ==================
+    panel                            words    sideways   upright   sideways lines
+    ==============================  ======  ==========  ========  ==================
+    bourbon, 1950 x 862                  0           0         0                   0
+    bourbon, 1350 x 300                 16           1        15                   0
+    bourbon, 1103 x 340                  8           5         3                   0
+    bourbon, 1050 x 309                 53           1        52                   0
+    bourbon, 187 x 1697                  1           0         1                   0
+    mezcal, 1750 x 1150                258          28       230                   4
+    fixture side strip, 187 x 1697      48          48         0                   3
+    ==============================  ======  ==========  ========  ==================
+
+    The fixture strip is the only row with no upright word, and it is the
+    only one Tesseract is asked about. A simple majority would also have
+    asked about the 1103 by 340 panel, whose arced lettering reads as five
+    tall boxes against three upright ones, for a read that comes back
+    unable to answer; and any rule on sideways lines alone would have asked
+    about the mezcal, whose two vertical strips are four such lines beside
+    230 upright words, for the three reads its second opinion costs. Neither
+    is a picture placed the wrong way up, and neither pays.
+    """
+    upright = sum(len(line.text.split()) for line in lines if not line.sideways)
+    if upright:
+        return False
+    return any(line.sideways and len(line.text.split()) >= 2 for line in lines)
+
+
+def _orientation_reads(orientation: Orientation) -> int:
+    """How many engine invocations turning the image upright cost.
+
+    None where no call was made: ``disabled``, and ``placement``, where the
+    turn came from the document and Tesseract was never asked (ADR 0025). One
+    for the OSD call whenever it was attempted, which is every other method:
+    an OSD call that came back "too few characters" was still a call, and
+    ``detect_orientation`` tallies it as one. Two more where the second
+    opinion scored the OSD verdict against its opposite, and two more again
+    where that scoring read nothing at the reduced scale and was repeated at
+    full resolution. The same arithmetic ``timing.tesseract_read`` records as
+    it happens, restated here from the reported method so the two cannot
+    drift apart without ``tests/test_ocr.py`` noticing.
+    """
+    if orientation.method in ("disabled", "placement"):
+        return 0
+    if orientation.method == "osd_180_check":
+        return 3
+    if orientation.method == "osd_180_check_full_resolution":
+        return 5
+    return 1
 
 
 def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
@@ -1024,10 +1238,48 @@ def _needs_the_plain_read(arms: list[_Arm], *, colour_read: bool) -> bool:
     read fell short, whatever the preprocessed read then scored, because a
     confident read of a thresholded colour image is exactly the evidence this
     release stopped trusting.
+
+    **With one exception, on the coloured source only (ADR 0026): when the
+    colour read and the preprocessed read have both returned no words at all,
+    the plain read is not made.** The test is on words, not on confidence. A
+    read of nothing scores 0.0 and so does nothing else; a read of something
+    that scored badly is a read the comparison exists for, and the 1350 by
+    300 panel on the bourbon filing in samples/real/, preprocessed 44.7 and
+    then plain 89.9 with the brand name on it, is why no confidence floor
+    would do here.
+
+    Two reasons the third read has nothing left to find, one structural and
+    one measured. The plain arm on a coloured source is there to compete with
+    a *confident* read of a transformed image that may have dropped an ink
+    class; where the transformed read found nothing there is nothing to
+    compete with, and the colour arm, the one rendering that cannot have lost
+    an ink class, has already read the untransformed pixels and found nothing
+    either. And the plain arm is one grayscale, a weighted mean of the three
+    channels, whose contrast between any two inks can never exceed the
+    contrast of the channel that separates them best; the colour arm hands
+    Tesseract all three channels and it thresholds each and keeps the best,
+    so there is no two-tone label the plain arm can separate that the colour
+    arm could not. Measured on 2026-09-08 over the three low-contrast shapes
+    docs/09 section 9 names (pale mint on white, gold on near-black, pale pink
+    on deep purple) at 24 and 46 pixel type, each clean, under an
+    illumination gradient, under glare and at two levels of contrast loss,
+    plus the three-class colour fixture under the same four, thirty cases in
+    all: the colour arm read every case the plain arm read, and the one case
+    where the colour arm read nothing, the bourbon's 1950 by 862 painting,
+    every arm read nothing. The preprocessed arm is not touched by this rule
+    and its full-resolution read still runs, because a local threshold is the
+    one thing the colour arm does not do, and on a source with no colour the
+    photograph-like fixture in tests/test_ocr.py still reads zero words
+    preprocessed and every word plain, which is v1.0.1's own finding and the
+    reason the rule stops at the coloured source.
     """
     if not colour_read:
         return arms[-1].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
-    return arms[0].confidence < PREPROCESS_SHORT_CIRCUIT_CONFIDENCE
+    colour = arms[0]
+    if colour.confidence >= PREPROCESS_SHORT_CIRCUIT_CONFIDENCE:
+        return False
+    preprocessed = arms[1]
+    return colour.words > 0 or preprocessed.words > 0
 
 
 @dataclass(frozen=True)

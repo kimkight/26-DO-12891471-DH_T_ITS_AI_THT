@@ -31,15 +31,23 @@ records why that was a problem: it is a sample of one.
 
 **15309001000084, the bourbon.** The document that found three defects. Its
 artwork is split across five separate pictures on three pages, sized
-1950 x 862, 1350 x 300, 1103 x 340, 1050 x 309 and 187 x 1697. Between them
-they carry:
+1950 x 862, 1350 x 300, 1103 x 340, 1050 x 309 and 187 x 1697. The class or
+type, the alcohol content and the net contents are all on one line of type
+along the bottom of the 1950 x 862 painting; the 187 x 1697 strip carries
+two script signatures, a logo and a placeholder serial number, and none of
+the five values. Every one of the five is placed upright by the page
+(ADR 0025). Between them they carry:
 
 1. an alcohol statement in the slash form, which the matcher did not handle;
 2. a government warning that reads at 86.8 confidence but is overprinted with
    printer registration marks, so a word for word comparison fails on a label
    a human would pass;
-3. no net contents statement on any panel, which is a real finding on the
-   label as submitted and not a failure of the reader.
+3. a net contents statement, `1L`, at the end of the same line as the
+   alcohol statement, along the bottom edge of the 1950 x 862 painting,
+   which no arm of the reader finds on the session container's Tesseract
+   (OQ-39). Until 2026-09-08 this item said the label carried no net
+   contents statement; the panel shows one, and it is the reader that does
+   not find it.
 
 The shape rules removed in #140 and the panel stopping rule in #141 were both
 found on this document.

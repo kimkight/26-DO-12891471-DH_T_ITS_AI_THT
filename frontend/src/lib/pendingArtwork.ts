@@ -55,3 +55,27 @@ export function pendingFromArtwork(
   )
   return ARTWORK_FIELDS.filter((name) => !found.has(name))
 }
+
+/**
+ * The fields this document will answer when the check runs, from its pages or
+ * from its pictures (ADR 0017, ADR 0024).
+ *
+ * A file with no text layer is not read at all on the prefill pass: reading
+ * its pages as pictures is the slowest thing the tool does, and the check
+ * reads them a moment later anyway. Such a document answers `not_read`, and
+ * every compared value is then still to come rather than missing, the same
+ * way the two artwork values are on a filing with a text layer. Nothing has
+ * been read, so nothing is a gap yet; the check fills the values in, and a
+ * value it cannot find is a gap on the result, where it says so.
+ */
+export function pendingFromDocument(
+  document: ApplicationDocumentResult | null | undefined,
+): (keyof ApplicationData)[] {
+  if (!document) return []
+  if (document.extraction_path === 'not_read') {
+    return document.fields
+      .filter((entry) => !entry.found_on_document)
+      .map((entry) => entry.name as keyof ApplicationData)
+  }
+  return pendingFromArtwork(document)
+}

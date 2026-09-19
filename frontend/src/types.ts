@@ -124,8 +124,23 @@ export interface ArtworkPanelDetail {
  * from the application form, and the verification runs on what is in the fields.
  */
 export interface ApplicationDocumentResult {
-  extraction_path: 'form_fields' | 'embedded_text' | 'ocr'
+  /**
+   * `not_read` is the prefill pass on a file with no text layer (ADR 0024):
+   * its pages are read as pictures by the check, not here, so every value is
+   * still to come and none is a gap yet.
+   */
+  extraction_path: 'form_fields' | 'embedded_text' | 'ocr' | 'not_read'
   pages_read: number
+  /**
+   * Pages the OCR fallback did not get to: all of them on the prefill pass of
+   * a scan, or the ones past the document's read budget on the check
+   * (ADR 0023). Optional so that an older server's response still reads.
+   */
+  pages_not_reached?: number
+  /** What reading this document cost against its ceiling (ADR 0023). */
+  tesseract_reads?: number
+  read_budget?: number
+  read_budget_reached?: boolean
   fields: ParsedApplicationField[]
   fanciful_name: string | null
   class_type_code: string | null
@@ -197,9 +212,11 @@ export interface AcceptedImageDetail {
    * `not_needed` means the pictures read before it already carried all five
    * values, so reading stopped; `not_read` means it was never put through OCR
    * for another reason, on the prefill pass or past the ceiling on how many
-   * pictures are read; `undecodable` speaks for itself.
+   * pictures are read; `not_reached` means the document's read budget was
+   * spent before the reader got to it (ADR 0023); `undecodable` speaks for
+   * itself.
    */
-  status: 'read' | 'no_text' | 'not_needed' | 'not_read' | 'undecodable'
+  status: 'read' | 'no_text' | 'not_needed' | 'not_read' | 'not_reached' | 'undecodable'
   ocr_confidence: number | null
 }
 
@@ -218,9 +235,17 @@ export interface OrientationDetail {
   /**
    * `osd_180_check_full_resolution` is the second opinion repeated at full
    * resolution because the reduced-scale pass read no words either way
-   * (v1.3.0); `check` then carries the full-resolution scores.
+   * (v1.3.0); `check` then carries the full-resolution scores. `placement`
+   * is a picture lifted out of a PDF and turned the way the page draws it,
+   * with no orientation call made (ADR 0025); `confidence` is then null.
    */
-  method: 'osd' | 'osd_180_check' | 'osd_180_check_full_resolution' | 'unavailable' | 'disabled'
+  method:
+    | 'osd'
+    | 'osd_180_check'
+    | 'osd_180_check_full_resolution'
+    | 'unavailable'
+    | 'disabled'
+    | 'placement'
   confidence: number | null
   /**
    * The second opinion taken when Tesseract's own confidence in the turn fell
