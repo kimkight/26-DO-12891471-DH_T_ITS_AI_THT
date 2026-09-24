@@ -34,7 +34,7 @@ RUN npm run build
 # ---------------------------------------------------------------------------
 # Stage 2: runtime image, backend plus built frontend assets.
 # ---------------------------------------------------------------------------
-FROM python:3.11-slim-bookworm@sha256:528257d48c1da0dcecc2e725d1ae34498d60c965f1241e39cd6a85a8859bdf84 AS runtime
+FROM python:3.11-slim-bookworm@sha256:a36c24f9cbdf4fd0f52d67f0823eeac19c2028c637cecc392d97f980d4fec56b AS runtime
 
 # Tesseract and the English language data are installed here because the
 # default extraction path runs OCR locally, inside the container, with no
